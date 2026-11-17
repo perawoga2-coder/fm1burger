@@ -31,6 +31,8 @@ class MixerScreen(private val a: MainActivity) : Screen {
     private lateinit var synthMuteBtn: Button
     private lateinit var voiceFader: FaderView
     private lateinit var voiceMuteBtn: Button
+    private lateinit var songFader: FaderView
+    private lateinit var songMuteBtn: Button
     private lateinit var mixRecBtn: Button
     private lateinit var mixInfo: TextView
     private lateinit var masterFader: FaderView
@@ -159,6 +161,20 @@ class MixerScreen(private val a: MainActivity) : Screen {
         vcol.addView(voiceMuteBtn, ui.fullWidth(4))
         row.addView(vcol, colLp())
 
+        val gcol = ui.panel()
+        gcol.addView(ui.text("Song rec", 13f, Color.parseColor("#3DA9FC"), true))
+        songFader = FaderView(a)
+        songFader.color = Color.parseColor("#3DA9FC")
+        songFader.onChange = { v -> e.bank.clipVol = v }
+        gcol.addView(songFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
+        gcol.addView(ui.text("Part recordings (Song page)", 11f, Theme.DIM))
+        songMuteBtn = ui.button("Mute") {
+            e.bank.clipMute = !e.bank.clipMute
+            refreshMutes()
+        }
+        gcol.addView(songMuteBtn, ui.fullWidth(4))
+        row.addView(gcol, colLp())
+
         val mcol = ui.panel()
         mcol.addView(ui.text("Master", 13f, Theme.TEXT, true))
         masterFader = FaderView(a)
@@ -219,6 +235,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         ui.styleButton(bassMuteBtn, e.bass.mute, Theme.RED)
         ui.styleButton(synthMuteBtn, e.analog.mute, Theme.RED)
         ui.styleButton(voiceMuteBtn, e.vocal.mute, Theme.RED)
+        ui.styleButton(songMuteBtn, e.bank.clipMute, Theme.RED)
     }
 
     override fun onShow() {
@@ -230,6 +247,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         bassFader.value = e.bass.volume
         synthFader.value = e.analog.volume
         voiceFader.value = e.vocal.volume
+        songFader.value = e.bank.clipVol
         masterFader.value = e.masterVol
         refreshMutes()
     }
