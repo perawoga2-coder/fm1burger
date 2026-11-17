@@ -14,10 +14,133 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.exp
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.math.tanh
 import org.json.JSONObject
+
+
+/** Second-order filter section (used for low cut, high cut, hum notch and the equalizer). */
+class Biquad {
+    private var b0 = 1.0
+    private var b1 = 0.0
+    private var b2 = 0.0
+    private var a1 = 0.0
+    private var a2 = 0.0
+    private var x1 = 0.0
+    private var x2 = 0.0
+    private var y1 = 0.0
+    private var y2 = 0.0
+
+    fun set(c: DoubleArray) {
+        b0 = c[0]
+        b1 = c[1]
+        b2 = c[2]
+        a1 = c[3]
+        a2 = c[4]
+    }
+
+    fun process(x: Float): Float {
+        val xd = x.toDouble()
+        val y = b0 * xd + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        x2 = x1
+        x1 = xd
+        y2 = y1
+        y1 = y
+        return y.toFloat()
+    }
+}
+
+/** Filter coefficient formulas (RBJ cookbook). Each returns [b0, b1, b2, a1, a2]. */
+object Bq {
+    private fun norm(b0: Double, b1: Double, b2: Double, a0: Double, a1: Double, a2: Double): DoubleArray =
+        doubleArrayOf(b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0)
+
+    fun lowpass(fs: Double, f0: Double, q: Double): DoubleArray {
+        val w = 2.0 * PI * f0 / fs
+        val c = cos(w)
+        val al = sin(w) / (2.0 * q)
+        return norm((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + al, -2 * c, 1 - al)
+    }
+
+    fun highpass(fs: Double, f0: Double, q: Double): DoubleArray {
+        val w = 2.0 * PI * f0 / fs
+        val c = cos(w)
+        val al = sin(w) / (2.0 * q)
+        return norm((1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + al, -2 * c, 1 - al)
+    }
+
+    fun notch(fs: Double, f0: Double, q: Double): DoubleArray {
+        val w = 2.0 * PI * f0 / fs
+        val c = cos(w)
+        val al = sin(w) / (2.0 * q)
+        return norm(1.0, -2 * c, 1.0, 1 + al, -2 * c, 1 - al)
+    }
+
+    fun peaking(fs: Double, f0: Double, gDb: Double, q: Double): DoubleArray {
+        val a = 10.0.pow(gDb / 40.0)
+        val w = 2.0 * PI * f0 / fs
+        val c = cos(w)
+        val al = sin(w) / (2.0 * q)
+        return norm(1 + al * a, -2 * c, 1 - al * a, 1 + al / a, -2 * c, 1 - al / a)
+    }
+
+    fun lowShelf(fs: Double, f0: Double, gDb: Double): DoubleArray {
+        val a = 10.0.pow(gDb / 40.0)
+        val w = 2.0 * PI * f0 / fs
+        val c = cos(w)
+        val al = sin(w) / 2.0 * sqrt(2.0)
+        val sa = sqrt(a)
+        return norm(
+            a * ((a + 1) - (a - 1) * c + 2 * sa * al),
+            2 * a * ((a - 1) - (a + 1) * c),
+            a * ((a + 1) - (a - 1) * c - 2 * sa * al),
+            (a + 1) + (a - 1) * c + 2 * sa * al,
+            -2 * ((a - 1) + (a + 1) * c),
+            (a + 1) + (a - 1) * c - 2 * sa * al
+        )
+    }
+
+    fun highShelf(fs: Double, f0: Double, gDb: Double): DoubleArray {
+        val a = 10.0.pow(gDb / 40.0)
+        val w = 2.0 * PI * f0 / fs
+        val c = cos(w)
+        val al = sin(w) / 2.0 * sqrt(2.0)
+        val sa = sqrt(a)
+        return norm(
+            a * ((a + 1) + (a - 1) * c + 2 * sa * al),
+            -2 * a * ((a - 1) + (a + 1) * c),
+            a * ((a + 1) + (a - 1) * c - 2 * sa * al),
+            (a + 1) - (a - 1) * c + 2 * sa * al,
+            2 * ((a - 1) - (a + 1) * c),
+            (a + 1) - (a - 1) * c - 2 * sa * al
+        )
+    }
+
+    /** Equalizer band i: 0 = low shelf, 1..3 = bell, 4 = high shelf. */
+    fun band(i: Int, fs: Double, f0: Double, gDb: Double): DoubleArray = when (i) {
+        0 -> lowShelf(fs, f0, gDb)
+        4 -> highShelf(fs, f0, gDb)
+        else -> peaking(fs, f0, gDb, 1.0)
+    }
+
+    /** Size (gain, not dB) of a filter at frequency f. */
+    fun mag(c: DoubleArray, fs: Double, f: Double): Double {
+        val w = 2.0 * PI * f / fs
+        val cw = cos(w)
+        val sw = sin(w)
+        val c2 = cos(2 * w)
+        val s2 = sin(2 * w)
+        val nr = c[0] + c[1] * cw + c[2] * c2
+        val ni = -(c[1] * sw + c[2] * s2)
+        val dr = 1.0 + c[3] * cw + c[4] * c2
+        val di = -(c[3] * sw + c[4] * s2)
+        return sqrt((nr * nr + ni * ni) / (dr * dr + di * di + 1e-18))
+    }
+}
 
 /**
  * Records everything you hear (the final stereo mix) into a WAV file while you play.
@@ -166,7 +289,9 @@ class VocalChannel {
     companion object {
         const val RING = 8192
         const val MASK = 8191L
-        val PRESET_NAMES = listOf("Normal", "Bathroom", "Hall", "Mountain top")
+        val PRESET_NAMES = listOf("Normal", "Bathroom", "Hall", "Mountain top", "Dry")
+        const val WF = 240
+        const val SPEC = 2048
         private val COMB = intArrayOf(1116, 1188, 1277, 1356)
         private const val MAX_TAKE = 180 * Cfg.SR
     }
@@ -176,14 +301,17 @@ class VocalChannel {
     @Volatile var volume = 0.8f
     @Volatile var lowCut = 0.25f
     @Volatile var comp = 0.35f
-    @Volatile var wet = 0.15f
+    @Volatile var wet = 0f
     @Volatile var decay = 0.3f
     @Volatile var bright = 0.6f
     @Volatile var echo = 0f
     @Volatile var echoTime = 0.4f
     @Volatile var echoFb = 0.3f
     @Volatile var mute = false
-    @Volatile var preset = 0
+    @Volatile var gate = 0f
+    @Volatile var highCut = 0f
+    @Volatile var hum = 0
+    @Volatile var preset = 4
     @Volatile var roomScale = 0.7f
     @Volatile var preMs = 8f
 
@@ -207,11 +335,33 @@ class VocalChannel {
     private var take = FloatArray(Cfg.SR * 10)
     @Volatile private var takeLen = 0
 
+    // equalizer: 5 bands (0 = low shelf, 1..3 = bell, 4 = high shelf), gain in dB
+    val eqF = floatArrayOf(100f, 400f, 1500f, 4000f, 10000f)
+    val eqG = FloatArray(5)
+
+    // what the screen draws: scrolling waveform and a buffer for the spectrum
+    val wfMin = FloatArray(WF)
+    val wfMax = FloatArray(WF)
+    @Volatile var wfPos = 0
+    val spec = FloatArray(SPEC)
+    @Volatile var specPos = 0
+    private var wMin = 0f
+    private var wMax = 0f
+    private var wCnt = 0
+
     // audio thread state
+    private val hpF = Biquad()
+    private val lpF = Biquad()
+    private val humF1 = Biquad()
+    private val humF2 = Biquad()
+    private val eqB = Array(5) { Biquad() }
+    private val eqOn = BooleanArray(5)
+    private var lpOn = false
+    private var humOn = false
+    private var gEnv = 0f
+    private var gGain = 1f
     private var quiet = 0
     private var cnt = 0
-    private var hpA = 0.05f
-    private var hpLp = 0f
     private var env = 0f
     private val pd = FloatArray(8820)
     private var pi = 0
@@ -240,9 +390,13 @@ class VocalChannel {
                 roomScale = 1.8f; preMs = 28f; wet = 0.35f; decay = 0.85f; bright = 0.5f
                 echo = 0f; echoTime = 0.4f; echoFb = 0.3f
             }
-            else -> {
+            3 -> {
                 roomScale = 2.0f; preMs = 40f; wet = 0.18f; decay = 0.6f; bright = 0.45f
                 echo = 0.55f; echoTime = 0.45f; echoFb = 0.5f
+            }
+            else -> {
+                roomScale = 0.7f; preMs = 8f; wet = 0f; decay = 0.3f; bright = 0.6f
+                echo = 0f; echoTime = 0.4f; echoFb = 0.3f
             }
         }
     }
@@ -371,6 +525,63 @@ class VocalChannel {
 
     // ---------------- audio thread: the vocal chain ----------------
 
+    private fun refreshFilters() {
+        val fs = Cfg.SR.toDouble()
+        hpF.set(Bq.highpass(fs, 40.0 + lowCut * 360.0, 0.707))
+        val hc = highCut
+        lpOn = hc > 0.02f
+        if (lpOn) lpF.set(Bq.lowpass(fs, 20000.0 * 0.15.pow(hc.toDouble()), 0.707))
+        val hm = hum
+        humOn = hm > 0
+        if (humOn) {
+            val f0 = if (hm == 1) 50.0 else 60.0
+            humF1.set(Bq.notch(fs, f0, 8.0))
+            humF2.set(Bq.notch(fs, f0 * 2.0, 8.0))
+        }
+        for (i in 0 until 5) {
+            val g = eqG[i].toDouble()
+            eqOn[i] = abs(g) > 0.1
+            if (eqOn[i]) eqB[i].set(Bq.band(i, fs, eqF[i].toDouble(), g))
+        }
+    }
+
+    private fun tap(x: Float) {
+        spec[specPos and (SPEC - 1)] = x
+        specPos = specPos + 1
+        if (x < wMin) wMin = x
+        if (x > wMax) wMax = x
+        wCnt++
+        if (wCnt >= 441) {
+            val i = wfPos % WF
+            wfMin[i] = wMin
+            wfMax[i] = wMax
+            wfPos = wfPos + 1
+            wMin = 0f
+            wMax = 0f
+            wCnt = 0
+        }
+    }
+
+    /** The filters that shape the voice right now, for drawing the response curve. */
+    fun responseCoefs(): List<DoubleArray> {
+        val fs = Cfg.SR.toDouble()
+        val l = ArrayList<DoubleArray>()
+        l.add(Bq.highpass(fs, 40.0 + lowCut * 360.0, 0.707))
+        if (highCut > 0.02f) l.add(Bq.lowpass(fs, 20000.0 * 0.15.pow(highCut.toDouble()), 0.707))
+        if (hum > 0) {
+            val f0 = if (hum == 1) 50.0 else 60.0
+            l.add(Bq.notch(fs, f0, 8.0))
+            l.add(Bq.notch(fs, f0 * 2.0, 8.0))
+        }
+        for (i in 0 until 5) {
+            if (abs(eqG[i]) > 0.1f) l.add(Bq.band(i, fs, eqF[i].toDouble(), eqG[i].toDouble()))
+        }
+        return l
+    }
+
+    /** Level (0..1) under which the noise gate closes, or 0 when the gate is off. */
+    fun gateThreshold(): Float = if (gate > 0.01f) 0.0005f * 100f.pow(gate) else 0f
+
     fun render() {
         val live = on
         if (!live) {
@@ -387,14 +598,32 @@ class VocalChannel {
         val ax = abs(x)
         inLevel = max(ax, inLevel * 0.9995f)
 
-        // low cut
-        if ((cnt and 63) == 0) {
-            val fc = 40.0 + lowCut * 360.0
-            hpA = (1.0 - exp(-2.0 * PI * fc / Cfg.SR)).toFloat()
-        }
+        // cleaning filters: low cut, hum notch, high cut (settings refreshed every 64 samples)
+        if ((cnt and 63) == 0) refreshFilters()
         cnt++
-        hpLp += hpA * (x - hpLp)
-        x -= hpLp
+        x = hpF.process(x)
+        if (humOn) {
+            x = humF1.process(x)
+            x = humF2.process(x)
+        }
+        if (lpOn) x = lpF.process(x)
+        tap(x)
+
+        // noise gate: closes the sound when it is quieter than the threshold
+        val gt = gate
+        if (gt > 0.01f) {
+            val gthr = 0.0005f * 100f.pow(gt)
+            val ag = abs(x)
+            gEnv = if (ag > gEnv) ag else gEnv * 0.9995f
+            val tg = if (gEnv > gthr) 1f else 0.04f
+            gGain += (tg - gGain) * (if (tg > gGain) 0.02f else 0.0015f)
+            x *= gGain
+        } else {
+            gGain = 1f
+        }
+
+        // equalizer
+        for (i in 0 until 5) if (eqOn[i]) x = eqB[i].process(x)
 
         // compressor
         val a = abs(x)
@@ -485,6 +714,17 @@ object VocalSave {
             o.put("echoTime", v.echoTime.toDouble())
             o.put("echoFb", v.echoFb.toDouble())
             o.put("mute", v.mute)
+            o.put("gate", v.gate.toDouble())
+            o.put("highCut", v.highCut.toDouble())
+            o.put("hum", v.hum)
+            val ef = org.json.JSONArray()
+            val eg = org.json.JSONArray()
+            for (i in 0 until 5) {
+                ef.put(v.eqF[i].toDouble())
+                eg.put(v.eqG[i].toDouble())
+            }
+            o.put("eqF", ef)
+            o.put("eqG", eg)
             o.put("preset", v.preset)
             o.put("roomScale", v.roomScale.toDouble())
             o.put("preMs", v.preMs.toDouble())
@@ -501,14 +741,23 @@ object VocalSave {
             v.volume = o.optDouble("volume", 0.8).toFloat()
             v.lowCut = o.optDouble("lowCut", 0.25).toFloat()
             v.comp = o.optDouble("comp", 0.35).toFloat()
-            v.wet = o.optDouble("wet", 0.15).toFloat()
+            v.wet = o.optDouble("wet", 0.0).toFloat()
             v.decay = o.optDouble("decay", 0.3).toFloat()
             v.bright = o.optDouble("bright", 0.6).toFloat()
             v.echo = o.optDouble("echo", 0.0).toFloat()
             v.echoTime = o.optDouble("echoTime", 0.4).toFloat()
             v.echoFb = o.optDouble("echoFb", 0.3).toFloat()
             v.mute = o.optBoolean("mute", false)
-            v.preset = o.optInt("preset", 0).coerceIn(0, 3)
+            v.gate = o.optDouble("gate", 0.0).toFloat()
+            v.highCut = o.optDouble("highCut", 0.0).toFloat()
+            v.hum = o.optInt("hum", 0).coerceIn(0, 2)
+            val ef = o.optJSONArray("eqF")
+            val eg = o.optJSONArray("eqG")
+            for (i in 0 until 5) {
+                if (ef != null && i < ef.length()) v.eqF[i] = ef.optDouble(i, v.eqF[i].toDouble()).toFloat()
+                if (eg != null && i < eg.length()) v.eqG[i] = eg.optDouble(i, 0.0).toFloat()
+            }
+            v.preset = o.optInt("preset", 4).coerceIn(0, 4)
             v.roomScale = o.optDouble("roomScale", 0.7).toFloat()
             v.preMs = o.optDouble("preMs", 8.0).toFloat()
         } catch (ex: Exception) {
