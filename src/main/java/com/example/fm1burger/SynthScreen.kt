@@ -483,6 +483,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
         for (r in refreshers) r()
         refreshBass()
         refreshAnalog()
+        seqPanel.refresh()
         lastState = -1
         refreshTransport()
         showMode(mode)
