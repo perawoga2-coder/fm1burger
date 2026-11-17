@@ -1,9 +1,11 @@
 package com.example.fm1burger
 
 import android.content.Context
+import android.graphics.Color
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.widget.Button
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -20,6 +22,11 @@ class MixerScreen(private val a: MainActivity) : Screen {
     private val pans = ArrayList<SliderRow>()
     private val muteBtns = ArrayList<Button>()
     private lateinit var padFader: FaderView
+    private lateinit var bassFader: FaderView
+    private lateinit var synthFader: FaderView
+    private lateinit var drumMuteBtn: Button
+    private lateinit var bassMuteBtn: Button
+    private lateinit var synthMuteBtn: Button
     private lateinit var masterFader: FaderView
     private lateinit var outSpinner: Spinner
     private var outDevs: List<AudioDeviceInfo> = emptyList()
@@ -48,7 +55,6 @@ class MixerScreen(private val a: MainActivity) : Screen {
         content.addView(op, ui.fullWidth(0))
 
         val row = ui.row()
-        row.weightSum = 6f
         for (i in 0 until Cfg.TRACKS) {
             val col = ui.panel()
             col.addView(ui.text("Track ${i + 1}", 13f, Theme.TRACK_COLORS[i], true))
@@ -69,16 +75,51 @@ class MixerScreen(private val a: MainActivity) : Screen {
             faders.add(f)
             pans.add(pan)
             muteBtns.add(m)
-            row.addView(col, ui.w(1f, 2))
+            row.addView(col, colLp())
         }
 
         val pcol = ui.panel()
-        pcol.addView(ui.text("Pads", 13f, Theme.TEXT, true))
+        pcol.addView(ui.text("Drums", 13f, Theme.GREEN, true))
         padFader = FaderView(a)
         padFader.color = Theme.GREEN
         padFader.onChange = { v -> e.padVol = v }
         pcol.addView(padFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
-        row.addView(pcol, ui.w(1f, 2))
+        pcol.addView(ui.text("All 8 drum pads together", 11f, Theme.DIM))
+        drumMuteBtn = ui.button("Mute") {
+            val anyOn = e.pads.any { !it.mute }
+            for (p in e.pads) p.mute = anyOn
+            refreshMutes()
+        }
+        pcol.addView(drumMuteBtn, ui.fullWidth(4))
+        row.addView(pcol, colLp())
+
+        val bcol = ui.panel()
+        bcol.addView(ui.text("Bassline", 13f, Theme.ACCENT, true))
+        bassFader = FaderView(a)
+        bassFader.color = Theme.ACCENT
+        bassFader.onChange = { v -> e.bass.volume = v }
+        bcol.addView(bassFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
+        bcol.addView(ui.text("Bass synth (Synth page)", 11f, Theme.DIM))
+        bassMuteBtn = ui.button("Mute") {
+            e.bass.mute = !e.bass.mute
+            refreshMutes()
+        }
+        bcol.addView(bassMuteBtn, ui.fullWidth(4))
+        row.addView(bcol, colLp())
+
+        val scol = ui.panel()
+        scol.addView(ui.text("Analog synth", 13f, Theme.TEXT, true))
+        synthFader = FaderView(a)
+        synthFader.color = Color.parseColor("#B07CFF")
+        synthFader.onChange = { v -> e.analog.volume = v }
+        scol.addView(synthFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
+        scol.addView(ui.text("Keyboard synth (Synth page)", 11f, Theme.DIM))
+        synthMuteBtn = ui.button("Mute") {
+            e.analog.mute = !e.analog.mute
+            refreshMutes()
+        }
+        scol.addView(synthMuteBtn, ui.fullWidth(4))
+        row.addView(scol, colLp())
 
         val mcol = ui.panel()
         mcol.addView(ui.text("Master", 13f, Theme.TEXT, true))
@@ -86,10 +127,20 @@ class MixerScreen(private val a: MainActivity) : Screen {
         masterFader.color = Theme.TEXT
         masterFader.onChange = { v -> e.masterVol = v }
         mcol.addView(masterFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
-        row.addView(mcol, ui.w(1f, 2))
+        row.addView(mcol, colLp())
 
-        content.addView(row, ui.fullWidth(10))
+        val hs = HorizontalScrollView(a)
+        hs.isHorizontalScrollBarEnabled = true
+        hs.addView(row)
+        content.addView(hs, ui.fullWidth(10))
         scanOutputs()
+    }
+
+    /** Every mixer strip has the same width; the row scrolls sideways when there are more strips than fit. */
+    private fun colLp(): LinearLayout.LayoutParams {
+        val lp = LinearLayout.LayoutParams(ui.dp(118), LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.setMargins(ui.dp(2), ui.dp(2), ui.dp(2), ui.dp(2))
+        return lp
     }
 
     private fun panText(v: Int): String = when {
@@ -126,6 +177,9 @@ class MixerScreen(private val a: MainActivity) : Screen {
         for (i in 0 until Cfg.TRACKS) {
             ui.styleButton(muteBtns[i], e.tracks[i].mute, Theme.RED)
         }
+        ui.styleButton(drumMuteBtn, e.pads.all { it.mute }, Theme.RED)
+        ui.styleButton(bassMuteBtn, e.bass.mute, Theme.RED)
+        ui.styleButton(synthMuteBtn, e.analog.mute, Theme.RED)
     }
 
     override fun onShow() {
@@ -134,6 +188,8 @@ class MixerScreen(private val a: MainActivity) : Screen {
             pans[i].set(((e.tracks[i].pan * 100).toInt() + 100).coerceIn(0, 200))
         }
         padFader.value = e.padVol
+        bassFader.value = e.bass.volume
+        synthFader.value = e.analog.volume
         masterFader.value = e.masterVol
         refreshMutes()
     }
