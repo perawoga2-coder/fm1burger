@@ -26,6 +26,7 @@ class Engine {
 
     val tracks = Array(Cfg.TRACKS) { Track(it) }
     val pads = Array(Cfg.PADS) { PadVoice() }
+    val drumFx = FxChain()
     private val preview = PadVoice()
 
     @Volatile var bpmF = 120.0
@@ -36,6 +37,8 @@ class Engine {
         }
 
     @Volatile var playing = false
+    @Volatile var paused = false
+    @Volatile var pauseReq = false
     @Volatile var follow = false
     @Volatile var sendClock = false
     @Volatile var offsetMs = 0
@@ -66,6 +69,11 @@ class Engine {
 
     fun stop() {
         stopReq = true
+    }
+
+    /** Pause (freeze the sequencer where it is) or resume. Only works while playing. */
+    fun pause() {
+        pauseReq = true
     }
 
     fun setOutput(d: AudioDeviceInfo?) {
@@ -201,7 +209,7 @@ class Engine {
                 tpk[i] = 0f
             }
 
-            if (follow && playing) {
+            if (follow && playing && !paused) {
                 var n = pendingTicks.getAndSet(0)
                 while (n > 0) {
                     onTick(0, t0)
@@ -219,7 +227,7 @@ class Engine {
             var mpk = 0f
 
             for (f in 0 until BLOCK) {
-                if (playing) {
+                if (playing && !paused) {
                     if (!follow) {
                         tickAcc += 1.0
                         if (tickAcc >= spt) {
@@ -242,11 +250,13 @@ class Engine {
                         if (ab > tpk[i]) tpk[i] = ab
                     }
                 }
+                var pm = 0f
                 for (p in pads) {
-                    val v = renderPad(p) * pv
-                    l += v
-                    r += v
+                    pm += renderPad(p) * (if (p.mute) 0f else p.volume)
                 }
+                pm = drumFx.process(pm * pv, bpmNow, beatPos)
+                l += pm
+                r += pm
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
@@ -291,18 +301,27 @@ class Engine {
             stopReq = false
             if (playing && !follow && sendClock) send(0xFC, t0 + latencyNs + off)
             playing = false
+            paused = false
             curStep = -1
             for (t in tracks) t.playing = false
         }
         if (startReq) {
             startReq = false
             playing = true
+            paused = false
             tickCount = 0L
             tickAcc = Cfg.SR * 60.0 / (bpmF * 24.0)
             beatPos = 0.0
             curStep = -1
             for (t in tracks) t.playing = false
             if (!follow && sendClock) send(0xFA, t0 + latencyNs + off)
+        }
+        if (pauseReq) {
+            pauseReq = false
+            if (playing) {
+                paused = !paused
+                if (!follow && sendClock) send(if (paused) 0xFC else 0xFB, t0 + latencyNs + off)
+            }
         }
         for (t in tracks) {
             if (t.auditionReq) {
