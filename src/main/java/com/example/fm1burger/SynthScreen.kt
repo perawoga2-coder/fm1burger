@@ -13,6 +13,7 @@ import android.widget.TextView
  * Synth page with two instruments:
  *  - Bassline: classic one-note-at-a-time bass with a 16 step pattern (note, accent, slide).
  *  - Analog synth: 6-voice keyboard synth with sine / saw / square / triangle waves, filter and ADSR.
+ * Play / Pause / Stop / Mute are at the top of the page.
  */
 class SynthScreen(private val a: MainActivity) : Screen {
 
@@ -42,6 +43,11 @@ class SynthScreen(private val a: MainActivity) : Screen {
     private lateinit var aMuteBtn: Button
     private lateinit var octText: TextView
     private var kbOct = 3
+    private var lastState = -1
+    private lateinit var playBtn: Button
+    private lateinit var pauseBtn: Button
+    private lateinit var stopBtn: Button
+    private lateinit var tMuteBtn: Button
     private val noteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
     init {
@@ -54,6 +60,16 @@ class SynthScreen(private val a: MainActivity) : Screen {
         tabs.addView(bassTab, ui.w(1f, 3))
         tabs.addView(anaTab, ui.w(1f, 3))
         content.addView(tabs, ui.fullWidth(6))
+        val tr = ui.row()
+        playBtn = ui.button("▶ Play") { doPlay() }
+        pauseBtn = ui.button("|| Pause") { doPause() }
+        stopBtn = ui.button("■ Stop") { e.stop() }
+        tMuteBtn = ui.button("Mute") { toggleMute() }
+        tr.addView(playBtn, ui.w(1f, 3))
+        tr.addView(pauseBtn, ui.w(1f, 3))
+        tr.addView(stopBtn, ui.w(1f, 3))
+        tr.addView(tMuteBtn, ui.w(1.3f, 3))
+        content.addView(tr, ui.fullWidth(4))
         buildBass()
         buildAnalog()
         content.addView(bassBox)
@@ -67,6 +83,38 @@ class SynthScreen(private val a: MainActivity) : Screen {
         anaBox.visibility = if (m == 1) View.VISIBLE else View.GONE
         ui.styleButton(bassTab, m == 0)
         ui.styleButton(anaTab, m == 1)
+        refreshMute()
+    }
+
+    // ---------------- transport (Play / Pause / Stop / Mute) ----------------
+
+    private fun doPlay() {
+        if (e.playing && e.paused) e.pause() else if (!e.playing) e.play()
+    }
+
+    private fun doPause() {
+        if (e.playing && !e.paused) e.pause()
+    }
+
+    private fun toggleMute() {
+        if (mode == 0) bs.mute = !bs.mute else an.mute = !an.mute
+        refreshBass()
+        refreshAnalog()
+    }
+
+    private fun refreshMute() {
+        val m = if (mode == 0) bs.mute else an.mute
+        tMuteBtn.text = if (mode == 0) (if (m) "Unmute bass" else "Mute bass") else (if (m) "Unmute synth" else "Mute synth")
+        ui.styleButton(tMuteBtn, m, Theme.RED)
+    }
+
+    private fun refreshTransport() {
+        val st = if (!e.playing) 0 else if (e.paused) 2 else 1
+        if (st == lastState) return
+        lastState = st
+        ui.styleButton(playBtn, st == 1)
+        ui.styleButton(pauseBtn, st == 2)
+        ui.styleButton(stopBtn, false)
     }
 
     private fun slider(name: String, get: () -> Float, set: (Float) -> Unit): SliderRow {
@@ -301,6 +349,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
         }
         ui.styleButton(accBtn, bs.accent[s])
         ui.styleButton(slideBtn, bs.slide[s])
+        refreshMute()
     }
 
     // ================= Analog synth =================
@@ -423,6 +472,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
         octText.text = "Octave $kbOct"
         for (i in waveBtns.indices) ui.styleButton(waveBtns[i], an.wave == i)
         ui.styleButton(aMuteBtn, an.mute, Theme.RED)
+        refreshMute()
     }
 
     // ================= Screen =================
@@ -431,10 +481,13 @@ class SynthScreen(private val a: MainActivity) : Screen {
         for (r in refreshers) r()
         refreshBass()
         refreshAnalog()
+        lastState = -1
+        refreshTransport()
         showMode(mode)
     }
 
     override fun onTick() {
+        refreshTransport()
         val s = if (e.playing) e.curStep else -1
         if (s != playStep) {
             val old = playStep
