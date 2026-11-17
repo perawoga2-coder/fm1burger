@@ -47,6 +47,22 @@ class Recorder(ctx: Context) {
         else -> "Other: ${d.productName}"
     }
 
+    /** The mic for the R button: an external 3.5 mm mic when plugged in, otherwise the internal mic. */
+    fun defaultMic(): AudioDeviceInfo? {
+        val l = inputs()
+        return l.firstOrNull { it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET }
+            ?: l.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+    }
+
+    /** The input for the S button: the FM-1 over USB, or a line / 3.5 mm cable. */
+    fun fm1Input(): AudioDeviceInfo? {
+        val l = inputs()
+        return l.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE }
+            ?: l.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_HEADSET }
+            ?: l.firstOrNull { it.type == AudioDeviceInfo.TYPE_LINE_ANALOG }
+            ?: l.firstOrNull { it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET }
+    }
+
     fun isUsbLike(d: AudioDeviceInfo): Boolean =
         d.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
             d.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
