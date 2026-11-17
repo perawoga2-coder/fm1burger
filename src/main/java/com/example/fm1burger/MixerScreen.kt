@@ -9,6 +9,8 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
+import android.widget.TextView
+import java.util.Locale
 
 class MixerScreen(private val a: MainActivity) : Screen {
 
@@ -27,6 +29,10 @@ class MixerScreen(private val a: MainActivity) : Screen {
     private lateinit var drumMuteBtn: Button
     private lateinit var bassMuteBtn: Button
     private lateinit var synthMuteBtn: Button
+    private lateinit var voiceFader: FaderView
+    private lateinit var voiceMuteBtn: Button
+    private lateinit var mixRecBtn: Button
+    private lateinit var mixInfo: TextView
     private lateinit var masterFader: FaderView
     private lateinit var outSpinner: Spinner
     private var outDevs: List<AudioDeviceInfo> = emptyList()
@@ -53,6 +59,24 @@ class MixerScreen(private val a: MainActivity) : Screen {
         )
         op.addView(ui.button("Rescan outputs") { scanOutputs() }, ui.fullWidth(4))
         content.addView(op, ui.fullWidth(0))
+
+        val mp = ui.panel()
+        mp.addView(ui.text("Record the whole mix", 14f, Theme.ACCENT, true))
+        mp.addView(
+            ui.text(
+                "Records everything you hear (tracks, drums, bass, synth, voice) live, with no length limit. " +
+                    "The ● REC MIX button at the top does the same from any page.",
+                12f, Theme.DIM
+            )
+        )
+        val mr = ui.row()
+        mixRecBtn = ui.button("● Record mix") { a.toggleMixRec() }
+        mr.addView(mixRecBtn, ui.w(1f, 3))
+        mr.addView(ui.button("Last mix...") { a.mixDialog() }, ui.w(1f, 3))
+        mp.addView(mr, ui.fullWidth(4))
+        mixInfo = ui.text("", 12f, Theme.DIM)
+        mp.addView(mixInfo)
+        content.addView(mp, ui.fullWidth(8))
 
         val row = ui.row()
         for (i in 0 until Cfg.TRACKS) {
@@ -121,6 +145,20 @@ class MixerScreen(private val a: MainActivity) : Screen {
         scol.addView(synthMuteBtn, ui.fullWidth(4))
         row.addView(scol, colLp())
 
+        val vcol = ui.panel()
+        vcol.addView(ui.text("Voice", 13f, Color.parseColor("#FF5CA8"), true))
+        voiceFader = FaderView(a)
+        voiceFader.color = Color.parseColor("#FF5CA8")
+        voiceFader.onChange = { v -> e.vocal.volume = v }
+        vcol.addView(voiceFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
+        vcol.addView(ui.text("Live mic (Voice page)", 11f, Theme.DIM))
+        voiceMuteBtn = ui.button("Mute") {
+            e.vocal.mute = !e.vocal.mute
+            refreshMutes()
+        }
+        vcol.addView(voiceMuteBtn, ui.fullWidth(4))
+        row.addView(vcol, colLp())
+
         val mcol = ui.panel()
         mcol.addView(ui.text("Master", 13f, Theme.TEXT, true))
         masterFader = FaderView(a)
@@ -180,6 +218,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         ui.styleButton(drumMuteBtn, e.pads.all { it.mute }, Theme.RED)
         ui.styleButton(bassMuteBtn, e.bass.mute, Theme.RED)
         ui.styleButton(synthMuteBtn, e.analog.mute, Theme.RED)
+        ui.styleButton(voiceMuteBtn, e.vocal.mute, Theme.RED)
     }
 
     override fun onShow() {
@@ -190,6 +229,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         padFader.value = e.padVol
         bassFader.value = e.bass.volume
         synthFader.value = e.analog.volume
+        voiceFader.value = e.vocal.volume
         masterFader.value = e.masterVol
         refreshMutes()
     }
@@ -197,5 +237,18 @@ class MixerScreen(private val a: MainActivity) : Screen {
     override fun onTick() {
         for (i in 0 until Cfg.TRACKS) faders[i].meter = e.tracks[i].peak
         masterFader.meter = e.masterPeak
+        val mr = e.mixRec
+        if (mr.recording) {
+            val s = mr.frames / Cfg.SR
+            mixRecBtn.text = "■ Stop recording"
+            ui.styleButton(mixRecBtn, true, Theme.RED)
+            mixInfo.text = String.format(
+                Locale.US, "Recording %d:%02d · %.1f MB", s / 60, s % 60, mr.bytesWritten / 1048576.0
+            )
+        } else {
+            mixRecBtn.text = "● Record mix"
+            ui.styleButton(mixRecBtn, false)
+            mixInfo.text = "Not recording."
+        }
     }
 }
