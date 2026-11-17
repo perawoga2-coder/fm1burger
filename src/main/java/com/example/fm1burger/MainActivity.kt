@@ -26,6 +26,7 @@ class MainActivity : Activity() {
     companion object {
         const val REQ_IMPORT = 10
         const val REQ_EXPORT = 11
+        const val REQ_EXPORT_FILE = 12
     }
 
     lateinit var ui: Ui
@@ -39,6 +40,9 @@ class MainActivity : Activity() {
     lateinit var libraryScreen: LibraryScreen
 
     var sel = 0
+    var lastMix: File? = null
+    private var pendingFile: File? = null
+    private lateinit var recMixBtn: Button
     private var cur = 0
     private var syncState = 0   // 0 off, 1 LEAD (the app sends the clock), 2 FOLLOW (the FM-1 is the boss)
     private var syncNote = ""
@@ -72,6 +76,7 @@ class MainActivity : Activity() {
         engine.start()
         project.load()
         SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
+        VocalSave.load(File(filesDir, "vocal.json"), engine.vocal)
         showTab(0)
         handler.post(ticker)
 
@@ -84,12 +89,16 @@ class MainActivity : Activity() {
         super.onPause()
         project.save()
         SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog)
+        VocalSave.save(File(filesDir, "vocal.json"), engine.vocal)
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         project.save()
         SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog)
+        VocalSave.save(File(filesDir, "vocal.json"), engine.vocal)
+        engine.vocal.stop()
+        if (engine.mixRec.recording) engine.mixRec.stop()
         recorder.stop()
         engine.shutdown()
         midi.shutdown()
@@ -137,7 +146,11 @@ class MainActivity : Activity() {
 
         statusText = ui.text("", 12f, Theme.DIM)
         statusText.maxLines = 2
-        head.addView(statusText)
+        val r2 = ui.row()
+        recMixBtn = ui.button("● REC MIX") { toggleMixRec() }
+        r2.addView(statusText, ui.w(1f, 2))
+        r2.addView(recMixBtn, ui.w(0f, 2))
+        head.addView(r2)
         root.addView(head)
 
         // screens
@@ -149,11 +162,12 @@ class MainActivity : Activity() {
         val fx = FxScreen(this)
         val pads = PadsScreen(this)
         val synth = SynthScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth)
+        val voice = VoiceScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice)
 
         // tabs
         val tabRow = ui.row()
-        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth")
+        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -340,7 +354,103 @@ class MainActivity : Activity() {
                 sl.ifEmpty { "Ready. Press ▶ to play." }
             }
         }
+        val mr = engine.mixRec
+        if (mr.autoStopped) {
+            mr.autoStopped = false
+            lastMix = mr.stop()
+            ui.toast("The mix recording stopped (storage full or write error). What was recorded is kept.")
+            mixDialog()
+        }
+        val rt = if (mr.recording) "■ REC " + clock(mr.frames / Cfg.SR) else "● REC MIX"
+        if (recMixBtn.text.toString() != rt) recMixBtn.text = rt
+        ui.styleButton(recMixBtn, mr.recording, Theme.RED)
+        if (mr.recording) {
+            statusText.setTextColor(Theme.RED)
+            statusText.text = "● Recording the whole mix " + clock(mr.frames / Cfg.SR) +
+                " · " + String.format(Locale.US, "%.1f", mr.bytesWritten / 1048576.0) + " MB. Press ■ REC to stop."
+        }
         screens[cur].onTick()
+    }
+
+    private fun clock(s: Long): String = String.format(Locale.US, "%d:%02d", s / 60, s % 60)
+
+    // ---------------- record the whole mix ----------------
+
+    fun toggleMixRec() {
+        val m = engine.mixRec
+        if (m.recording) {
+            lastMix = m.stop()
+            if (lastMix != null) mixDialog()
+        } else {
+            val f = m.start(File(filesDir, "mixes"))
+            if (f == null) {
+                ui.toast("Cannot start the mix recording (not enough free storage?)")
+            } else {
+                ui.toast("Recording the whole mix. Press ■ REC to stop. There is no length limit.")
+            }
+        }
+    }
+
+    fun mixDialog() {
+        val f = lastMix
+        if (f == null || !f.exists()) {
+            ui.toast("No mix recorded yet. Press ● REC MIX while you play.")
+            return
+        }
+        val secs = ((f.length() - 44L) / (Cfg.SR * 4L)).toInt().coerceAtLeast(0)
+        val mb = f.length() / 1048576.0
+        val items = arrayOf(
+            "Save to device (choose a folder)...",
+            "Add to the sample library" + (if (secs > 120) " (too long, max 2 min)" else " (mixed to mono)"),
+            "Keep it inside the app only",
+            "Delete this mix"
+        )
+        AlertDialog.Builder(this)
+            .setTitle(String.format(Locale.US, "%s  %d:%02d  %.1f MB", f.name, secs / 60, secs % 60, mb))
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> saveFile(f)
+                    1 -> mixToLibrary(f, secs)
+                    3 -> {
+                        f.delete()
+                        lastMix = null
+                        ui.toast("Mix deleted")
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun mixToLibrary(f: File, secs: Int) {
+        if (secs > 120) {
+            ui.toast("Too long for the library (max 2 minutes). Use Save to device.")
+            return
+        }
+        Thread {
+            try {
+                val p = Wav.parse(f.readBytes())
+                if (p == null) {
+                    runOnUiThread { ui.toast("Cannot read the mix file") }
+                } else {
+                    val saved = store.saveNew(f.name.removeSuffix(".wav"), p.data, p.rate)
+                    runOnUiThread {
+                        libraryScreen.refresh()
+                        ui.toast("Added ${saved.name} to the library")
+                    }
+                }
+            } catch (ex: Exception) {
+                runOnUiThread { ui.toast("Failed: ${ex.message}") }
+            }
+        }.start()
+    }
+
+    fun saveFile(f: File) {
+        pendingFile = f
+        val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "audio/wav"
+        i.putExtra(Intent.EXTRA_TITLE, f.name)
+        startActivityForResult(i, REQ_EXPORT_FILE)
     }
 
     // ---------------- samples ----------------
@@ -479,6 +589,20 @@ class MainActivity : Activity() {
                 ui.toast("Export failed: ${e.message}")
             }
             pendingBytes = null
+        } else if (requestCode == REQ_EXPORT_FILE) {
+            val uri = data.data ?: return
+            val src = pendingFile ?: return
+            pendingFile = null
+            Thread {
+                try {
+                    contentResolver.openOutputStream(uri)?.use { out ->
+                        src.inputStream().use { it.copyTo(out, 65536) }
+                    }
+                    runOnUiThread { ui.toast("Mix saved") }
+                } catch (ex: Exception) {
+                    runOnUiThread { ui.toast("Save failed: ${ex.message}") }
+                }
+            }.start()
         }
     }
 
