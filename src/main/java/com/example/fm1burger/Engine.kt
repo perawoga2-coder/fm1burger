@@ -29,6 +29,7 @@ class Engine {
     val drumFx = FxChain()
     val bass = Bassline()
     val analog = AnalogSynth()
+    val analogSeq = AnalogSeq(analog)
     val vocal = VocalChannel()
     val mixRec = MixRecorder()
     private val preview = PadVoice()
@@ -376,6 +377,7 @@ class Engine {
 
     private fun stepTrigger(s: Int) {
         bass.step(s, bpmF)
+        analogSeq.step(s)
         for (p in pads) {
             if (p.on[s] && p.data != null) {
                 p.gain = p.lvl[s]
