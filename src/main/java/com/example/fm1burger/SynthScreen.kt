@@ -13,7 +13,6 @@ import android.widget.TextView
  * Synth page with two instruments:
  *  - Bassline: classic one-note-at-a-time bass with a 16 step pattern (note, accent, slide).
  *  - Analog synth: 6-voice keyboard synth with sine / saw / square / triangle waves, filter and ADSR.
- * Play / Pause / Stop / Mute are at the top of the page.
  */
 class SynthScreen(private val a: MainActivity) : Screen {
 
@@ -21,6 +20,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
     private val e = a.engine
     private val bs = e.bass
     private val an = e.analog
+    private lateinit var seqPanel: AnalogSeqPanel
     override val root = ScrollView(a)
     private val content = ui.col()
     private val bassBox = ui.col()
@@ -418,6 +418,8 @@ class SynthScreen(private val a: MainActivity) : Screen {
             kb.addView(b, lp)
         }
         anaBox.addView(kb, ui.fullWidth(4))
+        seqPanel = AnalogSeqPanel(a, e.analogSeq)
+        anaBox.addView(seqPanel.view, ui.fullWidth(8))
 
         val panel = ui.panel()
         panel.addView(ui.text("Synth sound", 14f, Theme.ACCENT, true))
@@ -488,6 +490,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
 
     override fun onTick() {
         refreshTransport()
+        seqPanel.tick()
         val s = if (e.playing) e.curStep else -1
         if (s != playStep) {
             val old = playStep
