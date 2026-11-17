@@ -43,6 +43,7 @@ class MainActivity : Activity() {
     var lastMix: File? = null
     private var pendingFile: File? = null
     private lateinit var recMixBtn: Button
+    private lateinit var recPartBtn: Button
     private var cur = 0
     private var syncState = 0   // 0 off, 1 LEAD (the app sends the clock), 2 FOLLOW (the FM-1 is the boss)
     private var syncNote = ""
@@ -58,6 +59,9 @@ class MainActivity : Activity() {
     private lateinit var bpmText: TextView
     private lateinit var bpmBar: SeekBar
     private lateinit var statusText: TextView
+    private val cueBtns = ArrayList<Button>()
+    private var cueKey = ""
+    private var lastPartVersion = -1
 
     // ---------------- lifecycle ----------------
 
@@ -77,6 +81,9 @@ class MainActivity : Activity() {
         project.load()
         SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
         VocalSave.load(File(filesDir, "vocal.json"), engine.vocal)
+        engine.bank.load(File(filesDir, "parts.json"))
+        engine.bank.loadClips(filesDir)
+        lastPartVersion = engine.bank.version
         showTab(0)
         handler.post(ticker)
 
@@ -90,6 +97,7 @@ class MainActivity : Activity() {
         project.save()
         SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog)
         VocalSave.save(File(filesDir, "vocal.json"), engine.vocal)
+        engine.bank.save(File(filesDir, "parts.json"))
     }
 
     override fun onDestroy() {
@@ -97,6 +105,7 @@ class MainActivity : Activity() {
         project.save()
         SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog)
         VocalSave.save(File(filesDir, "vocal.json"), engine.vocal)
+        engine.bank.save(File(filesDir, "parts.json"))
         engine.vocal.stop()
         if (engine.mixRec.recording) engine.mixRec.stop()
         recorder.stop()
@@ -148,9 +157,25 @@ class MainActivity : Activity() {
         statusText.maxLines = 2
         val r2 = ui.row()
         recMixBtn = ui.button("● REC MIX") { toggleMixRec() }
+        recPartBtn = ui.button("● REC PART") { toggleRecPart() }
         r2.addView(statusText, ui.w(1f, 2))
+        r2.addView(recPartBtn, ui.w(0f, 2))
         r2.addView(recMixBtn, ui.w(0f, 2))
         head.addView(r2)
+
+        // the 6 cue parts, on every page
+        val r3 = ui.row()
+        for (i in 0 until PartBank.N) {
+            val b = ui.button("") { cueSlot(i) }
+            b.textSize = 12f
+            b.setOnLongClickListener {
+                slotDialog(i)
+                true
+            }
+            cueBtns.add(b)
+            r3.addView(b, ui.w(1f, 2))
+        }
+        head.addView(r3)
         root.addView(head)
 
         // screens
@@ -163,11 +188,12 @@ class MainActivity : Activity() {
         val pads = PadsScreen(this)
         val synth = SynthScreen(this)
         val voice = VoiceScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice)
+        val song = SongScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song)
 
         // tabs
         val tabRow = ui.row()
-        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice")
+        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -206,6 +232,145 @@ class MainActivity : Activity() {
 
     private fun togglePlay() {
         if (engine.playing) engine.stop() else engine.play()
+    }
+
+    /** A cue button: jump to that part (at the next bar while playing). */
+    fun cuePart(i: Int) {
+        val b = engine.bank
+        if (b.songOn) {
+            b.songOn = false
+            ui.toast("Song mode is off now, you are playing the parts by hand")
+        }
+        if (i == b.cur && b.cueReq < 0) return
+        b.cue(i)
+    }
+
+    /** Cue slot k (1-6 at the top): plays the part that is placed in that slot. */
+    fun cueSlot(k: Int) {
+        cuePart(engine.bank.slot[k].coerceIn(0, PartBank.N - 1))
+    }
+
+    /** Long press on a cue slot: choose which part goes into it. */
+    fun slotDialog(k: Int) {
+        val b = engine.bank
+        val items = Array(PartBank.N) {
+            val p = b.parts[it]
+            PartNames.NAMES[it] + when {
+                p.hasClip() -> "  (recorded, ${p.clipBars} bars)"
+                p.used -> ""
+                else -> "  (empty)"
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Cue ${k + 1}: which part?")
+            .setItems(items) { _, which ->
+                b.slot[k] = which
+                cueKey = ""
+            }
+            .show()
+    }
+
+    // ---------------- live recording of a part ----------------
+
+    private fun toggleRecPart() {
+        val b = engine.bank
+        when (b.recState) {
+            0 -> {
+                b.recArm()
+                if (!engine.playing) {
+                    engine.play()
+                    ui.toast("Recording a part. It starts now at bar 1. Play your idea, then press ■ REC PART.")
+                } else {
+                    ui.toast("Recording starts at the next bar 1.")
+                }
+            }
+            1 -> {
+                b.recStop()
+                ui.toast("Recording cancelled")
+            }
+            2 -> {
+                if (!b.recStopWanted) {
+                    b.recStop()
+                    ui.toast("The recording stops at the end of this bar")
+                }
+            }
+        }
+    }
+
+    private fun recPartDone() {
+        val b = engine.bank
+        val got = b.collectRec() ?: return
+        val data = got.first
+        val bars = got.second
+        val items = Array(PartBank.N + 1) {
+            if (it < PartBank.N) {
+                val p = b.parts[it]
+                PartNames.NAMES[it] + (if (p.hasClip()) "  (replaces its ${p.clipBars} bar recording)" else "")
+            } else {
+                "Throw it away"
+            }
+        }
+        val d = AlertDialog.Builder(this)
+            .setTitle("Recording ready: $bars bar" + (if (bars > 1) "s" else "") + ". Send it to which part?")
+            .setItems(items) { _, which ->
+                if (which < PartBank.N) {
+                    b.setClip(filesDir, which, data, bars)
+                    b.version++
+                    ui.toast("Sent to ${PartNames.NAMES[which]}. It plays when that part plays (Song page: play mode).")
+                }
+            }
+            .setCancelable(false)
+            .create()
+        d.show()
+    }
+
+    /** Play the song list from the top, or stop it. */
+    fun playSong() {
+        val b = engine.bank
+        if (engine.playing && b.songOn) {
+            engine.stop()
+            return
+        }
+        if (b.songLen == 0) {
+            ui.toast("The song is empty. Add some parts on the Song page first.")
+            return
+        }
+        if (engine.follow) {
+            b.songOn = true
+            ui.toast("Song mode on. In FOLLOW sync, press play on the FM-1 to start the song.")
+            return
+        }
+        b.songOn = true
+        if (engine.playing) engine.stop()
+        engine.play()
+    }
+
+    private fun paintCues() {
+        val b = engine.bank
+        val blink = (System.currentTimeMillis() / 250L) % 2L == 0L
+        val key = "${b.cur}|${b.cueReq}|$blink|${b.songOn}|${b.slot.joinToString()}|${b.version}"
+        if (key == cueKey) return
+        cueKey = key
+        for (k in cueBtns.indices) {
+            val btn = cueBtns[k]
+            val i = b.slot[k].coerceIn(0, PartBank.N - 1)
+            val col = SongScreen.PARTCOL[i]
+            btn.text = "${k + 1} " + PartNames.SHORT[i] + (if (b.parts[i].hasClip()) " ●" else "")
+            when {
+                i == b.cur -> {
+                    btn.background = ui.bg(col, 8)
+                    btn.setTextColor(android.graphics.Color.BLACK)
+                }
+                i == b.cueReq && blink -> {
+                    btn.background = ui.bg(Theme.TEXT, 8)
+                    btn.setTextColor(android.graphics.Color.BLACK)
+                }
+                else -> {
+                    btn.background = ui.bg(Theme.PANEL2, 8, col, 2)
+                    btn.setTextColor(if (b.parts[i].used) Theme.TEXT else Theme.DIM)
+                }
+            }
+        }
     }
 
     private fun changeBpm(d: Int) {
@@ -349,7 +514,9 @@ class MainActivity : Activity() {
             statusText.setTextColor(Theme.DIM)
             val sl = syncLine()
             statusText.text = if (engine.playing && engine.curStep >= 0) {
-                "Playing · step ${engine.curStep + 1} / ${Cfg.STEPS}" + (if (sl.isNotEmpty()) " · $sl" else "")
+                "Playing ${PartNames.NAMES[engine.bank.cur]} · step ${engine.curStep + 1} / ${Cfg.STEPS}" +
+                    (if (engine.bank.songOn) " · song ${engine.bank.songIdx + 1}/${engine.bank.songLen}" else "") +
+                    (if (sl.isNotEmpty()) " · $sl" else "")
             } else {
                 sl.ifEmpty { "Ready. Press ▶ to play." }
             }
@@ -368,6 +535,33 @@ class MainActivity : Activity() {
             statusText.setTextColor(Theme.RED)
             statusText.text = "● Recording the whole mix " + clock(mr.frames / Cfg.SR) +
                 " · " + String.format(Locale.US, "%.1f", mr.bytesWritten / 1048576.0) + " MB. Press ■ REC to stop."
+        }
+        paintCues()
+        val bk = engine.bank
+        if (bk.recState == 4) recPartDone()
+        if (bk.recCancelled) {
+            bk.recCancelled = false
+            ui.toast("The part recording was shorter than 1 bar, so it was not kept")
+        }
+        val rp = when (bk.recState) {
+            1 -> "WAIT BAR 1..."
+            2 -> if (bk.recStopWanted) "STOPPING..." else "■ REC PART ${bk.recBars + 1}"
+            else -> "● REC PART"
+        }
+        if (recPartBtn.text.toString() != rp) recPartBtn.text = rp
+        ui.styleButton(recPartBtn, bk.recState == 1 || bk.recState == 2, Theme.RED)
+        if (bk.recState == 2) {
+            statusText.setTextColor(Theme.RED)
+            statusText.text = "● Recording a part · bar ${bk.recBars + 1}. Press the button again to stop at the end of the bar."
+        }
+        if (bk.songEnded) {
+            bk.songEnded = false
+            ui.toast("End of the song")
+        }
+        if (bk.version != lastPartVersion) {
+            lastPartVersion = bk.version
+            // the patterns changed to another part: redraw the pages that show patterns
+            if (cur in intArrayOf(0, 1, 2, 6, 7, 9)) screens[cur].onShow()
         }
         screens[cur].onTick()
     }
