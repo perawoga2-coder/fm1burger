@@ -344,6 +344,13 @@ class Engine {
     }
 
     private fun stepTrigger(s: Int) {
+        for (p in pads) {
+            if (p.on[s] && p.data != null) {
+                p.gain = p.lvl[s]
+                p.pos = 0
+                p.playing = true
+            }
+        }
         for (t in tracks) {
             if (t.data == null) continue
             if (t.loop) {
