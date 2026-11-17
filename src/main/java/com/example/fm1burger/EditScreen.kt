@@ -43,6 +43,9 @@ class EditScreen(private val a: MainActivity) : Screen {
         content.addView(ui.text("Drag on the waveform to select a part. Without a selection, the whole sample is used.", 12f, Theme.DIM))
 
         row(
+            "● Record new sample (any input)" to { a.flow.recordForEdit() }
+        )
+        row(
             "Play" to { playSel() },
             "Stop" to { a.engine.previewStop() },
             "Select all" to { wave.setSelection(0f, 0f); updateInfo() }
