@@ -14,6 +14,7 @@ import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -22,9 +23,10 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * R = record with a microphone. Tap R: a big window shows the timer and the level.
- *     Press STOP & SAVE: the sound is saved, put in the track and played once.
+ * R = record with a microphone. Tap R: a big window shows the timer, the level and a boost slider.
+ *     Press STOP & SAVE: the sound is cleaned, saved, put in the track and played once.
  * S = sample the FM-1 (USB or line in), same window, then opens in the editor.
+ * Edit tab: "Record new sample" records from any input and opens the result in the editor.
  * Long press R or S opens the options.
  */
 class RecordFlow(private val a: MainActivity) {
@@ -35,20 +37,23 @@ class RecordFlow(private val a: MainActivity) {
     private var lastNote = -1
     private var discard = false
     private var devName = ""
+    private var lastGain = 1f
     private var recDialog: AlertDialog? = null
     private val handler = Handler(Looper.getMainLooper())
 
     fun active(): Boolean = a.recorder.running
 
+    private fun where(): String = if (recTrack < 0) "new sample" else "track ${recTrack + 1}"
+
     /** One line for the header while recording. */
     fun statusLine(): String {
         val r = a.recorder
         if (!r.running) return ""
-        val what = if (recLabel == "FM1") "SAMPLING FM-1" else "REC MIC"
-        if (r.waitingGate) return "● $what track ${recTrack + 1}: waiting for the next bar..."
+        val what = if (recLabel == "FM1") "SAMPLING FM-1" else "REC"
+        if (r.waitingGate) return "● $what ${where()}: waiting for the next bar..."
         var s = String.format(
-            Locale.US, "● %s track %d · %.1f / %d s · level %d%%",
-            what, recTrack + 1, r.seconds, recMax.toInt(), (r.peak * 100).toInt()
+            Locale.US, "● %s %s · %.1f / %d s · level %d%%",
+            what, where(), r.seconds, recMax.toInt(), (r.peak * 100).toInt()
         )
         if (r.clipped) s += " · CLIPPING, lower the volume"
         return s
@@ -59,7 +64,7 @@ class RecordFlow(private val a: MainActivity) {
     fun isMicTrack(ti: Int): Boolean = isRecordingTrack(ti) && recLabel != "FM1"
 
     private fun stopOrToast(ti: Int) {
-        if (recTrack == ti) a.recorder.stop() else a.ui.toast("Another track is recording. Stop it first.")
+        if (recTrack == ti) a.recorder.stop() else a.ui.toast("Another recording is running. Stop it first.")
     }
 
     // ---------------- R: microphone ----------------
@@ -80,6 +85,15 @@ class RecordFlow(private val a: MainActivity) {
             return
         }
         recordDialog(ti)
+    }
+
+    /** The Edit tab: record from any input into a new sample and open it in the editor. */
+    fun recordForEdit() {
+        if (a.recorder.running) {
+            a.ui.toast("Another recording is running. Stop it first.")
+            return
+        }
+        recordDialog(-1)
     }
 
     // ---------------- S: sample the FM-1 ----------------
@@ -137,7 +151,7 @@ class RecordFlow(private val a: MainActivity) {
         val devs = a.recorder.inputs()
         val box = ui.col()
         box.setPadding(ui.dp(20), ui.dp(10), ui.dp(20), ui.dp(4))
-        box.addView(ui.text("Microphone", 13f, Theme.DIM))
+        box.addView(ui.text("Input", 13f, Theme.DIM))
         val names = ArrayList<String>()
         names.add("Automatic (recommended)")
         for (d in devs) names.add(a.recorder.label(d))
@@ -147,13 +161,14 @@ class RecordFlow(private val a: MainActivity) {
         val len = ui.spinner(listOf("Manual stop (max 60 s)", "1 bar", "2 bars", "4 bars")) {}
         box.addView(len)
         val wait = check("Start at the next bar (only while playing)", false)
-        val auto = check("Auto level to 70% after recording", true)
+        val auto = check("Auto level to 90% after recording", true)
         box.addView(wait)
         box.addView(auto)
-        box.addView(tip("An external mic on the 3.5 mm jack or a USB mic shows up in the list when it is plugged in."))
+        box.addView(tip("An external mic on the 3.5 mm jack, a USB mic or the FM-1 over USB shows up in the list when it is plugged in."))
 
+        val title = if (ti < 0) "Record a new sample" else "Record into track ${ti + 1}"
         AlertDialog.Builder(a)
-            .setTitle("Record into track ${ti + 1}")
+            .setTitle(title)
             .setView(ScrollView(a).also { it.addView(box) })
             .setPositiveButton("Record") { _, _ ->
                 val dev = devs.getOrNull(src.selectedItemPosition - 1)
@@ -161,7 +176,7 @@ class RecordFlow(private val a: MainActivity) {
                 val maxSec = if (bars == 0) 60.0 else bars * 4 * 60.0 / a.engine.bpmF
                 val gate: (() -> Boolean)? =
                     if (wait.isChecked && a.engine.playing) makeBarGate() else null
-                begin(ti, dev, maxSec, gate, auto.isChecked, "Rec", -1, false)
+                begin(ti, dev, maxSec, gate, auto.isChecked, "Rec", -1, ti < 0)
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -197,7 +212,7 @@ class RecordFlow(private val a: MainActivity) {
         val labels = listOf("Manual stop (max 60 s)", "2 s", "4 s", "8 s", "16 s", "30 s")
         val lenSp = ui.spinner(labels) {}
         box.addView(lenSp)
-        val auto = check("Auto level to 70% after sampling", true)
+        val auto = check("Auto level to 90% after sampling", true)
         box.addView(auto)
         box.addView(tip("The line / 3.5 mm input can clip. If you see CLIPPING, lower the volume on the FM-1 and sample again."))
 
@@ -241,7 +256,35 @@ class RecordFlow(private val a: MainActivity) {
         box.addView(bar, lp)
         box.addView(sub)
 
-        val title = if (sampling) "Sampling the FM-1 into track ${ti + 1}" else "Recording into track ${ti + 1}"
+        val gl = ui.text("", 13f, Theme.TEXT)
+        gl.setPadding(0, ui.dp(10), 0, 0)
+        val gs = SeekBar(a)
+        gs.max = 70
+        gs.progress = ((lastGain - 1f) * 10f).toInt().coerceIn(0, 70)
+        val showGain = {
+            gl.text = String.format(
+                Locale.US, "Boost x%.1f  (raise it if the sound is too quiet)", lastGain
+            )
+        }
+        showGain()
+        gs.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                lastGain = 1f + p / 10f
+                a.recorder.gain = lastGain
+                showGain()
+            }
+
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
+        box.addView(gl)
+        box.addView(gs)
+
+        val title = when {
+            sampling -> "Sampling the FM-1 into ${where()}"
+            ti < 0 -> "Recording a new sample"
+            else -> "Recording into track ${ti + 1}"
+        }
         val d = AlertDialog.Builder(a)
             .setTitle(title)
             .setView(box)
@@ -264,8 +307,12 @@ class RecordFlow(private val a: MainActivity) {
                 }
                 bar.progress = (r.peak * 100).toInt().coerceIn(0, 100)
                 var s = "Input: $devName\nSound level: ${(r.peak * 100).toInt()}%"
-                if (r.seconds > 1.0 && r.peak < 0.01f) s += "\nNo sound is coming in!"
-                if (r.clipped) s += "\nCLIPPING: too loud, lower the volume"
+                if (r.seconds > 1.0 && r.peak < 0.01f) {
+                    s += "\nNo sound is coming in! Close other apps that use the microphone."
+                } else if (r.seconds > 1.0 && r.peak < 0.08f) {
+                    s += "\nVery quiet: move closer or raise the boost."
+                }
+                if (r.clipped) s += "\nCLIPPING: too loud, lower the boost or the volume"
                 sub.text = s
                 handler.postDelayed(this, 100)
             }
@@ -319,6 +366,7 @@ class RecordFlow(private val a: MainActivity) {
         recLabel = base
         recMax = maxSec
         discard = false
+        a.recorder.gain = lastGain
         val done: (RecResult?) -> Unit = { res ->
             a.runOnUiThread { finish(res, ti, auto, base, note, edit) }
         }
@@ -342,19 +390,42 @@ class RecordFlow(private val a: MainActivity) {
         a.refreshCurrent()
     }
 
-    /** Cuts the silence before the sound starts and after it ends. */
-    private fun trimSilence(d: FloatArray): FloatArray {
+    // ---------------- cleaning the recording ----------------
+
+    /** Removes the constant offset some microphones add (it makes pops and wastes headroom). */
+    private fun removeDc(d: FloatArray) {
+        if (d.isEmpty()) return
+        var sum = 0.0
+        for (v in d) sum += v
+        val m = (sum / d.size).toFloat()
+        if (abs(m) < 0.00005f) return
+        for (i in d.indices) d[i] = d[i] - m
+    }
+
+    /** Cuts the silence before the sound starts and after it ends (keeps a natural tail). */
+    private fun trimSilence(d: FloatArray, rate: Int): FloatArray {
         val pk = Wav.peak(d)
         if (pk < 0.001f) return d
-        val thr = max(0.004f, pk * 0.03f)
+        val thr = max(0.003f, pk * 0.02f)
         var s = 0
         while (s < d.size && abs(d[s]) < thr) s++
         var e = d.size - 1
         while (e > s && abs(d[e]) < thr) e--
         if (e - s < 200) return d
-        val from = max(0, s - 300)
-        val to = min(d.size, e + 2000)
+        val from = max(0, s - rate / 50)
+        val to = min(d.size, e + rate * 3 / 10)
         return d.copyOfRange(from, to)
+    }
+
+    /** A very short fade at both ends so the sample never starts or stops with a click. */
+    private fun fadeEdges(d: FloatArray, rate: Int) {
+        val n = min(d.size / 2, rate / 200)
+        if (n < 2) return
+        for (i in 0 until n) {
+            val g = i.toFloat() / n
+            d[i] = d[i] * g
+            d[d.size - 1 - i] = d[d.size - 1 - i] * g
+        }
     }
 
     private fun finish(res: RecResult?, ti: Int, auto: Boolean, base: String, note: Int, edit: Boolean) {
@@ -374,7 +445,7 @@ class RecordFlow(private val a: MainActivity) {
                 "Nothing was recorded",
                 "Android gave no sound from: $devName.\n\n" +
                     "Check: the microphone permission is on, no other app is using the microphone, " +
-                    "then tap R and try again."
+                    "then try again."
             )
             return
         }
@@ -384,30 +455,34 @@ class RecordFlow(private val a: MainActivity) {
                 "The recording is silent",
                 "The app recorded from: $devName, but no sound came in " +
                     "(${String.format(Locale.US, "%.1f", res.data.size.toDouble() / res.rate)} s of silence). Nothing was saved.\n\n" +
-                    "Try: make a loud sound close to the microphone while recording. " +
+                    "Close other apps that use the microphone (voice chat, split screen with a voice app). " +
+                    "Make a loud sound close to the microphone while recording. " +
                     "If it is still silent, long press R and choose another microphone."
             )
             return
         }
         var d = res.data
-        if (edit) d = trimSilence(d)
+        removeDc(d)
+        d = trimSilence(d, res.rate)
         if (auto) {
             val p = Wav.peak(d)
             if (p > 0.001f) {
-                val g = 0.7f / p
+                val g = 0.9f / p
                 for (i in d.indices) d[i] = d[i] * g
             }
         }
+        fadeEdges(d, res.rate)
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val f = a.store.saveNew("${base}_$stamp", d, res.rate)
-        a.assignTrack(ti, f)
+        if (ti >= 0) a.assignTrack(ti, f)
         val secs = d.size.toDouble() / res.rate
         var clipNote = ""
         if (res.rawPeak >= 0.98f) {
-            clipNote = "\n\nThe input was clipping. Lower the volume and record again for a clean sound."
+            clipNote = "\n\nThe input was clipping. Lower the boost or the volume and record again for a clean sound."
         }
         if (edit) {
-            a.ui.toast("Sampled ${f.name} into track ${ti + 1}. It is open in Edit: trim, fade, then Save.$clipNote")
+            val into = if (ti >= 0) " into track ${ti + 1}" else ""
+            a.ui.toast("Saved ${f.name}$into. It is open in Edit: trim, fade, then Save.$clipNote")
             a.openEdit(f)
         } else {
             val pv = Wav.resample(d, res.rate, Cfg.SR)
