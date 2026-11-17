@@ -27,6 +27,8 @@ class Engine {
     val tracks = Array(Cfg.TRACKS) { Track(it) }
     val pads = Array(Cfg.PADS) { PadVoice() }
     val drumFx = FxChain()
+    val bass = Bassline()
+    val analog = AnalogSynth()
     private val preview = PadVoice()
 
     @Volatile var bpmF = 120.0
@@ -257,6 +259,10 @@ class Engine {
                 pm = drumFx.process(pm * pv, bpmNow, beatPos)
                 l += pm
                 r += pm
+                val bz = bass.render()
+                val sy = analog.fx.process(analog.render(), bpmNow, beatPos)
+                l += bz + sy
+                r += bz + sy
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
@@ -363,6 +369,7 @@ class Engine {
     }
 
     private fun stepTrigger(s: Int) {
+        bass.step(s, bpmF)
         for (p in pads) {
             if (p.on[s] && p.data != null) {
                 p.gain = p.lvl[s]
