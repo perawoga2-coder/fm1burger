@@ -65,4 +65,8 @@ class PadVoice {
     // drum sequencer pattern of this pad (one row on the Pads page)
     val on = BooleanArray(Cfg.STEPS)
     val lvl = FloatArray(Cfg.STEPS) { 1f }
+
+    // volume and mute of this drum row
+    @Volatile var volume = 1f
+    @Volatile var mute = false
 }
