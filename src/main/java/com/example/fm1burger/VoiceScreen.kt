@@ -26,6 +26,13 @@ class VoiceScreen(private val a: MainActivity) : Screen {
     private lateinit var takeBtn: Button
     private lateinit var info: TextView
     private lateinit var levelBar: ProgressBar
+    private lateinit var wave: WaveView
+    private lateinit var eqView: EqView
+    private lateinit var humBtn: Button
+    private lateinit var playBtn: Button
+    private lateinit var pauseBtn: Button
+    private lateinit var stopBtn: Button
+    private var lastState = -1
     private val roomBtns = ArrayList<Button>()
     private val refreshers = ArrayList<() -> Unit>()
     private var takeActive = false
@@ -53,10 +60,27 @@ class VoiceScreen(private val a: MainActivity) : Screen {
         r1.addView(muteBtn, ui.w(1f, 3))
         content.addView(r1, ui.fullWidth(6))
 
+        val tr = ui.row()
+        playBtn = ui.button("▶ Play") {
+            if (e.playing && e.paused) e.pause() else if (!e.playing) e.play()
+        }
+        pauseBtn = ui.button("|| Pause") {
+            if (e.playing && !e.paused) e.pause()
+        }
+        stopBtn = ui.button("■ Stop") { e.stop() }
+        tr.addView(playBtn, ui.w(1f, 3))
+        tr.addView(pauseBtn, ui.w(1f, 3))
+        tr.addView(stopBtn, ui.w(1f, 3))
+        content.addView(tr, ui.fullWidth(4))
+
         content.addView(ui.text("Input level", 12f, Theme.DIM), ui.fullWidth(6))
         levelBar = ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal)
         levelBar.max = 100
         content.addView(levelBar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(16)))
+
+        wave = WaveView(a)
+        wave.ch = v
+        content.addView(wave, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(110)))
 
         content.addView(ui.text("Room", 14f, Theme.ACCENT, true), ui.fullWidth(10))
         val rr = ui.row()
@@ -72,7 +96,7 @@ class VoiceScreen(private val a: MainActivity) : Screen {
         content.addView(rr, ui.fullWidth(4))
         content.addView(
             ui.text(
-                "Normal: a little room. Bathroom: short and bright. Hall: big and long. Mountain top: far away echoes.",
+                "Normal: a little room. Bathroom: short and bright. Hall: big and long. Mountain top: far away echoes. Dry: no effect.",
                 12f, Theme.DIM
             ), ui.fullWidth(2)
         )
@@ -103,6 +127,46 @@ class VoiceScreen(private val a: MainActivity) : Screen {
         )
         content.addView(panel, ui.fullWidth(8))
 
+        val np = ui.panel()
+        np.addView(ui.text("Noise cleaning", 14f, Theme.ACCENT, true))
+        np.addView(
+            ui.text(
+                "Noise gate: raise it until the background noise disappears when you are quiet " +
+                    "(yellow lines in the wave show the level). High cut removes hiss. Hum filter removes mains buzz.",
+                12f, Theme.DIM
+            )
+        )
+        val hr = ui.row()
+        hr.addView(slider("Noise gate (0 = off)", { v.gate }, { v.gate = it }).view, ui.w(1f, 4))
+        hr.addView(slider("High cut (0 = off)", { v.highCut }, { v.highCut = it }).view, ui.w(1f, 4))
+        np.addView(hr)
+        humBtn = ui.button("Hum filter: off") {
+            v.hum = (v.hum + 1) % 3
+            refreshButtons()
+        }
+        np.addView(humBtn, ui.fullWidth(4))
+        content.addView(np, ui.fullWidth(8))
+
+        val ep = ui.panel()
+        ep.addView(ui.text("Equalizer (frequency graph)", 14f, Theme.ACCENT, true))
+        ep.addView(
+            ui.text(
+                "Blue = your voice now. Orange = the equalizer. Drag a dot: left/right = frequency, up/down = louder/quieter. " +
+                    "1 lows, 2 mud, 3 mid, 4 presence, 5 highs.",
+                12f, Theme.DIM
+            )
+        )
+        eqView = EqView(a)
+        eqView.ch = v
+        ep.addView(eqView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(200)))
+        val pr = ui.row()
+        pr.addView(ui.button("Flat") { eq(floatArrayOf(100f, 400f, 1500f, 4000f, 10000f), floatArrayOf(0f, 0f, 0f, 0f, 0f)) }, ui.w(1f, 3))
+        pr.addView(ui.button("Clear voice") { eq(floatArrayOf(100f, 300f, 1500f, 4000f, 10000f), floatArrayOf(-3f, -3f, 0f, 3f, 2f)) }, ui.w(1f, 3))
+        pr.addView(ui.button("Warm") { eq(floatArrayOf(100f, 300f, 1500f, 4000f, 10000f), floatArrayOf(3f, 2f, 0f, -1f, -2f)) }, ui.w(1f, 3))
+        pr.addView(ui.button("Radio") { eq(floatArrayOf(200f, 500f, 1500f, 3000f, 6000f), floatArrayOf(-12f, -3f, 4f, 3f, -10f)) }, ui.w(1f, 3))
+        ep.addView(pr, ui.fullWidth(4))
+        content.addView(ep, ui.fullWidth(8))
+
         content.addView(ui.text("Record a voice take", 14f, Theme.ACCENT, true), ui.fullWidth(10))
         content.addView(
             ui.text(
@@ -127,6 +191,14 @@ class VoiceScreen(private val a: MainActivity) : Screen {
         val r = ui.row()
         for (x in rows) r.addView(x.view, ui.w(1f, 4))
         return r
+    }
+
+    private fun eq(f: FloatArray, g: FloatArray) {
+        for (i in 0 until 5) {
+            v.eqF[i] = f[i]
+            v.eqG[i] = g[i]
+        }
+        eqView.invalidate()
     }
 
     private fun toggleMic() {
@@ -188,6 +260,8 @@ class VoiceScreen(private val a: MainActivity) : Screen {
     private fun refreshButtons() {
         micBtn.text = if (v.on) "Mic: ON" else "Mic: OFF"
         ui.styleButton(micBtn, v.on, Theme.GREEN)
+        humBtn.text = when (v.hum) { 1 -> "Hum filter: 50 Hz"; 2 -> "Hum filter: 60 Hz"; else -> "Hum filter: off" }
+        ui.styleButton(humBtn, v.hum > 0, Theme.GREEN)
         muteBtn.text = if (v.mute) "Unmute voice" else "Mute voice"
         ui.styleButton(muteBtn, v.mute, Theme.RED)
         for (i in roomBtns.indices) ui.styleButton(roomBtns[i], v.preset == i)
@@ -195,13 +269,27 @@ class VoiceScreen(private val a: MainActivity) : Screen {
         ui.styleButton(takeBtn, takeActive, Theme.RED)
     }
 
+    private fun refreshTransport() {
+        val st = if (!e.playing) 0 else if (e.paused) 2 else 1
+        if (st == lastState) return
+        lastState = st
+        ui.styleButton(playBtn, st == 1)
+        ui.styleButton(pauseBtn, st == 2)
+        ui.styleButton(stopBtn, false)
+    }
+
     override fun onShow() {
+        lastState = -1
+        refreshTransport()
         for (r in refreshers) r()
         refreshButtons()
     }
 
     override fun onTick() {
+        refreshTransport()
         levelBar.progress = (v.inLevel * 100f).toInt().coerceIn(0, 100)
+        wave.invalidate()
+        eqView.invalidate()
         if (takeActive && !v.taking) endTake()
         info.text = if (takeActive) {
             String.format(java.util.Locale.US, "Recording take: %.1f s", v.takeSeconds())
