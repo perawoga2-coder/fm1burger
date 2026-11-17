@@ -26,6 +26,9 @@ class Recorder(ctx: Context) {
     @Volatile var waitingGate = false
         private set
 
+    /** Software boost applied while recording (1.0 = none). Can be changed live. */
+    @Volatile var gain = 1f
+
     fun inputs(): List<AudioDeviceInfo> {
         val allowed = setOf(
             AudioDeviceInfo.TYPE_BUILTIN_MIC,
@@ -155,7 +158,7 @@ class Recorder(ctx: Context) {
                     while (i + nch <= got && n < maxFrames) {
                         var s = 0f
                         for (c in 0 until nch) s += buf[i + c] / 32768f
-                        s /= nch
+                        s = (s / nch * gain).coerceIn(-1f, 1f)
                         out[n++] = s
                         val a = abs(s)
                         if (a > pk) pk = a
