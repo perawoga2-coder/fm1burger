@@ -71,6 +71,7 @@ class MainActivity : Activity() {
         buildUi()
         engine.start()
         project.load()
+        SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
         showTab(0)
         handler.post(ticker)
 
@@ -82,11 +83,13 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         project.save()
+        SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog)
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         project.save()
+        SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog)
         recorder.stop()
         engine.shutdown()
         midi.shutdown()
@@ -145,11 +148,12 @@ class MainActivity : Activity() {
         editScreen = EditScreen(this)
         val fx = FxScreen(this)
         val pads = PadsScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads)
+        val synth = SynthScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth)
 
         // tabs
         val tabRow = ui.row()
-        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads")
+        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
