@@ -60,6 +60,20 @@ class Project(private val a: MainActivity) {
             val ps = JSONArray()
             for (p in e.pads) ps.put(p.name)
             o.put("pads", ps)
+            val po = JSONArray()
+            val pl = JSONArray()
+            for (p in e.pads) {
+                val ao = JSONArray()
+                val al = JSONArray()
+                for (k in 0 until Cfg.STEPS) {
+                    ao.put(p.on[k])
+                    al.put(p.lvl[k].toDouble())
+                }
+                po.put(ao)
+                pl.put(al)
+            }
+            o.put("padOn", po)
+            o.put("padLvl", pl)
             file.writeText(o.toString())
         } catch (ex: Exception) {
         }
@@ -117,6 +131,18 @@ class Project(private val a: MainActivity) {
                 for (i in 0 until minOf(ps.length(), Cfg.PADS)) {
                     val name = ps.optString(i, "")
                     if (name.isNotEmpty() && a.store.file(name).exists()) a.assignPad(i, a.store.file(name))
+                }
+            }
+            val po = o.optJSONArray("padOn")
+            val pl = o.optJSONArray("padLvl")
+            if (po != null) {
+                for (i in 0 until minOf(po.length(), Cfg.PADS)) {
+                    val ao = po.optJSONArray(i) ?: continue
+                    val al = pl?.optJSONArray(i)
+                    for (k in 0 until minOf(ao.length(), Cfg.STEPS)) {
+                        e.pads[i].on[k] = ao.optBoolean(k, false)
+                        if (al != null && k < al.length()) e.pads[i].lvl[k] = al.optDouble(k, 1.0).toFloat()
+                    }
                 }
             }
         } catch (ex: Exception) {
