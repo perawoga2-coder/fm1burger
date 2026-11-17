@@ -1,0 +1,125 @@
+package com.example.fm1burger
+
+import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** Saves and restores the whole session (tracks, steps, effects, pads) as one small JSON file. */
+class Project(private val a: MainActivity) {
+
+    private val file = File(a.filesDir, "project.json")
+
+    fun save() {
+        try {
+            val e = a.engine
+            val o = JSONObject()
+            o.put("bpm", e.bpm)
+            o.put("master", e.masterVol.toDouble())
+            o.put("padVol", e.padVol.toDouble())
+            val ts = JSONArray()
+            for (t in e.tracks) {
+                val j = JSONObject()
+                j.put("sample", t.sampleName)
+                j.put("vol", t.volume.toDouble())
+                j.put("pan", t.pan.toDouble())
+                j.put("mute", t.mute)
+                j.put("loop", t.loop)
+                j.put("pitch", t.pitch)
+                j.put("start", t.start.toDouble())
+                j.put("end", t.end.toDouble())
+                j.put("reverse", t.reverse)
+                val so = JSONArray()
+                val sp = JSONArray()
+                val sl = JSONArray()
+                for (s in t.steps) {
+                    so.put(s.on)
+                    sp.put(s.pitch)
+                    sl.put(s.level.toDouble())
+                }
+                j.put("stepOn", so)
+                j.put("stepPitch", sp)
+                j.put("stepLevel", sl)
+                val fo = JSONArray()
+                val fa = JSONArray()
+                val fb = JSONArray()
+                val ord = JSONArray()
+                val order = t.fx.order
+                for (i in 0 until FxChain.N) {
+                    fo.put(t.fx.on[i])
+                    fa.put(t.fx.a[i].toDouble())
+                    fb.put(t.fx.b[i].toDouble())
+                    ord.put(order[i])
+                }
+                j.put("fxOn", fo)
+                j.put("fxA", fa)
+                j.put("fxB", fb)
+                j.put("fxOrder", ord)
+                ts.put(j)
+            }
+            o.put("tracks", ts)
+            val ps = JSONArray()
+            for (p in e.pads) ps.put(p.name)
+            o.put("pads", ps)
+            file.writeText(o.toString())
+        } catch (ex: Exception) {
+        }
+    }
+
+    fun load() {
+        try {
+            if (!file.exists()) return
+            val e = a.engine
+            val o = JSONObject(file.readText())
+            e.bpm = o.optInt("bpm", 120)
+            e.masterVol = o.optDouble("master", 0.9).toFloat()
+            e.padVol = o.optDouble("padVol", 0.8).toFloat()
+            val ts = o.optJSONArray("tracks")
+            if (ts != null) {
+                for (i in 0 until minOf(ts.length(), Cfg.TRACKS)) {
+                    val j = ts.getJSONObject(i)
+                    val t = e.tracks[i]
+                    t.volume = j.optDouble("vol", 0.8).toFloat()
+                    t.pan = j.optDouble("pan", 0.0).toFloat()
+                    t.mute = j.optBoolean("mute", false)
+                    t.loop = j.optBoolean("loop", false)
+                    t.pitch = j.optInt("pitch", 0)
+                    t.start = j.optDouble("start", 0.0).toFloat()
+                    t.end = j.optDouble("end", 1.0).toFloat()
+                    t.reverse = j.optBoolean("reverse", false)
+                    val so = j.optJSONArray("stepOn")
+                    val sp = j.optJSONArray("stepPitch")
+                    val sl = j.optJSONArray("stepLevel")
+                    for (k in 0 until Cfg.STEPS) {
+                        val s = t.steps[k]
+                        if (so != null && k < so.length()) s.on = so.optBoolean(k, false)
+                        if (sp != null && k < sp.length()) s.pitch = sp.optInt(k, 0)
+                        if (sl != null && k < sl.length()) s.level = sl.optDouble(k, 1.0).toFloat()
+                    }
+                    val fo = j.optJSONArray("fxOn")
+                    val fa = j.optJSONArray("fxA")
+                    val fb = j.optJSONArray("fxB")
+                    for (k in 0 until FxChain.N) {
+                        if (fo != null && k < fo.length()) t.fx.on[k] = fo.optBoolean(k, false)
+                        if (fa != null && k < fa.length()) t.fx.a[k] = fa.optDouble(k, FxChain.DEF_A[k].toDouble()).toFloat()
+                        if (fb != null && k < fb.length()) t.fx.b[k] = fb.optDouble(k, FxChain.DEF_B[k].toDouble()).toFloat()
+                    }
+                    val ord = j.optJSONArray("fxOrder")
+                    if (ord != null && ord.length() == FxChain.N) {
+                        val arr = IntArray(FxChain.N) { ord.optInt(it, it) }
+                        if (arr.sortedArray().contentEquals(IntArray(FxChain.N) { it })) t.fx.order = arr
+                    }
+                    val name = j.optString("sample", "")
+                    if (name.isNotEmpty() && a.store.file(name).exists()) a.assignTrack(i, a.store.file(name))
+                }
+            }
+            val ps = o.optJSONArray("pads")
+            if (ps != null) {
+                for (i in 0 until minOf(ps.length(), Cfg.PADS)) {
+                    val name = ps.optString(i, "")
+                    if (name.isNotEmpty() && a.store.file(name).exists()) a.assignPad(i, a.store.file(name))
+                }
+            }
+        } catch (ex: Exception) {
+        }
+    }
+}
