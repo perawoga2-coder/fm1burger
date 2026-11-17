@@ -40,9 +40,10 @@ class MainActivity : Activity() {
 
     var sel = 0
     private var cur = 0
-    private var syncState = 0   // 0 off, 1 app sends clock, 2 follows the FM-1
+    private var syncState = 0   // 0 off, 1 LEAD (the app sends the clock), 2 FOLLOW (the FM-1 is the boss)
     private var syncNote = ""
     private var pendingBytes: ByteArray? = null
+    private var importTarget = -1
     private val handler = Handler(Looper.getMainLooper())
 
     private lateinit var screens: List<Screen>
@@ -202,8 +203,31 @@ class MainActivity : Activity() {
     }
 
     private fun toggleSync() {
-        if (syncState != 0) {
-            syncOff()
+        val now = when (syncState) {
+            1 -> "LEAD"
+            2 -> "FOLLOW"
+            else -> "off"
+        }
+        val items = arrayOf(
+            "FOLLOW the FM-1: the FM-1 is the boss. Start, stop and tempo come from the FM-1. Press play on the FM-1.",
+            "LEAD the FM-1: the app is the boss. The play button here starts and stops the FM-1 too.",
+            "Sync off"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Sync with the FM-1 (now: $now)")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> startSync(2)
+                    1 -> startSync(1)
+                    else -> syncOff()
+                }
+            }
+            .show()
+    }
+
+    private fun startSync(mode: Int) {
+        if (midi.connected) {
+            applySync(mode)
             return
         }
         val infos = midi.devices()
@@ -212,40 +236,40 @@ class MainActivity : Activity() {
             return
         }
         if (infos.size == 1) {
-            connectAndDetect(infos[0])
+            connectMidi(infos[0], mode)
         } else {
             val names = Array(infos.size) { midi.nameOf(infos[it]) }
             AlertDialog.Builder(this)
-                .setTitle("Which MIDI device?")
-                .setItems(names) { _, which -> connectAndDetect(infos[which]) }
+                .setTitle("Which MIDI device is the FM-1?")
+                .setItems(names) { _, which -> connectMidi(infos[which], mode) }
                 .show()
         }
     }
 
-    private fun connectAndDetect(info: android.media.midi.MidiDeviceInfo) {
+    private fun connectMidi(info: android.media.midi.MidiDeviceInfo, mode: Int) {
         syncNote = "Connecting to ${midi.nameOf(info)}..."
         midi.open(info) { ok ->
             if (!ok) {
                 syncNote = ""
                 ui.toast("Could not open the MIDI device")
             } else {
-                syncNote = "Listening for the FM-1 clock..."
-                handler.postDelayed({
-                    engine.stop()
-                    if (midi.clockActive()) {
-                        engine.follow = true
-                        engine.sendClock = false
-                        syncState = 2
-                        syncNote = "SYNC: following the clock of ${midi.deviceName}"
-                    } else {
-                        engine.follow = false
-                        engine.sendClock = true
-                        syncState = 1
-                        syncNote = "SYNC: no clock from the FM-1, so the app sends the clock to ${midi.deviceName}"
-                    }
-                }, 1200)
+                applySync(mode)
             }
         }
+    }
+
+    private fun applySync(mode: Int) {
+        engine.stop()
+        if (mode == 2) {
+            engine.follow = true
+            engine.sendClock = false
+            syncState = 2
+        } else {
+            engine.follow = false
+            engine.sendClock = true
+            syncState = 1
+        }
+        syncNote = ""
     }
 
     private fun syncOff() {
@@ -253,7 +277,17 @@ class MainActivity : Activity() {
         engine.follow = false
         engine.sendClock = false
         syncState = 0
-        syncNote = "SYNC off (MIDI stays connected for the pads)"
+        syncNote = if (midi.connected) "SYNC off (MIDI stays connected for the pads)" else ""
+    }
+
+    private fun syncLine(): String = when (syncState) {
+        1 -> "LEAD: the app sends the clock to ${midi.deviceName}. The play button starts the FM-1 too."
+        2 -> if (midi.clockActive()) {
+            "FOLLOW: clock from ${midi.deviceName} OK"
+        } else {
+            "FOLLOW: no clock from the FM-1 yet. Press play on the FM-1."
+        }
+        else -> syncNote
     }
 
     // ---------------- ticker ----------------
@@ -273,8 +307,8 @@ class MainActivity : Activity() {
         playBtn.text = if (engine.playing) "■" else "▶"
         ui.styleButton(playBtn, engine.playing)
         val sb = when (syncState) {
-            1 -> "SYNC ▶ FM-1"
-            2 -> "SYNC ◀ FM-1"
+            1 -> "SYNC: LEAD"
+            2 -> "SYNC: FOLLOW"
             else -> "SYNC"
         }
         if (syncBtn.text.toString() != sb) syncBtn.text = sb
@@ -295,10 +329,11 @@ class MainActivity : Activity() {
             statusText.text = rec
         } else {
             statusText.setTextColor(Theme.DIM)
+            val sl = syncLine()
             statusText.text = if (engine.playing && engine.curStep >= 0) {
-                "Playing · step ${engine.curStep + 1} / ${Cfg.STEPS}" + (if (syncNote.isNotEmpty()) " · $syncNote" else "")
+                "Playing · step ${engine.curStep + 1} / ${Cfg.STEPS}" + (if (sl.isNotEmpty()) " · $sl" else "")
             } else {
-                syncNote.ifEmpty { "Ready. Press ▶ to play." }
+                sl.ifEmpty { "Ready. Press ▶ to play." }
             }
         }
         screens[cur].onTick()
@@ -316,6 +351,28 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(title)
             .setItems(items) { _, which -> cb(if (which == 0) null else files[which - 1]) }
+            .show()
+    }
+
+    /** The L button: load a sample into a track from the library, or from this device. */
+    fun loadDialog(i: Int) {
+        val files = store.list()
+        val items = ArrayList<String>()
+        items.add("Browse this device (files, downloads, SD card)...")
+        items.add("(empty this slot)")
+        for (f in files) items.add(f.name)
+        AlertDialog.Builder(this)
+            .setTitle("Load into track ${i + 1}")
+            .setItems(items.toTypedArray()) { _, which ->
+                when (which) {
+                    0 -> {
+                        importTarget = i
+                        importFiles(false)
+                    }
+                    1 -> assignTrack(i, null)
+                    else -> assignTrack(i, files[which - 2])
+                }
+            }
             .show()
     }
 
@@ -366,11 +423,11 @@ class MainActivity : Activity() {
 
     // ---------------- import / export ----------------
 
-    fun importFiles() {
+    fun importFiles(multiple: Boolean = true) {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
         i.addCategory(Intent.CATEGORY_OPENABLE)
         i.type = "*/*"
-        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
         startActivityForResult(i, REQ_IMPORT)
     }
 
@@ -386,6 +443,10 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_IMPORT && (resultCode != RESULT_OK || data == null)) {
+            importTarget = -1
+            return
+        }
         if (resultCode != RESULT_OK || data == null) return
         if (requestCode == REQ_IMPORT) {
             val uris = ArrayList<Uri>()
@@ -395,7 +456,14 @@ class MainActivity : Activity() {
             } else {
                 data.data?.let { uris.add(it) }
             }
-            for (u in uris) importUri(u)
+            val imported = ArrayList<File>()
+            for (u in uris) {
+                val f = importUri(u)
+                if (f != null) imported.add(f)
+            }
+            val target = importTarget
+            importTarget = -1
+            if (target >= 0 && imported.isNotEmpty()) assignTrack(target, imported[0])
             libraryScreen.refresh()
         } else if (requestCode == REQ_EXPORT) {
             val uri = data.data ?: return
@@ -421,24 +489,26 @@ class MainActivity : Activity() {
         return "Imported.wav"
     }
 
-    private fun importUri(uri: Uri) {
+    private fun importUri(uri: Uri): File? {
         try {
             val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
             if (bytes == null || bytes.size > 40 * 1024 * 1024) {
                 ui.toast("File unreadable or too large (max 40 MB)")
-                return
+                return null
             }
             val p = Wav.parse(bytes)
             if (p == null) {
                 ui.toast("Only WAV files (16 bit, 24 bit or float) can be imported")
-                return
+                return null
             }
             var base = displayName(uri)
             if (base.lowercase(Locale.ROOT).endsWith(".wav")) base = base.substring(0, base.length - 4)
             val f = store.saveNew(base.ifEmpty { "Imported" }, p.data, p.rate)
             ui.toast("Imported ${f.name} (stereo files are mixed to mono)")
+            return f
         } catch (e: Exception) {
             ui.toast("Import failed: ${e.message}")
+            return null
         }
     }
 }
