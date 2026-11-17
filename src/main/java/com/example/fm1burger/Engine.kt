@@ -32,6 +32,7 @@ class Engine {
     val analogSeq = AnalogSeq(analog)
     val vocal = VocalChannel()
     val mixRec = MixRecorder()
+    val bank = PartBank(this)
     private val preview = PadVoice()
 
     @Volatile var bpmF = 120.0
@@ -269,6 +270,9 @@ class Engine {
                 vocal.render()
                 l += vocal.outL
                 r += vocal.outR
+                bank.renderClip()
+                l += bank.outL
+                r += bank.outR
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
@@ -282,6 +286,7 @@ class Engine {
                 out[f * 2 + 1] = (r * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             }
 
+            bank.feedRec(out)
             mixRec.feed(out)
             for (i in 0 until Cfg.TRACKS) tracks[i].peak = tpk[i]
             masterPeak = mpk
@@ -317,6 +322,7 @@ class Engine {
             paused = false
             curStep = -1
             for (t in tracks) t.playing = false
+            bank.onTransportStop(bpmF)
         }
         if (startReq) {
             startReq = false
@@ -327,6 +333,7 @@ class Engine {
             beatPos = 0.0
             curStep = -1
             for (t in tracks) t.playing = false
+            if (bank.songOn) bank.songStart() else bank.whileStopped()
             if (!follow && sendClock) send(0xFA, t0 + latencyNs + off)
         }
         if (pauseReq) {
@@ -344,6 +351,17 @@ class Engine {
         }
         for (p in pads) padRequest(p)
         padRequest(preview)
+        if (!playing || paused) bank.whileStopped()
+    }
+
+    /** Stop from inside the audio thread (used when the song reaches its end). */
+    private fun stopHere(t0: Long) {
+        if (playing && !follow && sendClock) send(0xFC, t0 + latencyNs + offsetMs * 1_000_000L)
+        playing = false
+        paused = false
+        curStep = -1
+        for (t in tracks) t.playing = false
+        bank.onTransportStop(bpmF)
     }
 
     private fun padRequest(p: PadVoice) {
@@ -360,6 +378,7 @@ class Engine {
     }
 
     private fun onTick(frame: Int, t0: Long) {
+        if (!playing) return
         beatPos = tickCount / 24.0
         if (!follow && sendClock) {
             send(
@@ -369,6 +388,16 @@ class Engine {
         }
         if (tickCount % 6L == 0L) {
             val s = ((tickCount / 6L) % Cfg.STEPS).toInt()
+            if (s == 0) {
+                val first = tickCount == 0L
+                if (!first && !bank.onBar()) {
+                    stopHere(t0)
+                    return
+                }
+                bank.barStart(frame, first)
+            } else {
+                bank.onStep(s, bpmF)
+            }
             curStep = s
             stepTrigger(s)
         }
@@ -376,6 +405,14 @@ class Engine {
     }
 
     private fun stepTrigger(s: Int) {
+        if (bank.silentNow()) {
+            // this part plays its recording only: no new notes, but let held synth notes end
+            val en = analogSeq.enabled
+            analogSeq.enabled = false
+            analogSeq.step(s)
+            analogSeq.enabled = en
+            return
+        }
         bass.step(s, bpmF)
         analogSeq.step(s)
         for (p in pads) {
