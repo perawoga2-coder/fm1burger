@@ -74,6 +74,25 @@ class Project(private val a: MainActivity) {
             }
             o.put("padOn", po)
             o.put("padLvl", pl)
+            val pvv = JSONArray()
+            val pmm = JSONArray()
+            for (p in e.pads) {
+                pvv.put(p.volume.toDouble())
+                pmm.put(p.mute)
+            }
+            o.put("padRowVol", pvv)
+            o.put("padRowMute", pmm)
+            val dfo = JSONArray()
+            val dfa = JSONArray()
+            val dfb = JSONArray()
+            for (i in 0 until FxChain.N) {
+                dfo.put(e.drumFx.on[i])
+                dfa.put(e.drumFx.a[i].toDouble())
+                dfb.put(e.drumFx.b[i].toDouble())
+            }
+            o.put("drumFxOn", dfo)
+            o.put("drumFxA", dfa)
+            o.put("drumFxB", dfb)
             file.writeText(o.toString())
         } catch (ex: Exception) {
         }
@@ -144,6 +163,20 @@ class Project(private val a: MainActivity) {
                         if (al != null && k < al.length()) e.pads[i].lvl[k] = al.optDouble(k, 1.0).toFloat()
                     }
                 }
+            }
+            val pvv = o.optJSONArray("padRowVol")
+            val pmm = o.optJSONArray("padRowMute")
+            for (i in 0 until Cfg.PADS) {
+                if (pvv != null && i < pvv.length()) e.pads[i].volume = pvv.optDouble(i, 1.0).toFloat()
+                if (pmm != null && i < pmm.length()) e.pads[i].mute = pmm.optBoolean(i, false)
+            }
+            val dfo = o.optJSONArray("drumFxOn")
+            val dfa = o.optJSONArray("drumFxA")
+            val dfb = o.optJSONArray("drumFxB")
+            for (k in 0 until FxChain.N) {
+                if (dfo != null && k < dfo.length()) e.drumFx.on[k] = dfo.optBoolean(k, false)
+                if (dfa != null && k < dfa.length()) e.drumFx.a[k] = dfa.optDouble(k, FxChain.DEF_A[k].toDouble()).toFloat()
+                if (dfb != null && k < dfb.length()) e.drumFx.b[k] = dfb.optDouble(k, FxChain.DEF_B[k].toDouble()).toFloat()
             }
         } catch (ex: Exception) {
         }
