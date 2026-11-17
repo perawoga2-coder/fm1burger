@@ -29,6 +29,8 @@ class Engine {
     val drumFx = FxChain()
     val bass = Bassline()
     val analog = AnalogSynth()
+    val vocal = VocalChannel()
+    val mixRec = MixRecorder()
     private val preview = PadVoice()
 
     @Volatile var bpmF = 120.0
@@ -263,6 +265,9 @@ class Engine {
                 val sy = analog.fx.process(analog.render(), bpmNow, beatPos)
                 l += bz + sy
                 r += bz + sy
+                vocal.render()
+                l += vocal.outL
+                r += vocal.outR
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
@@ -276,6 +281,7 @@ class Engine {
                 out[f * 2 + 1] = (r * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             }
 
+            mixRec.feed(out)
             for (i in 0 until Cfg.TRACKS) tracks[i].peak = tpk[i]
             masterPeak = mpk
 
