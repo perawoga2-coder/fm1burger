@@ -5,11 +5,13 @@ import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 
 /**
  * Pads: 8 pads you can tap, and below them a drum sequencer.
  * Each pad is one row of 16 steps. Tap a cell to turn it on (full), tap again for medium,
  * again for soft, again to turn it off. The pattern plays together with the 4 tracks.
+ * Every row has its own mute button and volume. Play / Pause / Stop are on this page too.
  */
 class PadsScreen(private val a: MainActivity) : Screen {
 
@@ -19,8 +21,22 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private val content = ui.col()
     private val pads = ArrayList<Button>()
     private val labels = ArrayList<Button>()
+    private val muteBtns = ArrayList<Button>()
+    private val volBars = ArrayList<SeekBar>()
     private val cells = Array(Cfg.PADS) { arrayOfNulls<View>(Cfg.STEPS) }
     private var playStep = -1
+    private var lastState = -1
+
+    private lateinit var playBtn: Button
+    private lateinit var pauseBtn: Button
+    private lateinit var stopBtn: Button
+    private lateinit var muteAllBtn: Button
+    private lateinit var volS: SliderRow
+    private lateinit var reverbS: SliderRow
+    private lateinit var delayS: SliderRow
+    private lateinit var lpS: SliderRow
+    private lateinit var hpS: SliderRow
+    private lateinit var driveS: SliderRow
 
     // 0 = off, then full / medium / soft
     private val levels = floatArrayOf(1f, 0.65f, 0.35f)
@@ -59,10 +75,22 @@ class PadsScreen(private val a: MainActivity) : Screen {
         }
 
         content.addView(ui.text("Drum sequencer", 16f, Theme.ACCENT, true), ui.fullWidth(10))
+
+        val tr = ui.row()
+        playBtn = ui.button("▶ Play") { doPlay() }
+        pauseBtn = ui.button("|| Pause") { doPause() }
+        stopBtn = ui.button("■ Stop") { e.stop() }
+        muteAllBtn = ui.button("Mute all drums") { muteAll() }
+        tr.addView(playBtn, ui.w(1f, 3))
+        tr.addView(pauseBtn, ui.w(1f, 3))
+        tr.addView(stopBtn, ui.w(1f, 3))
+        tr.addView(muteAllBtn, ui.w(1.3f, 3))
+        content.addView(tr, ui.fullWidth(6))
+
         content.addView(
             ui.text(
-                "Press ▶ at the top to play. Tap a cell: full, medium, soft, off. " +
-                    "Tap a row name to hear it. Long press a row name to choose its sample.",
+                "Tap a cell: full, medium, soft, off. Tap a row name to hear it, long press it to choose its sample. " +
+                    "M = mute that row. The slider at the end of the row is its volume.",
                 12f, Theme.DIM
             ), ui.fullWidth(4)
         )
@@ -74,6 +102,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
         for (r in 0 until Cfg.PADS) content.addView(buildRow(r), ui.fullWidth(2))
 
+        buildEffects()
+
         content.addView(ui.text("Ready-made beats (they use the drum kit on the pads)", 13f, Theme.DIM), ui.fullWidth(10))
         val r1 = ui.row()
         r1.addView(ui.button("Rock") { beat(0) }, ui.w(1f, 3))
@@ -81,6 +111,72 @@ class PadsScreen(private val a: MainActivity) : Screen {
         r1.addView(ui.button("Hip-hop") { beat(2) }, ui.w(1f, 3))
         content.addView(r1, ui.fullWidth(6))
     }
+
+    // ---------------- drum effects (the whole drum kit together) ----------------
+
+    private fun buildEffects() {
+        val p = ui.panel()
+        p.addView(ui.text("Drum volume and effects (all drums together)", 14f, Theme.ACCENT, true))
+        val fx = e.drumFx
+        val row = ui.row()
+        volS = ui.slider("Volume", 100, (e.padVol * 100f).toInt(), { "$it%" }) { v ->
+            e.padVol = v / 100f
+        }
+        reverbS = ui.slider("Reverb", 100, 0, { "$it%" }) { v ->
+            fx.a[2] = v / 100f
+            fx.on[2] = v > 0
+        }
+        delayS = ui.slider("Delay", 100, 0, { "$it%" }) { v ->
+            fx.a[3] = v / 100f
+            fx.on[3] = v > 0
+        }
+        lpS = ui.slider("Low-pass", 100, 100, { if (it >= 99) "open" else "$it%" }) { v ->
+            fx.a[0] = v / 100f
+            fx.on[0] = v < 99
+        }
+        hpS = ui.slider("High-pass", 100, 0, { if (it <= 1) "open" else "$it%" }) { v ->
+            fx.a[1] = v / 100f
+            fx.on[1] = v > 1
+        }
+        driveS = ui.slider("Drive", 100, 0, { "$it%" }) { v ->
+            fx.a[4] = v / 100f
+            fx.on[4] = v > 0
+        }
+        for (s in listOf(volS, reverbS, delayS, lpS, hpS, driveS)) row.addView(s.view, ui.w(1f, 4))
+        p.addView(row)
+        content.addView(p, ui.fullWidth(8))
+    }
+
+    private fun refreshEffects() {
+        val fx = e.drumFx
+        volS.set((e.padVol * 100f).toInt())
+        reverbS.set(if (fx.on[2]) (fx.a[2] * 100).toInt() else 0)
+        delayS.set(if (fx.on[3]) (fx.a[3] * 100).toInt() else 0)
+        lpS.set(if (fx.on[0]) (fx.a[0] * 100).toInt() else 100)
+        hpS.set(if (fx.on[1]) (fx.a[1] * 100).toInt() else 0)
+        driveS.set(if (fx.on[4]) (fx.a[4] * 100).toInt() else 0)
+    }
+
+    // ---------------- transport ----------------
+
+    private fun doPlay() {
+        if (e.playing && e.paused) e.pause() else if (!e.playing) e.play()
+    }
+
+    private fun doPause() {
+        if (e.playing && !e.paused) e.pause()
+    }
+
+    private fun refreshTransport() {
+        val st = if (!e.playing) 0 else if (e.paused) 2 else 1
+        if (st == lastState) return
+        lastState = st
+        ui.styleButton(playBtn, st == 1)
+        ui.styleButton(pauseBtn, st == 2)
+        ui.styleButton(stopBtn, false)
+    }
+
+    // ---------------- grid ----------------
 
     private fun buildRow(r: Int): LinearLayout {
         val row = LinearLayout(a)
@@ -115,7 +211,52 @@ class PadsScreen(private val a: MainActivity) : Screen {
             cells[r][s] = v
             paint(r, s)
         }
+
+        val mb = Button(a)
+        mb.isAllCaps = false
+        mb.text = "M"
+        mb.textSize = 12f
+        mb.minHeight = 0
+        mb.minWidth = 0
+        mb.setPadding(0, 0, 0, 0)
+        mb.setTextColor(Theme.TEXT)
+        mb.background = ui.bg(Theme.PANEL2, 8)
+        mb.setOnClickListener {
+            e.pads[r].mute = !e.pads[r].mute
+            refreshMutes()
+        }
+        muteBtns.add(mb)
+        val mlp = LinearLayout.LayoutParams(ui.dp(36), ui.dp(34))
+        mlp.setMargins(ui.dp(4), 0, ui.dp(4), 0)
+        row.addView(mb, mlp)
+
+        val vb = SeekBar(a)
+        vb.max = 100
+        vb.progress = (e.pads[r].volume * 100f).toInt().coerceIn(0, 100)
+        vb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                e.pads[r].volume = p / 100f
+            }
+
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
+        volBars.add(vb)
+        row.addView(vb, LinearLayout.LayoutParams(ui.dp(110), ui.dp(34)))
         return row
+    }
+
+    private fun refreshMutes() {
+        for (r in 0 until Cfg.PADS) ui.styleButton(muteBtns[r], e.pads[r].mute, Theme.RED)
+        val all = e.pads.all { it.mute }
+        muteAllBtn.text = if (all) "Unmute all drums" else "Mute all drums"
+        ui.styleButton(muteAllBtn, all, Theme.RED)
+    }
+
+    private fun muteAll() {
+        val anyOn = e.pads.any { !it.mute }
+        for (p in e.pads) p.mute = anyOn
+        refreshMutes()
     }
 
     private fun alphaColor(color: Int, alpha: Int): Int =
@@ -238,11 +379,17 @@ class PadsScreen(private val a: MainActivity) : Screen {
             val shortName = n.removeSuffix(".wav").removePrefix("Drum_").replace('_', ' ')
             pads[i].text = "${i + 1}\n" + (if (n.isEmpty()) "(empty)" else shortName)
             labels[i].text = "${i + 1}  " + (if (n.isEmpty()) "(empty)" else shortName)
+            volBars[i].progress = (e.pads[i].volume * 100f).toInt().coerceIn(0, 100)
         }
+        refreshEffects()
+        lastState = -1
+        refreshTransport()
+        refreshMutes()
         repaintAll()
     }
 
     override fun onTick() {
+        refreshTransport()
         val s = if (e.playing) e.curStep else -1
         if (s != playStep) {
             val old = playStep
