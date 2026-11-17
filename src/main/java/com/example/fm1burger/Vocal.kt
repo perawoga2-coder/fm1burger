@@ -24,7 +24,7 @@ import org.json.JSONObject
 
 
 /** Second-order filter section (used for low cut, high cut, hum notch and the equalizer). */
-class Biquad {
+{class VBiquad {
     private var b0 = 1.0
     private var b1 = 0.0
     private var b2 = 0.0
@@ -351,11 +351,11 @@ class VocalChannel {
 
     // audio thread state
     private val hpF = Biquad()
-    private val lpF = Biquad()
-    private val humF1 = Biquad()
-    private val humF2 = Biquad()
-    private val eqB = Array(5) { Biquad() }
-    private val eqOn = BooleanArray(5)
+    VBiquad() = Biquad()
+    VBiquad() = Biquad()
+    VBiquad() = Biquad()
+    VBiquad() = Array(5) { Biquad() }
+    VBiquad() = BooleanArray(5)
     private var lpOn = false
     private var humOn = false
     private var gEnv = 0f
