@@ -39,6 +39,14 @@ class TracksScreen(private val a: MainActivity) : Screen {
     init {
         content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
         root.addView(content)
+        content.addView(
+            ui.text(
+                "L = load a sample (library or this device) · R = record with the mic (internal or external) · " +
+                    "S = sample the FM-1 (up to 60 s, then opens in Edit) · M = mute. " +
+                    "R and S: tap to start, tap ■ to stop. Long press R or S for options.",
+                11f, Theme.DIM
+            ), ui.fullWidth(0)
+        )
         buildEffects()
         for (i in 0 until Cfg.TRACKS) buildCard(i)
         buildSettings()
@@ -90,12 +98,18 @@ class TracksScreen(private val a: MainActivity) : Screen {
         top.addView(badge)
         top.addView(name, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         top.addView(ui.button("▶") { e.audition(i) }, ui.w(0f, 2))
-        top.addView(ui.button("L") {
-            a.pickSample("Load into track ${i + 1}") { f -> a.assignTrack(i, f) }
-        }, ui.w(0f, 2))
+        top.addView(ui.button("L") { a.loadDialog(i) }, ui.w(0f, 2))
         val r = ui.button("R") { a.flow.onRecordButton(i) }
+        r.setOnLongClickListener {
+            a.flow.onRecordOptions(i)
+            true
+        }
         top.addView(r, ui.w(0f, 2))
         val s = ui.button("S") { a.flow.onSampleButton(i) }
+        s.setOnLongClickListener {
+            a.flow.onSampleOptions(i)
+            true
+        }
         top.addView(s, ui.w(0f, 2))
         val m = ui.button("M") {
             val t = e.tracks[i]
@@ -182,9 +196,12 @@ class TracksScreen(private val a: MainActivity) : Screen {
                 if (a.sel == i) Theme.TRACK_COLORS[i] else Theme.PANEL, 2
             )
             ui.styleButton(muteBtns[i], t.mute, Theme.RED)
-            val rec = a.flow.isRecordingTrack(i)
-            recBtns[i].text = if (rec) "■" else "R"
-            ui.styleButton(recBtns[i], rec, Theme.RED)
+            val mic = a.flow.isMicTrack(i)
+            recBtns[i].text = if (mic) "■" else "R"
+            ui.styleButton(recBtns[i], mic, Theme.RED)
+            val samp = a.flow.isSamplingTrack(i)
+            sampBtns[i].text = if (samp) "■" else "S"
+            ui.styleButton(sampBtns[i], samp, Theme.RED)
         }
         val t = sel()
         fxTitle.text = "Track ${a.sel + 1} effects"
@@ -210,11 +227,10 @@ class TracksScreen(private val a: MainActivity) : Screen {
         for (i in 0 until Cfg.TRACKS) {
             waves[i].playhead = e.tracks[i].playFraction()
         }
-        val rec = a.flow.active()
         for (i in 0 until Cfg.TRACKS) {
-            val on = rec && a.flow.isRecordingTrack(i)
-            val want = if (on) "■" else "R"
-            if (recBtns[i].text.toString() != want) refresh()
+            val wantR = if (a.flow.isMicTrack(i)) "■" else "R"
+            val wantS = if (a.flow.isSamplingTrack(i)) "■" else "S"
+            if (recBtns[i].text.toString() != wantR || sampBtns[i].text.toString() != wantS) refresh()
         }
     }
 }
