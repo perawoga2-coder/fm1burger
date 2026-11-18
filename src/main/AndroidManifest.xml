@@ -8,8 +8,8 @@
 
     <application
         android:icon="@mipmap/ic_launcher"
-        android:label="FM1 Burger"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:label="Burger Studio"
+        android:theme="@style/BurgerTheme">
         <activity
             android:name=".MainActivity"
             android:exported="true"

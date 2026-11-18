@@ -41,7 +41,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
     private var lastOut = 0
 
     init {
-        content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
         root.addView(content)
 
         val op = ui.panel()
@@ -136,7 +136,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         val scol = ui.panel()
         scol.addView(ui.text("Analog synth", 13f, Theme.TEXT, true))
         synthFader = FaderView(a)
-        synthFader.color = Color.parseColor("#B07CFF")
+        synthFader.color = Theme.PURPLE
         synthFader.onChange = { v -> e.analog.volume = v }
         scol.addView(synthFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
         scol.addView(ui.text("Keyboard synth (Synth page)", 11f, Theme.DIM))
@@ -148,9 +148,9 @@ class MixerScreen(private val a: MainActivity) : Screen {
         row.addView(scol, colLp())
 
         val vcol = ui.panel()
-        vcol.addView(ui.text("Voice", 13f, Color.parseColor("#FF5CA8"), true))
+        vcol.addView(ui.text("Voice", 13f, Theme.PINK, true))
         voiceFader = FaderView(a)
-        voiceFader.color = Color.parseColor("#FF5CA8")
+        voiceFader.color = Theme.PINK
         voiceFader.onChange = { v -> e.vocal.volume = v }
         vcol.addView(voiceFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
         vcol.addView(ui.text("Live mic (Voice page)", 11f, Theme.DIM))
@@ -162,9 +162,9 @@ class MixerScreen(private val a: MainActivity) : Screen {
         row.addView(vcol, colLp())
 
         val gcol = ui.panel()
-        gcol.addView(ui.text("Song rec", 13f, Color.parseColor("#3DA9FC"), true))
+        gcol.addView(ui.text("Song rec", 13f, Theme.BLUE, true))
         songFader = FaderView(a)
-        songFader.color = Color.parseColor("#3DA9FC")
+        songFader.color = Theme.BLUE
         songFader.onChange = { v -> e.bank.clipVol = v }
         gcol.addView(songFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
         gcol.addView(ui.text("Part recordings (Song page)", 11f, Theme.DIM))

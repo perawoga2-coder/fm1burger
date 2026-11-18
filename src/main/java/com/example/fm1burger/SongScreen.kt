@@ -37,9 +37,9 @@ class SongScreen(private val a: MainActivity) : Screen {
     private var lastKey = ""
 
     init {
-        content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
         root.addView(content)
-        content.addView(ui.text("Song parts (cues)", 18f, Theme.ACCENT, true))
+        content.addView(ui.title("Song parts (cues)"))
         content.addView(
             ui.text(
                 "Each part keeps its own patterns: track steps, drums, bassline, synth steps and the mute buttons. " +
@@ -94,7 +94,7 @@ class SongScreen(private val a: MainActivity) : Screen {
         content.addView(r2, ui.fullWidth(4))
 
         // ---------------- song builder ----------------
-        content.addView(ui.text("Song builder", 18f, Theme.ACCENT, true), ui.fullWidth(16))
+        content.addView(ui.title("Song builder"), ui.fullWidth(16))
         content.addView(
             ui.text(
                 "Add parts in the order you want, and set how many bars each one plays (1 bar = 16 steps). " +
@@ -448,12 +448,12 @@ class SongScreen(private val a: MainActivity) : Screen {
 
     companion object {
         val PARTCOL = intArrayOf(
-            Color.parseColor("#3DA9FC"),
-            Color.parseColor("#3DD68C"),
-            Color.parseColor("#E5C03D"),
-            Color.parseColor("#FF6A1A"),
-            Color.parseColor("#B57DFF"),
-            Color.parseColor("#E5484D")
+            Theme.BLUE,
+            Theme.GREEN,
+            Theme.YELLOW,
+            Theme.ACCENT,
+            Theme.PURPLE,
+            Theme.RED
         )
     }
 }

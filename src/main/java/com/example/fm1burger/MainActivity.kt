@@ -59,6 +59,9 @@ class MainActivity : Activity() {
     private lateinit var bpmText: TextView
     private lateinit var bpmBar: SeekBar
     private lateinit var statusText: TextView
+    private lateinit var statusDot: View
+    private lateinit var tabScroll: HorizontalScrollView
+    private var dotColor = 0
     private val cueBtns = ArrayList<Button>()
     private var cueKey = ""
     private var lastPartVersion = -1
@@ -67,6 +70,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLog.install(this)
+        SafeIo.cleanTemps(filesDir)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         ui = Ui(this)
         store = Store(this)
@@ -77,6 +82,7 @@ class MainActivity : Activity() {
         flow = RecordFlow(this)
 
         buildUi()
+        if (savedInstanceState == null) showSplash()
         engine.start()
         project.load()
         SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
@@ -85,33 +91,78 @@ class MainActivity : Activity() {
         engine.bank.loadClips(filesDir)
         lastPartVersion = engine.bank.version
         showTab(0)
-        handler.post(ticker)
+
+        val crash = CrashLog.take(this)
+        if (crash != null) showCrash(crash)
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        handler.removeCallbacks(ticker)
+        handler.post(ticker)
+    }
+
     override fun onPause() {
         super.onPause()
-        project.save()
-        SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog)
-        VocalSave.save(File(filesDir, "vocal.json"), engine.vocal)
-        engine.bank.save(File(filesDir, "parts.json"))
+        // the screen is hidden: no need to redraw 20 times a second (the audio keeps playing)
+        handler.removeCallbacks(ticker)
+        saveAll()
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        project.save()
-        SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog)
-        VocalSave.save(File(filesDir, "vocal.json"), engine.vocal)
-        engine.bank.save(File(filesDir, "parts.json"))
+        saveAll()
         engine.vocal.stop()
         if (engine.mixRec.recording) engine.mixRec.stop()
         recorder.stop()
         engine.shutdown()
         midi.shutdown()
         super.onDestroy()
+    }
+
+    /** Writes the whole session to disk. Each part is saved on its own, so one failure does not lose the rest. */
+    private fun saveAll() {
+        try { project.save() } catch (e: Exception) { }
+        try { SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog) } catch (e: Exception) { }
+        try { VocalSave.save(File(filesDir, "vocal.json"), engine.vocal) } catch (e: Exception) { }
+        try { engine.bank.save(File(filesDir, "parts.json")) } catch (e: Exception) { }
+    }
+
+    /** The intro animation over the app; it removes itself when done (or when tapped). */
+    private fun showSplash() {
+        try {
+            val host = findViewById<FrameLayout>(android.R.id.content)
+            // when the intro ends (or is skipped) the jingle stops with it
+            val sp = SplashView(this) { engine.previewStop() }
+            host.addView(sp, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            sp.start()
+            engine.previewPlay(SplashView.jingle())
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun showCrash(report: String) {
+        val tv = ui.text(report.take(6000), 11f, Theme.DIM)
+        tv.typeface = android.graphics.Typeface.MONOSPACE
+        tv.setTextIsSelectable(true)
+        tv.setPadding(ui.dp(20), ui.dp(8), ui.dp(20), ui.dp(8))
+        val sc = android.widget.ScrollView(this)
+        sc.addView(tv)
+        AlertDialog.Builder(this)
+            .setTitle("The app closed by itself last time")
+            .setMessage("Your work was saved. If it happens again, copy this report and send it along so it can be fixed.")
+            .setView(sc)
+            .setPositiveButton("Copy report") { _, _ ->
+                val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Burger Studio crash", report))
+                ui.toast("Report copied")
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     // ---------------- layout ----------------
@@ -121,23 +172,50 @@ class MainActivity : Activity() {
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(Theme.BG)
 
-        // header
+        // ---- header: transport, status, cue parts ----
         val head = LinearLayout(this)
         head.orientation = LinearLayout.VERTICAL
         head.setBackgroundColor(Theme.PANEL)
-        head.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
+        head.setPadding(ui.dp(10), ui.dp(8), ui.dp(10), ui.dp(8))
 
         val r1 = ui.row()
         playBtn = ui.button("▶") { togglePlay() }
-        r1.addView(playBtn, LinearLayout.LayoutParams(ui.dp(56), LinearLayout.LayoutParams.WRAP_CONTENT))
-        r1.addView(ui.button("−") { changeBpm(-1) }, ui.w(0f, 2))
-        bpmText = ui.text("BPM 120", 14f, Theme.TEXT, true)
+        playBtn.textSize = 20f
+        playBtn.setPadding(0, 0, 0, 0)
+        ui.styleButton(playBtn, false, Theme.ACCENT, 26)
+        r1.addView(playBtn, LinearLayout.LayoutParams(ui.dp(52), ui.dp(52)).also { it.marginEnd = ui.dp(10) })
+
+        // tempo block: − [ BPM 120 ] +
+        val tempo = ui.row()
+        tempo.background = ui.bg(Theme.PANEL2, 14, Theme.LINE, 1)
+        tempo.setPadding(ui.dp(4), ui.dp(2), ui.dp(4), ui.dp(2))
+        val minus = ui.button("−") { changeBpm(-1) }
+        minus.background = null
+        minus.textSize = 18f
+        minus.setPadding(ui.dp(10), 0, ui.dp(10), 0)
+        val plus = ui.button("+") { changeBpm(1) }
+        plus.background = null
+        plus.textSize = 18f
+        plus.setPadding(ui.dp(10), 0, ui.dp(10), 0)
+        val bpmBox = ui.col()
+        bpmBox.gravity = android.view.Gravity.CENTER
+        val bpmLabel = ui.text("BPM", 9f, Theme.DIM, true)
+        bpmLabel.letterSpacing = 0.15f
+        bpmLabel.gravity = android.view.Gravity.CENTER
+        bpmText = ui.text("120", 20f, Theme.TEXT, true)
         bpmText.gravity = android.view.Gravity.CENTER
-        r1.addView(bpmText, LinearLayout.LayoutParams(ui.dp(92), LinearLayout.LayoutParams.WRAP_CONTENT))
-        r1.addView(ui.button("+") { changeBpm(1) }, ui.w(0f, 2))
+        bpmText.setOnClickListener { bpmDialog() }
+        bpmBox.addView(bpmLabel)
+        bpmBox.addView(bpmText)
+        tempo.addView(minus, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, ui.dp(44)))
+        tempo.addView(bpmBox, LinearLayout.LayoutParams(ui.dp(64), LinearLayout.LayoutParams.WRAP_CONTENT))
+        tempo.addView(plus, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, ui.dp(44)))
+        r1.addView(tempo)
+
         bpmBar = SeekBar(this)
         bpmBar.max = 200
         bpmBar.progress = engine.bpm - 40
+        ui.tint(bpmBar)
         bpmBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                 if (fromUser && !engine.follow) engine.bpm = p + 40
@@ -148,34 +226,50 @@ class MainActivity : Activity() {
         })
         r1.addView(bpmBar, ui.w(1f, 4))
         syncBtn = ui.button("SYNC") { toggleSync() }
-        r1.addView(syncBtn, ui.w(0f, 2))
+        r1.addView(syncBtn, ui.w(0f, 3))
         muteAllBtn = ui.button("MUTE ALL") { muteAll() }
-        r1.addView(muteAllBtn, ui.w(0f, 2))
+        r1.addView(muteAllBtn, ui.w(0f, 3))
         head.addView(r1)
 
+        // status line in a soft pill, the two record buttons next to it
+        val r2 = ui.row()
+        val statusBox = ui.row()
+        statusBox.background = ui.bg(Theme.BG, 12)
+        statusBox.setPadding(ui.dp(10), ui.dp(6), ui.dp(10), ui.dp(6))
+        statusDot = View(this)
+        statusDot.background = ui.bg(Theme.FAINT, 4)
+        statusBox.addView(statusDot, LinearLayout.LayoutParams(ui.dp(8), ui.dp(8)).also { it.marginEnd = ui.dp(8) })
         statusText = ui.text("", 12f, Theme.DIM)
         statusText.maxLines = 2
-        val r2 = ui.row()
-        recMixBtn = ui.button("● REC MIX") { toggleMixRec() }
+        statusText.ellipsize = android.text.TextUtils.TruncateAt.END
+        statusBox.addView(statusText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        r2.addView(statusBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).also {
+            it.setMargins(0, ui.dp(3), ui.dp(3), ui.dp(3))
+        })
         recPartBtn = ui.button("● REC PART") { toggleRecPart() }
-        r2.addView(statusText, ui.w(1f, 2))
-        r2.addView(recPartBtn, ui.w(0f, 2))
-        r2.addView(recMixBtn, ui.w(0f, 2))
-        head.addView(r2)
+        recMixBtn = ui.button("● REC MIX") { toggleMixRec() }
+        r2.addView(recPartBtn, ui.w(0f, 3))
+        r2.addView(recMixBtn, ui.w(0f, 3))
+        head.addView(r2, ui.fullWidth(6))
 
         // the 6 cue parts, on every page
         val r3 = ui.row()
         for (i in 0 until PartBank.N) {
             val b = ui.button("") { cueSlot(i) }
             b.textSize = 12f
+            b.maxLines = 1
+            b.ellipsize = android.text.TextUtils.TruncateAt.END
+            b.setPadding(ui.dp(4), 0, ui.dp(4), 0)
             b.setOnLongClickListener {
                 slotDialog(i)
                 true
             }
             cueBtns.add(b)
-            r3.addView(b, ui.w(1f, 2))
+            r3.addView(b, LinearLayout.LayoutParams(0, ui.dp(42), 1f).also {
+                it.setMargins(ui.dp(3), ui.dp(3), ui.dp(3), ui.dp(3))
+            })
         }
-        head.addView(r3)
+        head.addView(r3, ui.fullWidth(2))
         root.addView(head)
 
         // screens
@@ -191,20 +285,28 @@ class MainActivity : Activity() {
         val song = SongScreen(this)
         screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song)
 
-        // tabs
+        // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
+        tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
         val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
+            b.minHeight = ui.dp(36)
+            b.minimumHeight = ui.dp(36)
+            b.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6))
             btns.add(b)
-            tabRow.addView(b, ui.w(0f, 2))
+            tabRow.addView(b, ui.w(0f, 3))
         }
         tabBtns = btns
-        val tabScroll = HorizontalScrollView(this)
+        tabScroll = HorizontalScrollView(this)
         tabScroll.isHorizontalScrollBarEnabled = false
+        tabScroll.setBackgroundColor(Theme.BG)
         tabScroll.addView(tabRow)
         root.addView(tabScroll)
+        val line = View(this)
+        line.setBackgroundColor(Theme.LINE)
+        root.addView(line, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(1)))
 
         val content = FrameLayout(this)
         for (s in screens) content.addView(s.root)
@@ -215,12 +317,63 @@ class MainActivity : Activity() {
     fun showTab(i: Int) {
         cur = i
         screens.forEachIndexed { idx, s -> s.root.visibility = if (idx == i) View.VISIBLE else View.GONE }
-        tabBtns.forEachIndexed { idx, b -> ui.styleButton(b, idx == i) }
-        screens[i].onShow()
+        tabBtns.forEachIndexed { idx, b -> styleTab(b, idx == i) }
+        // keep the open tab visible in the scrolling tab bar
+        val b = tabBtns[i]
+        tabScroll.post {
+            val x = b.left - (tabScroll.width - b.width) / 2
+            tabScroll.smoothScrollTo(x.coerceAtLeast(0), 0)
+        }
+        try {
+            screens[i].onShow()
+        } catch (e: Exception) {
+            ui.toast("This page had a problem: ${e.message}")
+        }
+    }
+
+    private fun styleTab(b: Button, active: Boolean) {
+        if (active) {
+            ui.styleButton(b, true, Theme.ACCENT, 18)
+        } else {
+            b.background = ui.touchBg(ui.bg(Theme.BG, 18), 18)
+            b.setTextColor(Theme.DIM)
+        }
+    }
+
+    /** Tap on the BPM number: type a tempo. */
+    private fun bpmDialog() {
+        if (engine.follow) {
+            ui.toast("The tempo comes from the FM-1 while in FOLLOW sync")
+            return
+        }
+        val ed = android.widget.EditText(this)
+        ed.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        ed.setText(engine.bpm.toString())
+        ed.setSelectAllOnFocus(true)
+        val box = FrameLayout(this)
+        box.setPadding(ui.dp(24), ui.dp(8), ui.dp(24), 0)
+        box.addView(ed)
+        AlertDialog.Builder(this)
+            .setTitle("Tempo (40 - 240 BPM)")
+            .setView(box)
+            .setPositiveButton("OK") { _, _ ->
+                val v = ed.text.toString().trim().toIntOrNull()
+                if (v == null) {
+                    ui.toast("Type a number")
+                } else {
+                    engine.bpm = v
+                    bpmBar.progress = engine.bpm - 40
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     fun refreshCurrent() {
-        screens[cur].onShow()
+        try {
+            screens[cur].onShow()
+        } catch (e: Exception) {
+        }
     }
 
     fun selectTrack(i: Int) {
@@ -358,15 +511,15 @@ class MainActivity : Activity() {
             btn.text = "${k + 1} " + PartNames.SHORT[i] + (if (b.parts[i].hasClip()) " ●" else "")
             when {
                 i == b.cur -> {
-                    btn.background = ui.bg(col, 8)
-                    btn.setTextColor(android.graphics.Color.BLACK)
+                    btn.background = ui.touchBg(ui.bg(col, 12), 12)
+                    btn.setTextColor(Theme.onColor(col))
                 }
                 i == b.cueReq && blink -> {
-                    btn.background = ui.bg(Theme.TEXT, 8)
-                    btn.setTextColor(android.graphics.Color.BLACK)
+                    btn.background = ui.touchBg(ui.bg(Theme.TEXT, 12), 12)
+                    btn.setTextColor(Theme.onColor(Theme.TEXT))
                 }
                 else -> {
-                    btn.background = ui.bg(Theme.PANEL2, 8, col, 2)
+                    btn.background = ui.touchBg(ui.bg(Theme.alpha(col, 28), 12, Theme.alpha(col, 150), 1), 12)
                     btn.setTextColor(if (b.parts[i].used) Theme.TEXT else Theme.DIM)
                 }
             }
@@ -487,8 +640,9 @@ class MainActivity : Activity() {
             syncOff()
             syncNote = "MIDI device disconnected"
         }
-        playBtn.text = if (engine.playing) "■" else "▶"
-        ui.styleButton(playBtn, engine.playing)
+        val pt = if (engine.playing) "■" else "▶"
+        if (playBtn.text.toString() != pt) playBtn.text = pt
+        ui.styleButton(playBtn, engine.playing, Theme.GREEN, 26)
         val sb = when (syncState) {
             1 -> "SYNC: LEAD"
             2 -> "SYNC: FOLLOW"
@@ -502,7 +656,8 @@ class MainActivity : Activity() {
             muteAllBtn.text = mt
             ui.styleButton(muteAllBtn, allMuted, Theme.RED)
         }
-        bpmText.text = if (engine.follow) String.format(Locale.US, "BPM %.1f", engine.bpmF) else "BPM ${engine.bpm}"
+        val bt = if (engine.follow) String.format(Locale.US, "%.1f", engine.bpmF) else "${engine.bpm}"
+        if (bpmText.text.toString() != bt) bpmText.text = bt
         bpmBar.isEnabled = !engine.follow
         if (engine.follow) bpmBar.progress = (engine.bpm - 40).coerceIn(0, 200)
 
@@ -563,7 +718,20 @@ class MainActivity : Activity() {
             // the patterns changed to another part: redraw the pages that show patterns
             if (cur in intArrayOf(0, 1, 2, 6, 7, 9)) screens[cur].onShow()
         }
-        screens[cur].onTick()
+        // the dot in front of the status line: red = recording, green = playing, grey = stopped
+        val dc = when {
+            statusText.currentTextColor == Theme.RED -> Theme.RED
+            engine.playing -> Theme.GREEN
+            else -> Theme.FAINT
+        }
+        if (dc != dotColor) {
+            dotColor = dc
+            statusDot.background = ui.bg(dc, 4)
+        }
+        try {
+            screens[cur].onTick()
+        } catch (e: Exception) {
+        }
     }
 
     private fun clock(s: Long): String = String.format(Locale.US, "%d:%02d", s / 60, s % 60)
@@ -764,15 +932,24 @@ class MainActivity : Activity() {
             } else {
                 data.data?.let { uris.add(it) }
             }
-            val imported = ArrayList<File>()
-            for (u in uris) {
-                val f = importUri(u)
-                if (f != null) imported.add(f)
-            }
             val target = importTarget
             importTarget = -1
-            if (target >= 0 && imported.isNotEmpty()) assignTrack(target, imported[0])
-            libraryScreen.refresh()
+            if (uris.isEmpty()) return
+            ui.toast(if (uris.size == 1) "Importing..." else "Importing ${uris.size} files...")
+            // reading big files on the screen thread would freeze the app, so do it in the background
+            Thread {
+                val imported = ArrayList<File>()
+                for (u in uris) {
+                    val f = importUri(u)
+                    if (f != null) imported.add(f)
+                }
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    if (target >= 0 && imported.isNotEmpty()) assignTrack(target, imported[0])
+                    libraryScreen.refresh()
+                    if (imported.size > 1) ui.toast("Imported ${imported.size} files")
+                }
+            }.start()
         } else if (requestCode == REQ_EXPORT) {
             val uri = data.data ?: return
             val b = pendingBytes ?: return
@@ -811,25 +988,33 @@ class MainActivity : Activity() {
         return "Imported.wav"
     }
 
+    private fun toastLater(msg: String) {
+        runOnUiThread { ui.toast(msg) }
+    }
+
+    /** Background thread: copies one picked file into the library. */
     private fun importUri(uri: Uri): File? {
         try {
             val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
             if (bytes == null || bytes.size > 40 * 1024 * 1024) {
-                ui.toast("File unreadable or too large (max 40 MB)")
+                toastLater("File unreadable or too large (max 40 MB)")
                 return null
             }
             val p = Wav.parse(bytes)
             if (p == null) {
-                ui.toast("Only WAV files (16 bit, 24 bit or float) can be imported")
+                toastLater("Only WAV files (16 bit, 24 bit or float) can be imported")
                 return null
             }
             var base = displayName(uri)
             if (base.lowercase(Locale.ROOT).endsWith(".wav")) base = base.substring(0, base.length - 4)
             val f = store.saveNew(base.ifEmpty { "Imported" }, p.data, p.rate)
-            ui.toast("Imported ${f.name} (stereo files are mixed to mono)")
+            toastLater("Imported ${f.name} (stereo files are mixed to mono)")
             return f
+        } catch (e: OutOfMemoryError) {
+            toastLater("This file is too big to import")
+            return null
         } catch (e: Exception) {
-            ui.toast("Import failed: ${e.message}")
+            toastLater("Import failed: ${e.message}")
             return null
         }
     }

@@ -93,7 +93,7 @@ class Project(private val a: MainActivity) {
             o.put("drumFxOn", dfo)
             o.put("drumFxA", dfa)
             o.put("drumFxB", dfb)
-            file.writeText(o.toString())
+            SafeIo.writeText(file, o.toString())
         } catch (ex: Exception) {
         }
     }

@@ -38,9 +38,9 @@ class VoiceScreen(private val a: MainActivity) : Screen {
     private var takeActive = false
 
     init {
-        content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
         root.addView(content)
-        content.addView(ui.text("Voice (5th track)", 18f, Theme.ACCENT, true))
+        content.addView(ui.title("Voice (5th track)"))
         content.addView(
             ui.text(
                 "Sing or speak into the microphone and hear yourself with a room effect, mixed with everything else. " +

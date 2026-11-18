@@ -25,9 +25,9 @@ class EditScreen(private val a: MainActivity) : Screen {
     var pendingOpen: File? = null
 
     init {
-        content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
         root.addView(content)
-        content.addView(ui.text("Sample editor", 18f, Theme.ACCENT, true))
+        content.addView(ui.title("Sample editor"))
 
         spinner = ui.spinner(listOf("(no samples)")) { idx -> choose(idx) }
         content.addView(spinner, ui.fullWidth(6))

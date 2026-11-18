@@ -11,4 +11,4 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "fm1burger"
+rootProject.name = "burgerstudio"

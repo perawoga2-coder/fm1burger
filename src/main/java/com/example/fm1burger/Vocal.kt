@@ -728,7 +728,7 @@ object VocalSave {
             o.put("preset", v.preset)
             o.put("roomScale", v.roomScale.toDouble())
             o.put("preMs", v.preMs.toDouble())
-            f.writeText(o.toString())
+            SafeIo.writeText(f, o.toString())
         } catch (ex: Exception) {
         }
     }

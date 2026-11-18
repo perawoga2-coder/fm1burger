@@ -172,9 +172,9 @@ class StepGridView(ctx: Context) : View(ctx) {
         for (r in 0 until ROWS) {
             for (s in 0 until Cfg.STEPS) {
                 paint.color = when {
-                    r == ROWS / 2 -> Color.parseColor("#34343C")
-                    (s / 4) % 2 == 0 -> Color.parseColor("#222227")
-                    else -> Color.parseColor("#1A1A1E")
+                    r == ROWS / 2 -> Theme.PANEL3
+                    (s / 4) % 2 == 0 -> Theme.PANEL2
+                    else -> Theme.PANEL
                 }
                 c.drawRect(s * cw + 1.5f, r * rh + 1.5f, (s + 1) * cw - 1.5f, (r + 1) * rh - 1.5f, paint)
             }
@@ -189,7 +189,7 @@ class StepGridView(ctx: Context) : View(ctx) {
                     paint.color = Theme.ACCENT
                     c.drawRect(s * cw + 1.5f, row * rh + 1.5f, (s + 1) * cw - 1.5f, (row + 1) * rh - 1.5f, paint)
                 }
-                paint.color = if (st.on) Theme.ACCENT else Color.parseColor("#3A3A42")
+                paint.color = if (st.on) Theme.ACCENT else Theme.PANEL3
                 val bh = sh * st.level
                 c.drawRect(s * cw + 3f, h - bh, (s + 1) * cw - 3f, h, paint)
             }
@@ -270,8 +270,8 @@ class FaderView(ctx: Context) : View(ctx) {
         if (w <= 0f || h <= 0f) return
         paint.style = Paint.Style.FILL
         paint.color = Theme.PANEL2
-        c.drawRoundRect(RectF(0f, 0f, w, h), 12f, 12f, paint)
-        val pad = 14f
+        c.drawRoundRect(RectF(0f, 0f, w, h), 16f, 16f, paint)
+        val pad = 16f
         val top = pad
         val bot = h - pad
         // meter
@@ -285,16 +285,18 @@ class FaderView(ctx: Context) : View(ctx) {
         val y = bot - (bot - top) * value
         paint.color = color
         c.drawRoundRect(RectF(w * 0.5f - 4f, y, w * 0.5f + 4f, bot), 4f, 4f, paint)
-        // handle
-        paint.color = Color.WHITE
-        c.drawRoundRect(RectF(w * 0.28f, y - 12f, w * 0.88f, y + 12f), 8f, 8f, paint)
+        // handle: a light cap with a colored line in the middle
+        paint.color = Color.parseColor("#E8E8EE")
+        c.drawRoundRect(RectF(w * 0.28f, y - 14f, w * 0.88f, y + 14f), 10f, 10f, paint)
+        paint.color = color
+        c.drawRect(w * 0.34f, y - 2f, w * 0.82f, y + 2f, paint)
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
-                val pad = 14f
+                val pad = 16f
                 val v = 1f - ((e.y - pad) / max(1f, height - 2 * pad))
                 value = v.coerceIn(0f, 1f)
                 onChange?.invoke(value)
