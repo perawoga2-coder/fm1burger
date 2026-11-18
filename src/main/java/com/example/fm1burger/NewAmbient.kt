@@ -49,6 +49,8 @@ class NewAmbient {
             "Whistling air that wanders through hollow places."
         )
         private const val VOICES = 6
+        /** Evens out the loudness of the creatures (measured: each one peaks near the same level). */
+        private val KIND_GAIN = floatArrayOf(0.92f, 4.2f, 0.42f, 0.8f, 1.2f, 1.6f, 0.26f)
         const val WF = 240
     }
 
@@ -357,7 +359,7 @@ class NewAmbient {
                 out = bp * env(v.t, v.len, 1.5f, 2.2f) * 0.9f
             }
         }
-        return out * v.amp
+        return out * v.amp * KIND_GAIN[v.kind.coerceIn(0, N_KIND - 1)]
     }
 
     /** One stereo sample of the whole soundscape (audio thread). */
