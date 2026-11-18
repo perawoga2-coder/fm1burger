@@ -77,7 +77,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
         showMode(0)
     }
 
-    private fun showMode(m: Int) {
+    fun showMode(m: Int) {
         mode = m
         bassBox.visibility = if (m == 0) View.VISIBLE else View.GONE
         anaBox.visibility = if (m == 1) View.VISIBLE else View.GONE

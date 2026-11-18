@@ -27,6 +27,15 @@ class MainActivity : Activity() {
         const val REQ_IMPORT = 10
         const val REQ_EXPORT = 11
         const val REQ_EXPORT_FILE = 12
+
+        // page numbers (the order of the screens list)
+        const val TAB_TRACKS = 0
+        const val TAB_EDIT = 4
+        const val TAB_PADS = 6
+        const val TAB_SYNTH = 7
+        const val TAB_VOICE = 8
+        const val TAB_SONG = 9
+        const val TAB_HOME = 10
     }
 
     lateinit var ui: Ui
@@ -38,6 +47,11 @@ class MainActivity : Activity() {
     lateinit var flow: RecordFlow
     lateinit var editScreen: EditScreen
     lateinit var libraryScreen: LibraryScreen
+    lateinit var synthScreen: SynthScreen
+    lateinit var homeScreen: HomeScreen
+
+    /** What the 16 lanes of the Home page show (saved with the project). */
+    val lanes = LaneSetup()
 
     var sel = 0
     var lastMix: File? = null
@@ -90,7 +104,7 @@ class MainActivity : Activity() {
         engine.bank.load(File(filesDir, "parts.json"))
         engine.bank.loadClips(filesDir)
         lastPartVersion = engine.bank.version
-        showTab(0)
+        showTab(TAB_HOME)
 
         val crash = CrashLog.take(this)
         if (crash != null) showCrash(crash)
@@ -281,14 +295,16 @@ class MainActivity : Activity() {
         val fx = FxScreen(this)
         val pads = PadsScreen(this)
         val synth = SynthScreen(this)
+        synthScreen = synth
         val voice = VoiceScreen(this)
         val song = SongScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song)
+        homeScreen = HomeScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen)
 
         // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
         tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
-        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song")
+        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song", "⌂ Home")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -296,7 +312,8 @@ class MainActivity : Activity() {
             b.minimumHeight = ui.dp(36)
             b.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6))
             btns.add(b)
-            tabRow.addView(b, ui.w(0f, 3))
+            // Home is the first tab on the left
+            if (i == TAB_HOME) tabRow.addView(b, 0, ui.w(0f, 3)) else tabRow.addView(b, ui.w(0f, 3))
         }
         tabBtns = btns
         tabScroll = HorizontalScrollView(this)
@@ -367,6 +384,12 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /** Opens the Synth page on the bassline (0) or the analog synth (1). */
+    fun openSynth(mode: Int) {
+        synthScreen.showMode(mode)
+        showTab(TAB_SYNTH)
     }
 
     fun refreshCurrent() {
@@ -716,7 +739,7 @@ class MainActivity : Activity() {
         if (bk.version != lastPartVersion) {
             lastPartVersion = bk.version
             // the patterns changed to another part: redraw the pages that show patterns
-            if (cur in intArrayOf(0, 1, 2, 6, 7, 9)) screens[cur].onShow()
+            if (cur in intArrayOf(0, 1, 2, 6, 7, 9, TAB_HOME)) screens[cur].onShow()
         }
         // the dot in front of the status line: red = recording, green = playing, grey = stopped
         val dc = when {
@@ -894,7 +917,7 @@ class MainActivity : Activity() {
 
     fun openEdit(f: File) {
         editScreen.pendingOpen = f
-        showTab(4)
+        showTab(TAB_EDIT)
     }
 
     // ---------------- import / export ----------------

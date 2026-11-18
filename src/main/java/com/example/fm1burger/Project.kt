@@ -93,6 +93,7 @@ class Project(private val a: MainActivity) {
             o.put("drumFxOn", dfo)
             o.put("drumFxA", dfa)
             o.put("drumFxB", dfb)
+            o.put("lanes", a.lanes.toJson())
             SafeIo.writeText(file, o.toString())
         } catch (ex: Exception) {
         }
@@ -103,6 +104,7 @@ class Project(private val a: MainActivity) {
             if (!file.exists()) return
             val e = a.engine
             val o = JSONObject(file.readText())
+            a.lanes.fromJson(o.optJSONObject("lanes"))
             e.bpm = o.optInt("bpm", 120)
             e.masterVol = o.optDouble("master", 0.9).toFloat()
             e.padVol = o.optDouble("padVol", 0.8).toFloat()
