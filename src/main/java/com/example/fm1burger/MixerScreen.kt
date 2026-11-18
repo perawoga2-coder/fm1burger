@@ -41,7 +41,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
     private var lastOut = 0
 
     init {
-        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
         root.addView(content)
 
         val op = ui.panel()

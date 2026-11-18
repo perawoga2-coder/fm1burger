@@ -75,6 +75,7 @@ class MainActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var statusDot: View
     private lateinit var tabScroll: HorizontalScrollView
+    private lateinit var homeFab: Button
     private var dotColor = 0
     private val cueBtns = ArrayList<Button>()
     private var cueKey = ""
@@ -327,12 +328,33 @@ class MainActivity : Activity() {
 
         val content = FrameLayout(this)
         for (s in screens) content.addView(s.root)
+
+        // a floating Home button on every page except Home itself
+        homeFab = ui.button("⌂  Home") { showTab(TAB_HOME) }
+        homeFab.textSize = 14f
+        homeFab.typeface = Ui.BOLD
+        homeFab.setPadding(ui.dp(18), 0, ui.dp(20), 0)
+        ui.styleButton(homeFab, true, Theme.ACCENT, 24)
+        homeFab.elevation = ui.dp(8).toFloat()
+        val fl = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, ui.dp(48))
+        fl.gravity = android.view.Gravity.BOTTOM or android.view.Gravity.END
+        fl.setMargins(0, 0, ui.dp(16), ui.dp(16))
+        content.addView(homeFab, fl)
+
         root.addView(content, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
     }
 
+    /** The phone's back button: from any page go back to Home first, from Home leave the app. */
+    @Deprecated("Deprecated in Java")
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (cur != TAB_HOME) showTab(TAB_HOME) else super.onBackPressed()
+    }
+
     fun showTab(i: Int) {
         cur = i
+        homeFab.visibility = if (i == TAB_HOME) View.GONE else View.VISIBLE
         screens.forEachIndexed { idx, s -> s.root.visibility = if (idx == i) View.VISIBLE else View.GONE }
         tabBtns.forEachIndexed { idx, b -> styleTab(b, idx == i) }
         // keep the open tab visible in the scrolling tab bar

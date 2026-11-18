@@ -51,7 +51,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
     private val noteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
     init {
-        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
         root.addView(content)
         content.addView(ui.title("Synth"))
         val tabs = ui.row()

@@ -38,7 +38,7 @@ class VoiceScreen(private val a: MainActivity) : Screen {
     private var takeActive = false
 
     init {
-        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
         root.addView(content)
         content.addView(ui.title("Voice (5th track)"))
         content.addView(

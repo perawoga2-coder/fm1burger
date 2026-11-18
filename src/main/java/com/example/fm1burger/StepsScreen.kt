@@ -17,7 +17,7 @@ class StepsScreen(private val a: MainActivity) : Screen {
     private lateinit var info: TextView
 
     init {
-        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
         root.addView(content)
 
         val selRow = ui.row()

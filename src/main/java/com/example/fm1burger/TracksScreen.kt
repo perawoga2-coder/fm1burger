@@ -37,7 +37,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
     private fun sel(): Track = e.tracks[a.sel]
 
     init {
-        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
         root.addView(content)
         content.addView(
             ui.text(

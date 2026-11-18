@@ -8,11 +8,12 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.fm1burger"
+        // Burger Studio is its own app, so it installs next to the old FM1 Burger (1.0) instead of over it
+        applicationId = "com.example.burgerstudio"
         minSdk = 23
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
     }
 
     // Same signing key for every build, so a new APK can be installed over the old one
@@ -40,4 +41,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+// the APK file carries the version: burgerstudio-v2.0-debug.apk
+base {
+    archivesName.set("burgerstudio-v" + android.defaultConfig.versionName)
 }
