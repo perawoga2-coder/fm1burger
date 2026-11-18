@@ -82,6 +82,7 @@ class MainActivity : Activity() {
         flow = RecordFlow(this)
 
         buildUi()
+        if (savedInstanceState == null) showSplash()
         engine.start()
         project.load()
         SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
@@ -129,6 +130,17 @@ class MainActivity : Activity() {
         try { SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog) } catch (e: Exception) { }
         try { VocalSave.save(File(filesDir, "vocal.json"), engine.vocal) } catch (e: Exception) { }
         try { engine.bank.save(File(filesDir, "parts.json")) } catch (e: Exception) { }
+    }
+
+    /** The intro animation over the app; it removes itself when done (or when tapped). */
+    private fun showSplash() {
+        try {
+            val host = findViewById<FrameLayout>(android.R.id.content)
+            val sp = SplashView(this) { }
+            host.addView(sp, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            sp.start()
+        } catch (e: Exception) {
+        }
     }
 
     private fun showCrash(report: String) {
