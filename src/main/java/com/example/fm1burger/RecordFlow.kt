@@ -49,7 +49,7 @@ class RecordFlow(private val a: MainActivity) {
     fun statusLine(): String {
         val r = a.recorder
         if (!r.running) return ""
-        val what = if (recLabel == "FM1") "SAMPLING FM-1" else "REC"
+        val what = if (recLabel == "FM1") "SAMPLING" else "REC"
         if (r.waitingGate) return "● $what ${where()}: waiting for the next bar..."
         var s = String.format(
             Locale.US, "● %s %s · %.1f / %d s · level %d%%",
@@ -106,8 +106,8 @@ class RecordFlow(private val a: MainActivity) {
         val dev = a.recorder.fm1Input()
         if (dev == null) {
             problem(
-                "No FM-1 audio input found",
-                "Connect the FM-1 with the USB cable (or a line cable) and try again.\n\n" +
+                "No instrument input found",
+                "Connect a synth, drum machine or any instrument with a USB audio cable (or a line cable) and try again.\n\n" +
                     "Long press S to choose another input."
             )
             return
@@ -164,7 +164,7 @@ class RecordFlow(private val a: MainActivity) {
         val auto = check("Auto level to 90% after recording", true)
         box.addView(wait)
         box.addView(auto)
-        box.addView(tip("An external mic on the 3.5 mm jack, a USB mic or the FM-1 over USB shows up in the list when it is plugged in."))
+        box.addView(tip("An external mic on the 3.5 mm jack, a USB mic or an instrument over USB shows up in the list when it is plugged in."))
 
         val title = if (ti < 0) "Record a new sample" else "Record into track ${ti + 1}"
         AlertDialog.Builder(a)
@@ -192,14 +192,14 @@ class RecordFlow(private val a: MainActivity) {
         val devs = a.recorder.inputs()
         val box = ui.col()
         box.setPadding(ui.dp(20), ui.dp(10), ui.dp(20), ui.dp(4))
-        box.addView(ui.text("Audio input (FM-1 over USB, or a line in)", 13f, Theme.DIM))
+        box.addView(ui.text("Audio input (an instrument over USB, or a line in)", 13f, Theme.DIM))
         val src = ui.spinner(devs.map { a.recorder.label(it) }.ifEmpty { listOf("No input found") }) {}
         val fm = a.recorder.fm1Input()
         val fmIdx = if (fm == null) -1 else devs.indexOfFirst { it.id == fm.id }
         if (fmIdx >= 0) src.setSelection(fmIdx)
         box.addView(src)
         val canMidi = a.midi.connected
-        val sendNote = check("Play a note on the FM-1 while sampling (needs SYNC / MIDI)", canMidi)
+        val sendNote = check("Play a note on the instrument while sampling (needs SYNC / MIDI)", canMidi)
         sendNote.isEnabled = canMidi
         box.addView(sendNote)
         val notes = (36..84).toList()
@@ -214,10 +214,10 @@ class RecordFlow(private val a: MainActivity) {
         box.addView(lenSp)
         val auto = check("Auto level to 90% after sampling", true)
         box.addView(auto)
-        box.addView(tip("The line / 3.5 mm input can clip. If you see CLIPPING, lower the volume on the FM-1 and sample again."))
+        box.addView(tip("The line / 3.5 mm input can clip. If you see CLIPPING, lower the volume on the instrument and sample again."))
 
         AlertDialog.Builder(a)
-            .setTitle("Sample the FM-1 into track ${ti + 1}")
+            .setTitle("Sample an instrument into track ${ti + 1}")
             .setView(ScrollView(a).also { it.addView(box) })
             .setPositiveButton("Sample") { _, _ ->
                 val dev = devs.getOrNull(src.selectedItemPosition)
@@ -281,7 +281,7 @@ class RecordFlow(private val a: MainActivity) {
         box.addView(gs)
 
         val title = when {
-            sampling -> "Sampling the FM-1 into ${where()}"
+            sampling -> "Sampling into ${where()}"
             ti < 0 -> "Recording a new sample"
             else -> "Recording into track ${ti + 1}"
         }

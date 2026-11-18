@@ -54,7 +54,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
         content.addView(
             ui.text(
                 "16 pads in each of 2 banks (A and B, 32 sounds). Tap a pad to play it, long press it to choose its sample. " +
-                    "MIDI notes from the FM-1 also play the pads (note number modulo 32: notes 0-15 bank A, 16-31 bank B).",
+                    "Notes from a MIDI keyboard or controller also play the pads (note number modulo 32: notes 0-15 bank A, 16-31 bank B).",
                 12f, Theme.DIM
             ), ui.fullWidth(4)
         )

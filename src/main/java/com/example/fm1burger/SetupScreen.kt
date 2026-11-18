@@ -75,7 +75,7 @@ class SetupScreen(private val a: MainActivity) : Screen {
 
         val op = ui.panel()
         op.addView(ui.text("Sound out and levels", 14f, Theme.ACCENT, true))
-        op.addView(ui.text("The audio output (tablet speaker, headphones, the FM-1 over USB) and the master volume are on the Mixer.",
+        op.addView(ui.text("The audio output (tablet speaker, headphones, a USB interface) and the master volume are on the Mixer.",
             12f, Theme.DIM), ui.fullWidth(4))
         val orow = ui.row()
         orow.addView(ui.button("Open the Mixer") { a.showTab(MainActivity.TAB_MIXER) }, ui.w(1f, 3))
@@ -97,14 +97,35 @@ class SetupScreen(private val a: MainActivity) : Screen {
         }, ui.w(1f, 3))
         fr.addView(ui.button("Import .syx bank") { a.importSyx() }, ui.w(1f, 3))
         fp.addView(fr, ui.fullWidth(4))
-        fp.addView(ui.button("Save MakerHip_FM.syx (for the FM-1)") {
+        content.addView(fp, ui.fullWidth(10))
+
+        // Devices: everything for one piece of gear in one place (the rest of the app needs no device)
+        val dv = ui.panel()
+        dv.addView(ui.text("Devices", 14f, Theme.ACCENT, true))
+        dv.addView(ui.text("Burger Studio works on its own. Gear you connect adds to it: any MIDI keyboard or controller " +
+            "(MIDI sync), any instrument to sample (S on a sampler track), any USB audio interface (Mixer).", 12f, Theme.DIM),
+            ui.fullWidth(4))
+        dv.addView(ui.text("M-VAVE FM-1 (optional)", 13f, Theme.TEXT, true), ui.fullWidth(8))
+        dv.addView(ui.text("With the Burger Studio firmware on the FM-1, samples go from the app into its sample slots: " +
+            "Library > Devices… or the editor's Devices… button.", 11f, Theme.DIM), ui.fullWidth(2))
+        val dr = ui.row()
+        dr.addView(ui.button("Firmware installer (Chrome)") {
+            try {
+                a.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("https://perawoga2-coder.github.io/Fm1sampa/")))
+            } catch (ex: Exception) {
+                ui.toast("perawoga2-coder.github.io/Fm1sampa")
+            }
+        }, ui.w(1f, 3))
+        dr.addView(ui.button("Save MakerHip_FM.syx") {
             try {
                 a.saveBytes(FmBank.SYX, FmBank.syxBytes(a), "application/octet-stream")
             } catch (ex: Exception) {
                 ui.toast("Could not read the bank")
             }
-        }, ui.fullWidth(4))
-        content.addView(fp, ui.fullWidth(10))
+        }, ui.w(1f, 3))
+        dv.addView(dr, ui.fullWidth(4))
+        content.addView(dv, ui.fullWidth(10))
 
         val ab = ui.panel()
         ab.addView(ui.text("About", 14f, Theme.ACCENT, true))

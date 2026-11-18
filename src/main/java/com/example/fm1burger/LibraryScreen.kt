@@ -48,18 +48,9 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         }, ui.w(1f, 3))
         fm.addView(ui.button("Import FM bank (.syx)") { a.importSyx() }, ui.w(1f, 3))
         content.addView(fm, ui.fullWidth(4))
-        val fm2 = ui.row()
-        fm2.addView(ui.button("Save MakerHip_FM.syx (for the FM-1)") {
-            try {
-                a.saveBytes(FmBank.SYX, FmBank.syxBytes(a), "application/octet-stream")
-            } catch (ex: Exception) {
-                ui.toast("Could not read the bank")
-            }
-        }, ui.w(1f, 3))
-        content.addView(fm2, ui.fullWidth(2))
         content.addView(
-            ui.text("FM banks: any DX7 / FM-1 .syx bank (32 voices) can be turned into samples here. " +
-                "The MakerHip FM bank is our own and can also be loaded into the FM-1.", 11f, Theme.DIM), ui.fullWidth(2)
+            ui.text("FM banks: any DX7-style .syx bank (32 voices) can be turned into samples here. " +
+                "The MakerHip FM bank is our own.", 11f, Theme.DIM), ui.fullWidth(2)
         )
 
         search.hint = "Search name or tag..."
@@ -86,7 +77,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         listBox.removeAllViews()
         val files = store.list(search.text.toString())
         if (files.isEmpty()) {
-            listBox.addView(ui.text("No samples yet. Record, sample the FM-1, or import a WAV file.", 14f, Theme.DIM))
+            listBox.addView(ui.text("No samples yet. Record, sample an instrument, or import a WAV file.", 14f, Theme.DIM))
             return
         }
         for (f in files) listBox.addView(rowFor(f), ui.fullWidth(8))
@@ -110,16 +101,30 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         r2.addView(ui.button("Tags") { tagsDialog(f) }, ui.w(1f, 2))
         r2.addView(ui.button("Rename") { renameDialog(f) }, ui.w(1f, 2))
         r2.addView(ui.button("Export") { exportPlain(f) }, ui.w(1f, 2))
-        r2.addView(ui.button("For FM-1") { fm1Dialog(f) }, ui.w(1f, 2))
-        r2.addView(ui.button("→ FM-1 USB") {
-            Thread {
-                val d = store.loadEngine(f.name)
-                a.runOnUiThread { if (d == null) ui.toast("Cannot read this file") else a.sendToFm1(f.name, d) }
-            }.start()
-        }, ui.w(1f, 2))
+        r2.addView(ui.button("Devices…") { deviceMenu(f) }, ui.w(1f, 2))
         r2.addView(ui.button("Delete") { deleteDialog(f) }, ui.w(1f, 2))
         p.addView(r2)
         return p
+    }
+
+    /** Things for connected gear (the FM-1 for now), kept out of the way of the main buttons. */
+    private fun deviceMenu(f: File) {
+        AlertDialog.Builder(a)
+            .setTitle(f.name)
+            .setItems(arrayOf(
+                "FM-1: send into a sample slot over USB (Burger Studio firmware)",
+                "FM-1: export a WAV that fits its sample memory"
+            )) { _, w ->
+                if (w == 0) {
+                    Thread {
+                        val d = store.loadEngine(f.name)
+                        a.runOnUiThread { if (d == null) ui.toast("Cannot read this file") else a.sendToFm1(f.name, d) }
+                    }.start()
+                } else {
+                    fm1Dialog(f)
+                }
+            }
+            .show()
     }
 
     private fun preview(f: File) {

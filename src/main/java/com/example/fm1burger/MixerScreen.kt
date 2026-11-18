@@ -62,7 +62,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         op.addView(outSpinner)
         op.addView(
             ui.text(
-                "Choose the tablet speaker, or the FM-1 USB audio if you want to hear everything through the FM-1.",
+                "Choose the tablet speaker, headphones, or a USB audio interface or instrument.",
                 12f, Theme.DIM
             )
         )

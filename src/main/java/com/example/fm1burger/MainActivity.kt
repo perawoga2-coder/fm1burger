@@ -513,7 +513,7 @@ class MainActivity : Activity() {
     /** Tap on the BPM number: type a tempo. */
     private fun bpmDialog() {
         if (engine.follow) {
-            ui.toast("The tempo comes from the FM-1 while in FOLLOW sync")
+            ui.toast("The tempo comes from the MIDI device while in FOLLOW sync")
             return
         }
         val ed = android.widget.EditText(this)
@@ -710,7 +710,7 @@ class MainActivity : Activity() {
         }
         if (engine.follow) {
             b.songOn = true
-            ui.toast("Song mode on. In FOLLOW sync, press play on the FM-1 to start the song.")
+            ui.toast("Song mode on. In FOLLOW sync, press play on the MIDI device to start the song.")
             return
         }
         b.songOn = true
@@ -985,7 +985,7 @@ class MainActivity : Activity() {
         }
         val infos = midi.devices()
         if (infos.isEmpty()) {
-            ui.toast("No MIDI device found. Connect the FM-1 with the USB cable and allow USB access.")
+            ui.toast("No MIDI device found. Connect a MIDI keyboard, synth or controller by USB and allow USB access.")
             return
         }
         if (infos.size == 1) {
@@ -993,7 +993,7 @@ class MainActivity : Activity() {
         } else {
             val names = Array(infos.size) { midi.nameOf(infos[it]) }
             AlertDialog.Builder(this)
-                .setTitle("Which MIDI device is the FM-1?")
+                .setTitle("Which MIDI device?")
                 .setItems(names) { _, which -> connectMidi(infos[which], mode) }
                 .show()
         }
@@ -1034,11 +1034,11 @@ class MainActivity : Activity() {
     }
 
     private fun syncLine(): String = when (syncState) {
-        1 -> "LEAD: the app sends the clock to ${midi.deviceName}. The play button starts the FM-1 too."
+        1 -> "LEAD: the app sends the clock to ${midi.deviceName}. The play button starts it too."
         2 -> if (midi.clockActive()) {
             "FOLLOW: clock from ${midi.deviceName} OK"
         } else {
-            "FOLLOW: no clock from the FM-1 yet. Press play on the FM-1."
+            "FOLLOW: no clock from ${midi.deviceName} yet. Press play there."
         }
         else -> syncNote
     }
@@ -1589,7 +1589,7 @@ class MainActivity : Activity() {
                 }
                 val bank = displayName(uri).removeSuffix(".syx").removeSuffix(".SYX").take(20)
                 runOnUiThread {
-                    if (voices == null) ui.toast("This is not a DX7 / FM-1 .syx bank (32 voices) or single voice")
+                    if (voices == null) ui.toast("This is not a DX7-style .syx bank (32 voices) or single voice")
                     else syxDialog(bank, voices)
                 }
             }.start()

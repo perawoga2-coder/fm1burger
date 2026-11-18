@@ -56,7 +56,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
         content.addView(
             ui.text(
                 "1 · Sample and edit at the top, then send it to Sampler 1-4.  2 · The tracks: " +
-                    "L = load · R = record the mic · S = sample the FM-1 · M = mute. Track 5 is your voice.  " +
+                    "L = load · R = record the mic · S = sample an instrument (USB audio / line in) · M = mute. Track 5 is your voice.  " +
                     "3 · Loops, slices and all effects of the selected track below.",
                 11f, Theme.DIM
             ), ui.fullWidth(2)
