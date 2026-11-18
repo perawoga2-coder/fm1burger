@@ -1,6 +1,7 @@
 package com.example.fm1burger
 
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.pow
@@ -107,6 +108,10 @@ class FxChain {
     }
 
     val on = BooleanArray(N)
+
+    /** How hard every effect goes: 1 = normal, up to 2 = extreme (longer, wetter, deeper, dirtier). */
+    @Volatile var intensity = 1f
+
     val a = FloatArray(N) { DEF_A[it] }
     val b = FloatArray(N) { DEF_B[it] }
 
@@ -120,6 +125,8 @@ class FxChain {
     private var lpB = -1f
     private var hpA = -1f
     private var hpB = -1f
+    private var lastK0 = -1f
+    private var lastK1 = -1f
 
     // reverb
     private val combs = arrayOf(Comb(1116), Comb(1188), Comb(1277), Comb(1356))
@@ -179,38 +186,45 @@ class FxChain {
                 else -> chop(x, beat)
             }
         }
+        // extreme settings can get loud: a soft safety limit
+        if (intensity > 1.01f && abs(x) > 1.2f) x = tanh(x / 1.2f) * 1.2f
         return x
     }
 
+    private val k: Float get() = (intensity - 1f).coerceIn(0f, 1f)   // 0 at normal, 1 at extreme
+
     private fun lpf(x: Float): Float {
         if (a[0] >= 0.99f) return x
-        if (a[0] != lpA || b[0] != lpB) {
+        if (a[0] != lpA || b[0] != lpB || k != lastK0) {
+            lastK0 = k
             lpA = a[0]
             lpB = b[0]
-            lp.lowpass(cut(lpA), 0.7f + lpB * 8f)
+            lp.lowpass(cut(lpA), 0.7f + lpB * (8f + 10f * k))
         }
         return lp.process(x)
     }
 
     private fun hpf(x: Float): Float {
         if (a[1] <= 0.01f) return x
-        if (a[1] != hpA || b[1] != hpB) {
+        if (a[1] != hpA || b[1] != hpB || k != lastK1) {
+            lastK1 = k
             hpA = a[1]
             hpB = b[1]
-            hp.highpass(cut(hpA), 0.7f + hpB * 8f)
+            hp.highpass(cut(hpA), 0.7f + hpB * (8f + 10f * k))
         }
         return hp.process(x)
     }
 
     private fun reverb(x: Float): Float {
-        val fb = 0.7f + b[2] * 0.25f
+        val fb = (0.7f + b[2] * (0.25f + 0.035f * k)).coerceAtMost(0.985f)
         val inp = x * 0.06f
         var s = 0f
-        for (c in combs) s += c.p(inp, fb, 0.3f)
+        for (c in combs) s += c.p(inp, fb, 0.3f - 0.15f * k)
         var w = s
         for (ap in aps) w = ap.p(w)
         val m = a[2]
-        return x * (1f - m * 0.5f) + w * m * 3f
+        // extreme: up to fully wet, and louder tails
+        return x * (1f - (m * (0.5f + 0.5f * k)).coerceAtMost(1f)) + w * m * (3f + 2f * k)
     }
 
     private fun delay(x: Float, bpm: Double): Float {
@@ -220,14 +234,14 @@ class FxChain {
         var r = dw - n
         if (r < 0) r += dbuf.size
         val d = dbuf[r]
-        dbuf[dw] = x + d * 0.45f
+        dbuf[dw] = x + d * (0.45f + 0.45f * k)      // more repeats, up to a long dub tail
         dw++
         if (dw >= dbuf.size) dw = 0
-        return x + d * a[3]
+        return x + d * a[3] * (1f + 0.6f * k)
     }
 
     private fun dist(x: Float): Float {
-        val drive = 1f + a[4] * 25f
+        val drive = 1f + a[4] * (25f + 75f * k)
         val y = tanh(x * drive) * 0.8f
         return x * (1f - b[4]) + y * b[4]
     }
@@ -236,7 +250,7 @@ class FxChain {
         cbuf[cw] = x
         cph += (0.2f + b[5] * 3f) / Cfg.SR
         if (cph >= 1f) cph -= 1f
-        val depth = (3f + a[5] * 7f) * Cfg.SR / 1000f
+        val depth = (3f + a[5] * (7f + 9f * k)) * Cfg.SR / 1000f
         val d = 12f * Cfg.SR / 1000f + sin(2f * PI.toFloat() * cph) * depth * 0.5f
         var pos = cw - d
         while (pos < 0f) pos += cbuf.size
@@ -246,7 +260,7 @@ class FxChain {
         val s = cbuf[i0] * (1f - fr) + cbuf[i1] * fr
         cw++
         if (cw >= cbuf.size) cw = 0
-        return x * (1f - a[5] * 0.4f) + s * a[5] * 0.7f
+        return x * (1f - a[5] * (0.4f + 0.3f * k)) + s * a[5] * (0.7f + 0.3f * k)
     }
 
     private fun phaser(x: Float): Float {
@@ -259,22 +273,22 @@ class FxChain {
             pcoef = (t - 1f) / (t + 1f)
         }
         pcnt--
-        var s = x + pfb * 0.5f
+        var s = x + pfb * (0.5f + 0.4f * k)
         for (k in 0 until 4) {
             val y = pcoef * s + apz[k]
             apz[k] = s - pcoef * y
             s = y
         }
         pfb = s
-        return x * (1f - a[6] * 0.5f) + s * a[6] * 0.5f
+        return x * (1f - a[6] * (0.5f + 0.2f * k)) + s * a[6] * (0.5f + 0.4f * k)
     }
 
     private fun lofi(x: Float): Float {
         if (lfCnt <= 0) {
-            val bits = 16f - a[7] * 12f
+            val bits = 16f - a[7] * (12f + 2f * k)          // down to 2 bits at extreme
             val levels = 2f.pow(bits - 1f)
             lfHold = round(x * levels) / levels
-            lfCnt = 1 + (b[7] * b[7] * 15f).toInt()
+            lfCnt = 1 + (b[7] * b[7] * (15f + 33f * k)).toInt()
         }
         lfCnt--
         return lfHold
@@ -284,7 +298,7 @@ class FxChain {
         wph += (0.3f + b[8] * 8f) / Cfg.SR
         if (wph >= 1f) wph -= 1f
         val l = sin(2f * PI.toFloat() * wph)
-        val fc = 18000f * 0.01f.pow(a[8] * (0.5f + 0.5f * l))
+        val fc = 18000f * (0.01f - 0.007f * k).pow(a[8] * (0.5f + 0.5f * l))
         val g = (1f - exp(-2f * PI.toFloat() * fc / Cfg.SR)).coerceIn(0f, 1f)
         wy += g * (x - wy)
         return wy
@@ -294,7 +308,7 @@ class FxChain {
         val per = CHOP_BEATS[(b[9] * 3.99f).toInt().coerceIn(0, 3)]
         val ph = (beat / per) % 1.0
         val g = if (ph < 0.5) 1f else 1f - a[9]
-        cgs += (g - cgs) * 0.02f
+        cgs += (g - cgs) * (0.02f + 0.18f * k)     // extreme: hard, gated edges
         return x * cgs
     }
 }

@@ -415,7 +415,8 @@ class PartBank(private val e: Engine) {
     /** Audio thread: true when the patterns must stay quiet because the part plays its recording only. */
     fun silentNow(): Boolean {
         val p = parts[cur]
-        return p.mode == 1 && p.hasClip()
+        // "recording only" keeps the patterns quiet only while that recording really plays
+        return p.mode == 1 && p.hasClip() && (songOn || layerOn[cur])
     }
 
     private fun barFrames(bpm: Double): Double = Cfg.SR * 60.0 * 4.0 / bpm
@@ -455,7 +456,8 @@ class PartBank(private val e: Engine) {
         partChanged = false
         val p = parts[cur]
         val c = p.clip
-        if (c != null && p.clipBars > 0 && p.mode != 0) {
+        // the part plays its own recording only in Song mode; otherwise the cue switches decide
+        if (songOn && c != null && p.clipBars > 0 && p.mode != 0) {
             if (barInPart % p.clipBars == 0) {
                 clipData = c
                 clipPos = 0
@@ -481,7 +483,7 @@ class PartBank(private val e: Engine) {
         barInPart = 0
         val p = parts[cur]
         val c = p.clip
-        if (c != null && p.clipBars > 0 && p.mode != 0) {
+        if (songOn && c != null && p.clipBars > 0 && p.mode != 0) {
             clipData = c
             clipPos = (s * barFrames(bpm) / Cfg.STEPS).toInt()
         } else {

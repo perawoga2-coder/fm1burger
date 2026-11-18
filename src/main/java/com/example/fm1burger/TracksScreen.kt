@@ -27,6 +27,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
     private lateinit var pitchS: SliderRow
     private lateinit var lpS: SliderRow
     private lateinit var hpS: SliderRow
+    private lateinit var intensityS: SliderRow
     private lateinit var startS: SliderRow
     private lateinit var endS: SliderRow
     private lateinit var stepBtn: Button
@@ -82,6 +83,13 @@ class TracksScreen(private val a: MainActivity) : Screen {
         }
         for (s in listOf(delayS, reverbS, pitchS, lpS, hpS)) row.addView(s.view, ui.w(1f, 4))
         p.addView(row)
+        val r2 = ui.row()
+        intensityS = ui.slider("Effect intensity", 100, 0, { if (it >= 95) "EXTREME" else "${100 + it}%" }) { v ->
+            sel().fx.intensity = 1f + v / 100f
+        }
+        r2.addView(intensityS.view, ui.w(2f, 4))
+        r2.addView(ui.button("All 10 effects ›") { a.showTab(MainActivity.TAB_FX) }, ui.w(1f, 3))
+        p.addView(r2)
         content.addView(p, ui.fullWidth(0))
     }
 
@@ -211,6 +219,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
         pitchS.set(t.pitch + 24)
         lpS.set(if (t.fx.on[0]) (t.fx.a[0] * 100).toInt() else 100)
         hpS.set(if (t.fx.on[1]) (t.fx.a[1] * 100).toInt() else 0)
+        intensityS.set(((t.fx.intensity - 1f) * 100).toInt().coerceIn(0, 100))
         startS.set((t.start * 100).toInt())
         endS.set((t.end * 100).toInt())
         ui.styleButton(stepBtn, !t.loop)

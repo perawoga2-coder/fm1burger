@@ -57,6 +57,7 @@ class Project(private val a: MainActivity) {
                 j.put("fxA", fa)
                 j.put("fxB", fb)
                 j.put("fxOrder", ord)
+                j.put("fxIntensity", t.fx.intensity.toDouble())
                 ts.put(j)
             }
             o.put("tracks", ts)
@@ -146,6 +147,7 @@ class Project(private val a: MainActivity) {
                         if (fa != null && k < fa.length()) t.fx.a[k] = fa.optDouble(k, FxChain.DEF_A[k].toDouble()).toFloat()
                         if (fb != null && k < fb.length()) t.fx.b[k] = fb.optDouble(k, FxChain.DEF_B[k].toDouble()).toFloat()
                     }
+                    t.fx.intensity = j.optDouble("fxIntensity", 1.0).toFloat().coerceIn(1f, 2f)
                     val ord = j.optJSONArray("fxOrder")
                     if (ord != null && ord.length() == FxChain.N) {
                         val arr = IntArray(FxChain.N) { ord.optInt(it, it) }

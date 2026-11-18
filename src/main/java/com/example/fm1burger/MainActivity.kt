@@ -31,6 +31,7 @@ class MainActivity : Activity() {
         // page numbers (the order of the screens list)
         const val TAB_TRACKS = 0
         const val TAB_EDIT = 4
+        const val TAB_FX = 5
         const val TAB_PADS = 6
         const val TAB_SYNTH = 7
         const val TAB_VOICE = 8
@@ -591,7 +592,7 @@ class MainActivity : Activity() {
                 if (which < PartBank.N) {
                     b.setClip(filesDir, which, data, bars)
                     b.version++
-                    ui.toast("Sent to ${PartNames.NAMES[which]}. It plays when that part plays (Song page: play mode).")
+                    ui.toast("Sent to ${PartNames.NAMES[which]}. Tap its cue at the top to play it, tap again to stop.")
                 }
             }
             .setCancelable(false)

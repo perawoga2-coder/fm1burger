@@ -12,6 +12,7 @@ class FxScreen(private val a: MainActivity) : Screen {
     private val content = ui.col()
     private val listBox = ui.col()
     private val trackBtns = ArrayList<Button>()
+    private lateinit var intensityS: SliderRow
 
     init {
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
@@ -31,11 +32,20 @@ class FxScreen(private val a: MainActivity) : Screen {
                 12f, Theme.DIM
             ), ui.fullWidth(6)
         )
+        intensityS = ui.slider("Effect intensity (this track)", 100, 0, { if (it >= 95) "EXTREME" else "${100 + it}%" }) { v ->
+            e.tracks[a.sel].fx.intensity = 1f + v / 100f
+        }
+        content.addView(intensityS.view, ui.fullWidth(8))
+        content.addView(
+            ui.text("100% = as before. Higher = longer reverb, more delay repeats, harder distortion, deeper chorus, " +
+                "phaser and wobble, crunchier lo-fi, harder chop.", 11f, Theme.DIM), ui.fullWidth(0)
+        )
         content.addView(listBox, ui.fullWidth(6))
     }
 
     override fun onShow() {
         for (i in 0 until Cfg.TRACKS) ui.styleButton(trackBtns[i], i == a.sel, Theme.TRACK_COLORS[i])
+        intensityS.set(((e.tracks[a.sel].fx.intensity - 1f) * 100).toInt().coerceIn(0, 100))
         rebuild()
     }
 
