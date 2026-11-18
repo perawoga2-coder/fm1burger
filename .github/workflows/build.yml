@@ -42,20 +42,27 @@ jobs:
           path: build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # Before anything replaces "latest", save the old FM1 Burger 1.0 APK as its own release (only once)
-      - name: Keep the old 1.0 as its own release
+      # The "v1.0" release must hold the original FM1 Burger (commit 5831bd6, the last build before the redesign).
+      # If it is missing or holds something else, rebuild that commit with the same signing key and put it there.
+      - name: Keep the original FM1 Burger 1.0 as its own release
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          OLD: 5831bd6c0bb8a268902b62461367a6196858a296
         run: |
-          if ! gh release view v1.0 >/dev/null 2>&1 && gh release view latest >/dev/null 2>&1; then
-            mkdir -p old
-            gh release download latest -D old -p '*.apk'
-            gh release create v1.0 old/*.apk \
-              --title "FM1 Burger 1.0" \
-              --notes "The first version (FM1 Burger). Kept so you can always go back to it." \
-              --target main
+          if gh release view v1.0 --json assets -q '.assets[].name' 2>/dev/null | grep -qx 'fm1burger-debug.apk'; then
+            echo "v1.0 already holds the original FM1 Burger"
+            exit 0
           fi
+          git fetch --depth 1 origin "$OLD"
+          git worktree add old FETCH_HEAD
+          cp debug.keystore old/
+          (cd old && gradle assembleDebug --stacktrace)
+          gh release delete v1.0 --yes --cleanup-tag || true
+          gh release create v1.0 old/build/outputs/apk/debug/fm1burger-debug.apk \
+            --title "FM1 Burger 1.0" \
+            --notes "The original FM1 Burger, before the redesign. Kept so you can always go back to it." \
+            --target "$OLD"
 
       # Every version gets its own release page (v2.0, v2.1, ...); builds of a work branch are marked pre-release
       - name: Publish this version
