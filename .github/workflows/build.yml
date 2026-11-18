@@ -39,6 +39,8 @@ jobs:
           if-no-files-found: error
 
       - name: Publish APK to the Releases page
+        # only builds of main replace the "latest" release; test builds of other branches stay as artifacts
+        if: github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}

@@ -21,10 +21,10 @@ class LibraryScreen(private val a: MainActivity) : Screen {
     private val search = EditText(a)
 
     init {
-        content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
         root.addView(content)
 
-        content.addView(ui.text("Sample library", 18f, Theme.ACCENT, true))
+        content.addView(ui.title("Sample library"))
         val top = ui.row()
         top.addView(ui.button("Import WAV") { a.importFiles() }, ui.w(1f, 3))
         top.addView(ui.button("Stop preview") { a.engine.previewStop() }, ui.w(1f, 3))

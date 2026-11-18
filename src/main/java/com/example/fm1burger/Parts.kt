@@ -575,7 +575,7 @@ class PartBank(private val e: Engine) {
             b.put("data".toByteArray())
             b.putInt(dataLen)
             for (x in d) b.putShort(x)
-            f.writeBytes(b.array())
+            SafeIo.writeBytes(f, b.array())
         } catch (ex: Exception) {
         }
     }
@@ -739,7 +739,7 @@ class PartBank(private val e: Engine) {
             }
             o.put("songPart", sp)
             o.put("songBars", sb)
-            f.writeText(o.toString())
+            SafeIo.writeText(f, o.toString())
         } catch (ex: Exception) {
         }
     }

@@ -153,7 +153,7 @@ object Wav {
     }
 
     fun write(f: File, d: FloatArray, rate: Int) {
-        f.writeBytes(toBytes(d, rate))
+        SafeIo.writeBytes(f, toBytes(d, rate))
     }
 
     fun peak(d: FloatArray, from: Int = 0, to: Int = d.size): Float {

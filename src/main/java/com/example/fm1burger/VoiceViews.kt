@@ -25,7 +25,7 @@ class WaveView(ctx: Context) : View(ctx) {
         val w = width.toFloat()
         val h = height.toFloat()
         p.style = Paint.Style.FILL
-        p.color = Color.rgb(20, 20, 24)
+        p.color = Theme.PANEL2
         c.drawRect(0f, 0f, w, h, p)
         val v = ch ?: return
         val mid = h / 2f
@@ -126,7 +126,7 @@ class EqView(ctx: Context) : View(ctx) {
         val w = width.toFloat()
         val h = height.toFloat()
         p.style = Paint.Style.FILL
-        p.color = Color.rgb(20, 20, 24)
+        p.color = Theme.PANEL2
         c.drawRect(0f, 0f, w, h, p)
         val v = ch ?: return
 

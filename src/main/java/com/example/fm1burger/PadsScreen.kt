@@ -42,9 +42,9 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private val levels = floatArrayOf(1f, 0.65f, 0.35f)
 
     init {
-        content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
         root.addView(content)
-        content.addView(ui.text("Pads and drum sequencer", 18f, Theme.ACCENT, true))
+        content.addView(ui.title("Pads and drum sequencer"))
         content.addView(
             ui.text(
                 "Tap a pad to play it. Long press a pad to choose its sample. " +
@@ -74,7 +74,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
             content.addView(row, ui.fullWidth(4))
         }
 
-        content.addView(ui.text("Drum sequencer", 16f, Theme.ACCENT, true), ui.fullWidth(10))
+        content.addView(ui.title("Drum sequencer"), ui.fullWidth(10))
 
         val tr = ui.row()
         playBtn = ui.button("▶ Play") { doPlay() }

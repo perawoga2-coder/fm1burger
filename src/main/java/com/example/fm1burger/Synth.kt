@@ -380,7 +380,7 @@ object SynthSave {
             ao.put("fxA", fa)
             ao.put("fxB", fb)
             o.put("analog", ao)
-            f.writeText(o.toString())
+            SafeIo.writeText(f, o.toString())
         } catch (ex: Exception) {
         }
     }

@@ -62,6 +62,9 @@ class Engine {
     private var thread: Thread? = null
     val pendingTicks = AtomicInteger(0)
 
+    /** How many audio blocks failed and were replaced by silence (for the status line). */
+    @Volatile var errors = 0
+
     private var tickCount = 0L
     private var tickAcc = 0.0
     private var beatPos = 0.0
@@ -205,6 +208,38 @@ class Engine {
             }
 
             val t0 = System.nanoTime()
+            try {
+                renderBlock(t0, out, tl, tr, tpk)
+            } catch (ex: Throwable) {
+                // never let one bad block kill the audio thread: play silence and carry on
+                errors++
+                java.util.Arrays.fill(out, 0.toShort())
+                for (t in tracks) t.playing = false
+            }
+
+            val w = try {
+                a.write(out, 0, out.size)
+            } catch (ex: Exception) {
+                -1
+            }
+            if (w < 0) {
+                outDevice = null
+                restartOut = true
+                try {
+                    Thread.sleep(100)
+                } catch (e: Exception) {
+                }
+            }
+        }
+        try {
+            at?.stop()
+            at?.release()
+        } catch (e: Exception) {
+        }
+    }
+
+    /** Mixes one block of audio into out. Runs on the audio thread. */
+    private fun renderBlock(t0: Long, out: ShortArray, tl: FloatArray, tr: FloatArray, tpk: FloatArray) {
             handleRequests(t0)
 
             for (i in 0 until Cfg.TRACKS) {
@@ -290,22 +325,6 @@ class Engine {
             mixRec.feed(out)
             for (i in 0 until Cfg.TRACKS) tracks[i].peak = tpk[i]
             masterPeak = mpk
-
-            val w = a.write(out, 0, out.size)
-            if (w < 0) {
-                outDevice = null
-                restartOut = true
-                try {
-                    Thread.sleep(100)
-                } catch (e: Exception) {
-                }
-            }
-        }
-        try {
-            at?.stop()
-            at?.release()
-        } catch (e: Exception) {
-        }
     }
 
     private fun send(b: Int, target: Long) {

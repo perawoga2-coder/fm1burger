@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- One dark theme for the whole app. Widgets that are not styled by hand
+         (sliders, check boxes, text fields, dialogs) pick up these colors. -->
+    <style name="BurgerTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#FFFF7A2F</item>
+        <item name="android:colorPrimary">#FF15151B</item>
+        <item name="android:colorPrimaryDark">#FF0B0B0F</item>
+        <item name="android:colorControlNormal">#FF8F8F9C</item>
+        <item name="android:colorControlActivated">#FFFF7A2F</item>
+        <item name="android:colorControlHighlight">#33FFFFFF</item>
+        <item name="android:colorBackground">#FF0B0B0F</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">#FF15151B</item>
+        <item name="android:navigationBarColor">#FF0B0B0F</item>
+        <item name="android:textColorPrimary">#FFF2F2F5</item>
+        <item name="android:textColorSecondary">#FF8F8F9C</item>
+        <item name="android:textColorHint">#FF6B6B78</item>
+        <item name="android:alertDialogTheme">@style/BurgerDialog</item>
+    </style>
+
+    <style name="BurgerDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#FFFF7A2F</item>
+        <item name="android:colorControlActivated">#FFFF7A2F</item>
+        <item name="android:colorBackground">#FF1C1C24</item>
+        <item name="android:windowBackground">@drawable/dialog_bg</item>
+        <item name="android:textColorPrimary">#FFF2F2F5</item>
+        <item name="android:textColorSecondary">#FFA6A6B2</item>
+        <item name="android:textColorAlertDialogListItem">#FFF2F2F5</item>
+    </style>
+</resources>

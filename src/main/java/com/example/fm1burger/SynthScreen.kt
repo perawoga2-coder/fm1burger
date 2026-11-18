@@ -51,9 +51,9 @@ class SynthScreen(private val a: MainActivity) : Screen {
     private val noteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
     init {
-        content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
         root.addView(content)
-        content.addView(ui.text("Synth", 18f, Theme.ACCENT, true))
+        content.addView(ui.title("Synth"))
         val tabs = ui.row()
         bassTab = ui.button("Bassline") { showMode(0) }
         anaTab = ui.button("Analog synth") { showMode(1) }

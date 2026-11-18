@@ -14,9 +14,9 @@ class FxScreen(private val a: MainActivity) : Screen {
     private val trackBtns = ArrayList<Button>()
 
     init {
-        content.setPadding(ui.dp(10), ui.dp(10), ui.dp(10), ui.dp(24))
+        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
         root.addView(content)
-        content.addView(ui.text("Effects chain", 18f, Theme.ACCENT, true))
+        content.addView(ui.title("Effects chain"))
         val tr = ui.row()
         for (i in 0 until Cfg.TRACKS) {
             val b = ui.button("Track ${i + 1}") { a.selectTrack(i) }

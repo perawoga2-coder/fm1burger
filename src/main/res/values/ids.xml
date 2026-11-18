@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ui.styleButton remembers the last style here so it does not rebuild drawables every tick -->
+    <item name="burger_style" type="id" />
+</resources>

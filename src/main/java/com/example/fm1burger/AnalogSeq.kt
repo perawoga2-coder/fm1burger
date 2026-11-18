@@ -273,7 +273,7 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
     private fun changed() {
         refresh()
         try {
-            file.writeText(seq.toJson())
+            SafeIo.writeText(file, seq.toJson())
         } catch (ex: Exception) {
         }
     }
