@@ -111,6 +111,12 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         r2.addView(ui.button("Rename") { renameDialog(f) }, ui.w(1f, 2))
         r2.addView(ui.button("Export") { exportPlain(f) }, ui.w(1f, 2))
         r2.addView(ui.button("For FM-1") { fm1Dialog(f) }, ui.w(1f, 2))
+        r2.addView(ui.button("→ FM-1 USB") {
+            Thread {
+                val d = store.loadEngine(f.name)
+                a.runOnUiThread { if (d == null) ui.toast("Cannot read this file") else a.sendToFm1(f.name, d) }
+            }.start()
+        }, ui.w(1f, 2))
         r2.addView(ui.button("Delete") { deleteDialog(f) }, ui.w(1f, 2))
         p.addView(r2)
         return p

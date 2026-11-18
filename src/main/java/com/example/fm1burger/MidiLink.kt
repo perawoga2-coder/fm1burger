@@ -36,6 +36,27 @@ class MidiLink(ctx: Context, private val engine: Engine) {
     val deviceName: String get() = conns.joinToString(" + ") { it.name }
     val count: Int get() = conns.size
 
+    /** A whole SysEx message arrived (without F0 / F7): the FM-1 firmware's replies (Fm1SampleLink). */
+    @Volatile var sysexListener: ((ByteArray) -> Unit)? = null
+
+    /** Sends one SysEx message (body without F0 / F7) to the FM-1 running Burger Studio / Felucca firmware
+     * (its port is named "Felucca"), or to every device when none has that name. Returns false with no device. */
+    fun sendSysex(body: ByteArray): Boolean {
+        val msg = ByteArray(body.size + 2)
+        msg[0] = 0xF0.toByte()
+        System.arraycopy(body, 0, msg, 1, body.size)
+        msg[msg.size - 1] = 0xF7.toByte()
+        val fw = conns.filter { it.name.contains("Felucca", true) || it.name.contains("Burger", true) }
+        val to = if (fw.isNotEmpty()) fw else conns.toList()
+        for (c in to) {
+            try {
+                c.inPort?.send(msg, 0, msg.size)
+            } catch (e: Exception) {
+            }
+        }
+        return to.isNotEmpty()
+    }
+
     /** Pass everything that comes in on to the other devices. */
     @Volatile var thru = false
 
@@ -210,6 +231,8 @@ class MidiLink(ctx: Context, private val engine: Engine) {
     private inner class Rx(private val c: Conn) : MidiReceiver() {
         private var status = 0
         private var d1 = -1
+        private val sx = java.io.ByteArrayOutputStream()
+        private var inSx = false
 
         override fun onSend(msg: ByteArray, offset: Int, count: Int, timestamp: Long) {
             val now = System.nanoTime()
@@ -222,6 +245,25 @@ class MidiLink(ctx: Context, private val engine: Engine) {
                 if (b >= 0xF8) {
                     realtime(c, b, now)
                     continue
+                }
+                if (b == 0xF0) {
+                    inSx = true
+                    sx.reset()
+                    status = 0
+                    continue
+                }
+                if (inSx) {
+                    if (b == 0xF7 || b >= 0x80) {
+                        inSx = false
+                        if (b == 0xF7) {
+                            val l = sysexListener
+                            if (l != null) try { l(sx.toByteArray()) } catch (e: Exception) {}
+                            continue
+                        }
+                    } else {
+                        if (sx.size() < 65536) sx.write(b)
+                        continue
+                    }
                 }
                 if (b >= 0x80) {
                     status = b

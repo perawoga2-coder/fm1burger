@@ -82,6 +82,24 @@ class EditScreen(private val a: MainActivity) : Screen {
             }, ui.w(1f, 3))
         }
         content.addView(sr, ui.fullWidth(8))
+        val fr = ui.row()
+        fr.addView(ui.button("→ Send to FM-1 (USB, Burger Studio firmware)") { sendFm1() }.also {
+            ui.styleButton(it, true, Theme.ACCENT)
+        }, ui.w(1f, 3))
+        content.addView(fr, ui.fullWidth(6))
+    }
+
+    /** The selection (or the whole sample) into a user slot of the FM-1. */
+    private fun sendFm1() {
+        val f = current
+        if (f == null || buf.isEmpty()) {
+            ui.toast("Record, import or pick a sample first")
+            return
+        }
+        val (s0, s1) = range()
+        val part = if (s1 > s0) buf.copyOfRange(s0, s1) else buf
+        val d = if (rate == Cfg.SR) part else Wav.resample(part, rate, Cfg.SR)
+        a.sendToFm1(f.nameWithoutExtension, d)
     }
 
     /** Takes the editor out of its own page, to sit inside the Sampler page. */

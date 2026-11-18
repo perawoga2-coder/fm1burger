@@ -783,6 +783,80 @@ class MainActivity : Activity() {
 
     fun muteAllTracks() = muteAll()
 
+    // ---------------- Send to FM-1 (Burger Studio firmware: user sample slots over USB) ----------------
+
+    private val fm1Link by lazy { Fm1SampleLink(midi) }
+
+    /** Puts a sample (44.1 kHz mono) into USR1..USR3 of the FM-1 running the Burger Studio firmware. */
+    fun sendToFm1(name: String, data: FloatArray) {
+        if (data.isEmpty()) {
+            ui.toast("The sample is empty")
+            return
+        }
+        if (!midi.connected) {
+            AlertDialog.Builder(this)
+                .setTitle("Send to FM-1")
+                .setMessage("Connect the FM-1 (running the Burger Studio firmware) by USB, then connect it in MIDI sync.")
+                .setPositiveButton("MIDI sync…") { _, _ -> openSyncMenu() }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        ui.toast("Asking the FM-1…")
+        Thread {
+            val slots = try { fm1Link.info() } catch (ex: Exception) { null }
+            runOnUiThread {
+                if (slots == null) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Send to FM-1")
+                        .setMessage("The FM-1 does not answer. Send to FM-1 needs the Burger Studio firmware on the FM-1 " +
+                            "(install it from perawoga2-coder.github.io/Fm1sampa in Chrome). The official firmware cannot take samples this way.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                    return@runOnUiThread
+                }
+                val secs = data.size / Cfg.SR.toDouble()
+                val items = Array(Fm1SampleLink.SLOTS) { k -> slots.getOrNull(k) ?: "USR${k + 1}" }
+                AlertDialog.Builder(this)
+                    .setTitle(String.format(Locale.US, "Send %s (%.1f s%s) to", name, secs,
+                        if (secs > Fm1SampleLink.MAX_SECONDS) String.format(Locale.US, ", cut to %.1f s", Fm1SampleLink.MAX_SECONDS) else ""))
+                    .setItems(items) { _, w -> uploadToFm1(w, name, data) }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }.start()
+    }
+
+    private fun uploadToFm1(slot: Int, name: String, data: FloatArray) {
+        val bar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+        bar.max = 1000
+        val box = ui.col()
+        box.setPadding(ui.dp(20), ui.dp(12), ui.dp(20), ui.dp(4))
+        box.addView(ui.text("Writing into USR${slot + 1}. Keep the cable in.", 13f, Theme.DIM))
+        box.addView(bar, ui.fullWidth(8))
+        val dlg = AlertDialog.Builder(this).setTitle("Send to FM-1").setView(box).setCancelable(false).show()
+        val nm = name.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9 _-]"), "").ifEmpty { "BURGER" }
+        Thread {
+            val res = try {
+                Result.success(fm1Link.upload(slot, nm, data) { f -> runOnUiThread { bar.progress = (f * 1000).toInt() } })
+            } catch (ex: Exception) {
+                Result.failure(ex)
+            }
+            runOnUiThread {
+                try { dlg.dismiss() } catch (e: Exception) {}
+                val ok = res.getOrNull()
+                AlertDialog.Builder(this)
+                    .setTitle(if (ok != null) "On the FM-1 now" else "Send to FM-1 failed")
+                    .setMessage(if (ok != null)
+                        "${nm.uppercase().take(8)} ($ok) is in USR${slot + 1}.\n\nOn the FM-1: a track with the SAMPLE engine, SET = USR${slot + 1}, " +
+                            "plays it on the keys; the SLICE engine, SRC = USR${slot + 1}, chops it on its hits (DIV AUTO)."
+                    else (res.exceptionOrNull()?.message ?: "?"))
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }.start()
+    }
+
     /** Pattern length for every sequencer: 1, 2 or 4 bars. A longer pattern starts as copies of the bars it has. */
     fun patternLengthDialog() {
         val items = arrayOf("1 bar (16 steps)", "2 bars (32 steps)", "4 bars (64 steps)")
