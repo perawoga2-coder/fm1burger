@@ -61,8 +61,8 @@ jobs:
           gh release delete v1.0 --yes --cleanup-tag || true
           gh release create v1.0 old/build/outputs/apk/debug/fm1burger-debug.apk \
             --title "FM1 Burger 1.0" \
-            --notes "The original FM1 Burger, before the redesign. Kept so you can always go back to it." \
-            --target "$OLD"
+            --notes "The original FM1 Burger (built from commit $OLD), before the redesign. Kept so you can always go back to it." \
+            --target main
 
       # Every version gets its own release page (v2.0, v2.1, ...); builds of a work branch are marked pre-release
       - name: Publish this version
