@@ -162,7 +162,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
         } catch (ex: Exception) {
             ""
         }
-        content.addView(ui.text("Burger Studio  v$ver", 11f, Theme.FAINT, true), ui.fullWidth(0))
+        content.addView(ui.text("Burger Studio Lab  v$ver", 11f, Theme.FAINT, true), ui.fullWidth(0))
         content.addView(
             ui.text(
                 "Tap a number to change the instrument of that lane. " +

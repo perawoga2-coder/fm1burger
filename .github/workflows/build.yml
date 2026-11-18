@@ -75,8 +75,8 @@ jobs:
           if [ "${{ github.ref }}" != "refs/heads/main" ]; then PRE="--prerelease"; fi
           gh release delete "v$VER" --yes --cleanup-tag || true
           gh release create "v$VER" build/outputs/apk/debug/*.apk $PRE \
-            --title "Burger Studio $VER" \
-            --notes "Burger Studio version $VER. Installs next to the old FM1 Burger, so you can keep both." \
+            --title "$(case "$VER" in *lab*) echo "Burger Studio Lab ${VER%-lab}";; *) echo "Burger Studio $VER";; esac)" \
+            --notes "Burger Studio $VER. Each app line installs on its own: FM1 Burger (1.x), Burger Studio (2.x) and Burger Studio Lab (3.x, experimental) can all be on one device." \
             --target "${{ github.sha }}"
 
       - name: Publish APK to the Releases page

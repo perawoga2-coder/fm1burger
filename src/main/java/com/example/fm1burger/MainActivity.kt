@@ -31,6 +31,20 @@ class MainActivity : Activity() {
 
         // page numbers (the order of the screens list)
         const val TAB_TRACKS = 0
+        const val TAB_STEPS = 1
+        const val TAB_MIXER = 2
+        const val TAB_LIBRARY = 3
+        const val TAB_SETUP = 14
+
+        // the 5 sections of the bottom bar, and the pages inside each one (3.0 Lab)
+        val SECTIONS = arrayOf(
+            intArrayOf(10, 2),                      // Home: lanes, mixer
+            intArrayOf(0, 1, 3),                    // Sampler: sampler, steps, library
+            intArrayOf(6, 13, 7, 12, 11, 8),        // Instruments: drums, bassline, analog, guitars, ambient, voice
+            intArrayOf(9),                          // Song
+            intArrayOf(14)                          // Setup
+        )
+        val SECTION_NAMES = arrayOf("⌂ Home", "Sampler", "Instruments", "Song", "Setup")
         const val TAB_EDIT = 4
         const val TAB_FX = 5
         const val TAB_PADS = 6
@@ -85,6 +99,12 @@ class MainActivity : Activity() {
     private lateinit var statusDot: View
     private lateinit var tabScroll: HorizontalScrollView
     private lateinit var homeFab: Button
+    private lateinit var recBtn: Button
+    private lateinit var segRow: LinearLayout
+    private var cueRow: View? = null
+    private val navBtns = ArrayList<Button>()
+    private val lastInSection = intArrayOf(10, 0, 6, 9, 14)
+    private var shownSection = -1
     private var dotColor = 0
     private val cueBtns = ArrayList<Button>()
     private var cueKey = ""
@@ -219,10 +239,18 @@ class MainActivity : Activity() {
         tempo.background = ui.bg(Theme.PANEL2, 14, Theme.LINE, 1)
         tempo.setPadding(ui.dp(4), ui.dp(2), ui.dp(4), ui.dp(2))
         val minus = ui.button("−") { changeBpm(-1) }
+        minus.setOnLongClickListener {
+            changeBpm(-10)
+            true
+        }
         minus.background = null
         minus.textSize = 18f
         minus.setPadding(ui.dp(10), 0, ui.dp(10), 0)
         val plus = ui.button("+") { changeBpm(1) }
+        plus.setOnLongClickListener {
+            changeBpm(10)
+            true
+        }
         plus.background = null
         plus.textSize = 18f
         plus.setPadding(ui.dp(10), 0, ui.dp(10), 0)
@@ -254,10 +282,19 @@ class MainActivity : Activity() {
             override fun onStopTrackingTouch(s: SeekBar?) {}
         })
         r1.addView(bpmBar, ui.w(1f, 4))
+        bpmBar.visibility = View.GONE                    // 3.0: tap the number, or − / + (hold for ±10)
+        r1.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         syncBtn = ui.button("SYNC") { toggleSync() }
         r1.addView(syncBtn, ui.w(0f, 3))
         muteAllBtn = ui.button("MUTE ALL") { muteAll() }
         r1.addView(muteAllBtn, ui.w(0f, 3))
+        muteAllBtn.visibility = View.GONE                // 3.0: on the Setup page
+        recBtn = ui.button("● REC") { recPressed() }
+        recBtn.setOnLongClickListener {
+            mixFormatDialog()
+            true
+        }
+        r1.addView(recBtn, ui.w(0f, 3))
         head.addView(r1)
 
         // status line in a soft pill, the two record buttons next to it
@@ -283,6 +320,8 @@ class MainActivity : Activity() {
         }
         r2.addView(recPartBtn, ui.w(0f, 3))
         r2.addView(recMixBtn, ui.w(0f, 3))
+        recPartBtn.visibility = View.GONE                // 3.0: one REC button in the first row
+        recMixBtn.visibility = View.GONE
         head.addView(r2, ui.fullWidth(6))
 
         // the 6 cue parts, on every page
@@ -303,6 +342,7 @@ class MainActivity : Activity() {
             })
         }
         head.addView(r3, ui.fullWidth(2))
+        cueRow = r3                                      // 3.0: the cues show on Home and Song only
         root.addView(head)
 
         // screens
@@ -323,12 +363,13 @@ class MainActivity : Activity() {
         homeScreen = HomeScreen(this)
         val ambient = AmbientScreen(this)
         guitarScreen = GuitarScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen, bassScreen)
+        val setup = SetupScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen, bassScreen, setup)
 
         // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
         tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
-        val names = listOf("Sampler", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Analog synth", "Voice", "Song", "⌂ Home", "New Ambient", "Guitars", "Bassline")
+        val names = listOf("Sampler", "Steps", "Mixer", "Library", "Edit", "FX", "Drums", "Analog synth", "Voice", "Song", "Lanes", "New Ambient", "Guitars", "Bassline", "Setup")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -336,12 +377,7 @@ class MainActivity : Activity() {
             b.minimumHeight = ui.dp(36)
             b.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6))
             btns.add(b)
-            // Home is the first tab on the left; Bassline sits just before Analog synth
-            when (i) {
-                TAB_HOME -> tabRow.addView(b, 0, ui.w(0f, 3))
-                TAB_BASS -> tabRow.addView(b, tabRow.indexOfChild(btns[TAB_SYNTH]), ui.w(0f, 3))
-                else -> tabRow.addView(b, ui.w(0f, 3))
-            }
+            // 3.0: the buttons are put into the bar per section (see showTab)
         }
         tabBtns = btns
         // the editor and the effects now live inside the Sampler page
@@ -352,6 +388,7 @@ class MainActivity : Activity() {
         tabScroll.isHorizontalScrollBarEnabled = false
         tabScroll.setBackgroundColor(Theme.BG)
         tabScroll.addView(tabRow)
+        segRow = tabRow
         root.addView(tabScroll)
         val line = View(this)
         line.setBackgroundColor(Theme.LINE)
@@ -373,7 +410,34 @@ class MainActivity : Activity() {
         content.addView(homeFab, fl)
 
         root.addView(content, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        homeFab.visibility = View.GONE                   // 3.0: the bottom bar has Home
+
+        // ---- the bottom bar: 5 sections ----
+        val line2 = View(this)
+        line2.setBackgroundColor(Theme.LINE)
+        root.addView(line2, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(1)))
+        val nav = ui.row()
+        nav.setBackgroundColor(Theme.PANEL)
+        nav.setPadding(ui.dp(4), ui.dp(4), ui.dp(4), ui.dp(6))
+        for (k in SECTION_NAMES.indices) {
+            val b = ui.button(SECTION_NAMES[k]) { openSection(k) }
+            b.textSize = 12f
+            b.setPadding(ui.dp(2), ui.dp(10), ui.dp(2), ui.dp(10))
+            navBtns.add(b)
+            nav.addView(b, ui.w(1f, 2))
+        }
+        root.addView(nav)
         setContentView(root)
+    }
+
+    /** Bottom bar: open a section on the page used last in it. */
+    fun openSection(k: Int) {
+        showTab(lastInSection[k])
+    }
+
+    private fun sectionOf(i: Int): Int {
+        for (k in SECTIONS.indices) if (i in SECTIONS[k]) return k
+        return 0
     }
 
     /** The phone's back button: from any page go back to Home first, from Home leave the app. */
@@ -387,6 +451,23 @@ class MainActivity : Activity() {
         // Edit and FX are sections of the Sampler page now
         val i = if (i0 == TAB_EDIT || i0 == TAB_FX) TAB_TRACKS else i0
         cur = i
+        // 3.0: the section, its page bar and the bottom bar
+        val sec = sectionOf(i)
+        lastInSection[sec] = i
+        if (sec != shownSection) {
+            shownSection = sec
+            segRow.removeAllViews()
+            for (idx in SECTIONS[sec]) segRow.addView(tabBtns[idx], ui.w(0f, 3))
+            tabScroll.visibility = if (SECTIONS[sec].size > 1) View.VISIBLE else View.GONE
+        }
+        for (k in navBtns.indices) {
+            if (k == sec) ui.styleButton(navBtns[k], true, Theme.ACCENT, 14)
+            else {
+                navBtns[k].background = ui.touchBg(ui.bg(Theme.PANEL, 14), 14)
+                navBtns[k].setTextColor(Theme.DIM)
+            }
+        }
+        cueRow?.visibility = if (sec == 0 || sec == 3) View.VISIBLE else View.GONE
         homeFab.visibility = if (i == TAB_HOME) View.GONE else View.VISIBLE
         screens.forEachIndexed { idx, s -> s.root.visibility = if (idx == i) View.VISIBLE else View.GONE }
         paintTabs()
@@ -661,6 +742,41 @@ class MainActivity : Activity() {
         bpmBar.progress = engine.bpm - 40
     }
 
+    /** The one REC button: stops what is recording, otherwise asks what to record. */
+    private fun recPressed() {
+        val b = engine.bank
+        when {
+            engine.mixRec.recording -> toggleMixRec()
+            b.recState == 1 || b.recState == 2 -> toggleRecPart()
+            else -> AlertDialog.Builder(this)
+                .setTitle("Record")
+                .setItems(arrayOf(
+                    "The whole mix (${MixRecorder.label(engine.mixRec.bits)}, no time limit)",
+                    "A part, from bar 1 (send it to a cue)",
+                    "Mix format…",
+                    "Last mix…"
+                )) { _, w ->
+                    when (w) {
+                        0 -> toggleMixRec()
+                        1 -> toggleRecPart()
+                        2 -> mixFormatDialog()
+                        else -> mixDialog()
+                    }
+                }
+                .show()
+        }
+    }
+
+    fun openSyncMenu() = toggleSync()
+
+    fun muteAllTracks() = muteAll()
+
+    fun syncSummary(): String {
+        val s = syncLine()
+        val devs = if (midi.connected) "Connected: ${midi.deviceName}" else "No MIDI device connected"
+        return (if (s.isNotEmpty()) "$s\n" else "Sync off.\n") + devs
+    }
+
     private fun muteAll() {
         val anyOn = engine.tracks.any { !it.mute }
         for (t in engine.tracks) t.mute = anyOn
@@ -812,8 +928,8 @@ class MainActivity : Activity() {
         val preparing = engine.playing && engine.prepare >= 0
         ui.styleButton(playBtn, engine.playing, if (preparing) Theme.YELLOW else Theme.GREEN, 26)
         val sb = when (syncState) {
-            1 -> "SYNC: LEAD"
-            2 -> "SYNC: FOLLOW"
+            1 -> "LEAD"
+            2 -> "FOLLOW"
             else -> "SYNC"
         }
         if (syncBtn.text.toString() != sb) syncBtn.text = sb
@@ -872,6 +988,15 @@ class MainActivity : Activity() {
             else -> "● REC PART"
         }
         if (recPartBtn.text.toString() != rp) recPartBtn.text = rp
+        // the one REC button shows whatever is recording
+        val rb = when {
+            mr.recording -> "■ MIX " + clock(mr.frames / Cfg.SR)
+            bk.recState == 1 -> "WAIT…"
+            bk.recState == 2 -> "■ PART ${bk.recBars + 1}"
+            else -> "● REC"
+        }
+        if (recBtn.text.toString() != rb) recBtn.text = rb
+        ui.styleButton(recBtn, mr.recording || bk.recState == 1 || bk.recState == 2, Theme.RED)
         ui.styleButton(recPartBtn, bk.recState == 1 || bk.recState == 2, Theme.RED)
         if (bk.recState == 2) {
             statusText.setTextColor(Theme.RED)
