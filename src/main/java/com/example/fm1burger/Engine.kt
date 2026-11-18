@@ -78,6 +78,7 @@ class Engine {
     val stemPeak = FloatArray(STEM_NAMES.size)
     private val stemBuf = Array(STEM_NAMES.size) { FloatArray(BLOCK * 2) }
     val bank = PartBank(this)
+    val auto = Automation(this)
     private val preview = PadVoice()
 
     @Volatile var bpmF = 120.0
@@ -395,6 +396,7 @@ class Engine {
     /** Mixes one block of audio into out. Runs on the audio thread. */
     private fun renderBlock(t0: Long, out: ShortArray, tl: FloatArray, tr: FloatArray, tpk: FloatArray) {
             handleRequests(t0)
+            auto.block()
 
             for (i in 0 until Cfg.TRACKS) {
                 val t = tracks[i]
@@ -581,6 +583,7 @@ class Engine {
             stopReq = false
             if (playing && !follow && sendClock && prepare < 0) send(0xFC, t0 + latencyNs + off)
             playing = false
+            auto.stopped()
             prepare = PREP_NONE
             paused = false
             curStep = -1
@@ -701,6 +704,7 @@ class Engine {
             val s = (patCount % len).toInt()
             patCount++
             curStep = s
+            auto.step(s, true)
             stepTrigger(s)
         }
         tickCount++

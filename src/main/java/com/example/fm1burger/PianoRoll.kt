@@ -11,17 +11,17 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 
-/** What a piano roll edits: one note per step (the bassline and the analog synth sequencer are both like this). */
+/**
+ * What a piano roll edits. The bassline is mono (one note per step: put replaces it),
+ * the analog synth is polyphonic (any number of notes per step).
+ */
 interface RollModel {
-    fun isOn(s: Int): Boolean
-    /** MIDI note of step s. */
-    fun note(s: Int): Int
-    /** Steps the note of step s holds (1 = one 16th). */
-    fun length(s: Int): Int
+    /** Length in steps of the note with MIDI number n that starts on step s, 0 = none. */
+    fun lenAt(s: Int, n: Int): Int
     fun put(s: Int, n: Int)
-    fun off(s: Int)
+    fun off(s: Int, n: Int)
     val canLength: Boolean
-    fun setLength(s: Int, l: Int)
+    fun setLength(s: Int, n: Int, l: Int)
     /** bit 0 = accent, bit 1 = slide (bassline only). */
     fun flags(s: Int): Int
     val hasFlags: Boolean
@@ -34,7 +34,7 @@ interface RollModel {
 
 /**
  * A piano roll of one bar (the bar the bar buttons show): pitch rows against 16 steps.
- * Tap an empty cell: a note (it replaces the note of that step). Tap a note: it goes away.
+ * Tap an empty cell: a note (the bassline: it replaces the note of that step; the synth: chords are fine). Tap a note: it goes away.
  * Drag a note sideways: its length (analog synth). Hold a note: accent / slide (bassline).
  */
 class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
@@ -68,11 +68,12 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
 
     private var downStep = -1
     private var downCol = 0
+    private var downNote = 0
     private var tappedExisting = false
     private var moved = false
     private var longDone = false
     private val longPress = Runnable {
-        if (downStep >= 0 && !moved && model.hasFlags && model.isOn(downStep)) {
+        if (downStep >= 0 && !moved && model.hasFlags && model.lenAt(downStep, downNote) > 0) {
             longDone = true
             model.cycleFlags(downStep)
             model.changed()
@@ -124,10 +125,11 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
         val base = Pat.base()
         // notes
         for (k in 0 until Pat.BAR) {
-            val s = base + k
-            if (!model.isOn(s)) continue
-            val n = model.note(s)
-            val len = if (model.canLength) model.length(s).coerceIn(1, Pat.BAR - k) else 1
+          val s = base + k
+          for (n in model.lowest..model.highest) {
+            val l0 = model.lenAt(s, n)
+            if (l0 <= 0) continue
+            val len = if (model.canLength) l0.coerceIn(1, Pat.BAR - k) else 1
             val f = model.flags(s)
             val col = when {
                 f and 1 != 0 -> Theme.YELLOW
@@ -155,6 +157,7 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
                 p.color = Theme.TEAL
                 c.drawRect(keyW + (k + 1) * cw - 6f, y + rh * 0.4f, keyW + (k + 1) * cw + 6f, y + rh * 0.6f, p)
             }
+          }
         }
         val ps = playStep - base
         if (ps in 0 until Pat.BAR) {
@@ -185,7 +188,8 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
                     downStep = -1
                     return true
                 }
-                tappedExisting = model.isOn(s) && model.note(s) == n
+                downNote = n
+                tappedExisting = model.lenAt(s, n) > 0
                 if (!tappedExisting) {
                     model.put(s, n)
                     model.audition(n)
@@ -203,10 +207,10 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
                 if (col != downCol) {
                     moved = true
                     hnd.removeCallbacks(longPress)
-                    if (model.canLength && model.isOn(s)) {
+                    if (model.canLength && model.lenAt(s, downNote) > 0) {
                         val l = (col - (s - Pat.base()) + 1).coerceIn(1, Pat.BAR)
-                        if (l != model.length(s)) {
-                            model.setLength(s, l)
+                        if (l != model.lenAt(s, downNote)) {
+                            model.setLength(s, downNote, l)
                             model.changed()
                             invalidate()
                         }
@@ -217,7 +221,7 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
                 hnd.removeCallbacks(longPress)
                 val s = downStep
                 if (s >= 0 && e.actionMasked == MotionEvent.ACTION_UP && tappedExisting && !moved && !longDone) {
-                    model.off(s)
+                    model.off(s, downNote)
                     model.changed()
                 }
                 downStep = -1

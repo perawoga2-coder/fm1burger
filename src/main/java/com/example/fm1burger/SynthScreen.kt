@@ -253,20 +253,18 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         bassBox.addView(pr, ui.fullWidth(4))
 
         val bassModel = object : RollModel {
-            override fun isOn(s: Int) = bs.on[s]
-            override fun note(s: Int) = bs.rootMidi() + bs.note[s]
-            override fun length(s: Int) = 1
+            override fun lenAt(s: Int, n: Int) = if (bs.on[s] && bs.rootMidi() + bs.note[s] == n) 1 else 0
             override fun put(s: Int, n: Int) {
                 bs.on[s] = true
                 bs.note[s] = (n - bs.rootMidi()).coerceIn(0, 24)
             }
-            override fun off(s: Int) {
+            override fun off(s: Int, n: Int) {
                 bs.on[s] = false
                 bs.accent[s] = false
                 bs.slide[s] = false
             }
             override val canLength = false
-            override fun setLength(s: Int, l: Int) {}
+            override fun setLength(s: Int, n: Int, l: Int) {}
             override fun flags(s: Int) = (if (bs.accent[s]) 1 else 0) or (if (bs.slide[s]) 2 else 0)
             override val hasFlags = true
             override fun cycleFlags(s: Int) {
@@ -501,20 +499,11 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         anaBox.addView(seqPanel.view, ui.fullWidth(8))
         val sq = e.analogSeq
         val synthModel = object : RollModel {
-            override fun isOn(s: Int) = sq.on[s]
-            override fun note(s: Int) = sq.note[s]
-            override fun length(s: Int) = sq.len[s]
-            override fun put(s: Int, n: Int) {
-                sq.on[s] = true
-                sq.note[s] = n.coerceIn(24, 96)
-            }
-            override fun off(s: Int) {
-                sq.on[s] = false
-            }
+            override fun lenAt(s: Int, n: Int) = sq.lenAt(s, n)
+            override fun put(s: Int, n: Int) = sq.set(s, n.coerceIn(24, 96), 1)
+            override fun off(s: Int, n: Int) = sq.set(s, n, 0)
             override val canLength = true
-            override fun setLength(s: Int, l: Int) {
-                sq.len[s] = l.coerceIn(1, AnalogSeq.MAX_LEN)
-            }
+            override fun setLength(s: Int, n: Int, l: Int) = sq.set(s, n, l.coerceIn(1, AnalogSeq.MAX_LEN))
             override fun flags(s: Int) = 0
             override val hasFlags = false
             override fun cycleFlags(s: Int) {}
@@ -530,8 +519,8 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
             }
         }
         synthRoll = PianoRollPanel(a, "Piano roll", synthModel,
-            "Tap a cell for a note, tap it again to remove it. Drag a note sideways to make it longer. " +
-                "The chord above is added to every note. It shows the bar picked with the bar buttons at the top.")
+            "Tap cells for notes: several on one step make a chord. Tap a note again to remove it. Drag a note sideways to make it longer. " +
+                "The chord type above is added to every note (use Single for your own chords). It shows the bar picked with the bar buttons at the top.")
         synthRoll.roll.onSelect = { st -> seqPanel.selected = st }
         synthRoll.fitTo(48)
         anaBox.addView(synthRoll.view, ui.fullWidth(8))

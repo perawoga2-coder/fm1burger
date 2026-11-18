@@ -135,9 +135,9 @@ class LibraryScreen(private val a: MainActivity) : Screen {
     private fun choosePad(f: File) {
         AlertDialog.Builder(a)
             .setTitle("Put on which pad?")
-            .setItems(Array(Cfg.PADS) { "Pad ${it + 1}" }) { _, which ->
+            .setItems(Array(Cfg.PADS) { "Pad ${Cfg.padName(it)}" }) { _, which ->
                 a.assignPad(which, f)
-                ui.toast("Pad ${which + 1}: ${f.name}")
+                ui.toast("Pad ${Cfg.padName(which)}: ${f.name}")
             }
             .show()
     }

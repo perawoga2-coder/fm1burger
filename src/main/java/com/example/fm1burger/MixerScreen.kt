@@ -118,7 +118,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         padFader.color = Theme.GREEN
         padFader.onChange = { v -> e.padVol = v }
         pcol.addView(padFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
-        pcol.addView(ui.text("All 8 drum pads together", 11f, Theme.DIM))
+        pcol.addView(ui.text("All 32 drum pads together (banks A and B)", 11f, Theme.DIM))
         drumMuteBtn = ui.button("Mute") {
             val anyOn = e.pads.any { !it.mute }
             for (p in e.pads) p.mute = anyOn

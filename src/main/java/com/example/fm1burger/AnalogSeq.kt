@@ -9,43 +9,100 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Step sequencer for the analog synth (1, 2 or 4 bars). Each step has a note and a length (1 to 16 steps).
- * A chord type is applied to every step. It is triggered by the engine step clock, so it
- * stays in sync with the drums and the bassline.
+ * Step sequencer for the analog synth (1, 2 or 4 bars). Polyphonic: any number of notes can start on a
+ * step, each with its own length (1 to 16 steps). The chord type is added on top of every note.
+ * It is triggered by the engine step clock, so it stays in sync with the drums and the bassline.
  */
 class AnalogSeq(private val syn: AnalogSynth) {
 
     companion object {
         const val MAX_LEN = 16
+        const val NOTES = 128
         val CHORD_NAMES = arrayOf("Single", "Major", "Minor", "Power", "Octave")
-        private val CHORDS = arrayOf(
+        val CHORDS = arrayOf(
             intArrayOf(0),
             intArrayOf(0, 4, 7),
             intArrayOf(0, 3, 7),
             intArrayOf(0, 7),
             intArrayOf(0, 12)
         )
+
+        /** Legacy (one note per step) to the note grid. */
+        fun fromMono(on: BooleanArray, note: IntArray, len: IntArray, grid: IntArray) {
+            grid.fill(0)
+            for (s in 0 until minOf(on.size, Cfg.STEPS)) {
+                if (on[s]) grid[s * NOTES + note[s].coerceIn(0, 127)] = len[s].coerceIn(1, MAX_LEN)
+            }
+        }
+
+        fun gridToJson(g: IntArray): JSONArray {
+            val a = JSONArray()
+            for (k in g.indices) if (g[k] > 0) {
+                a.put(k / NOTES)
+                a.put(k % NOTES)
+                a.put(g[k])
+            }
+            return a
+        }
+
+        fun gridFromJson(a: JSONArray, g: IntArray) {
+            g.fill(0)
+            var k = 0
+            while (k + 2 < a.length()) {
+                val s = a.optInt(k, -1)
+                val n = a.optInt(k + 1, -1)
+                val l = a.optInt(k + 2, 0)
+                if (s in 0 until Cfg.STEPS && n in 0 until NOTES && l > 0) g[s * NOTES + n] = l.coerceAtMost(MAX_LEN)
+                k += 3
+            }
+        }
     }
 
-    val on = BooleanArray(Cfg.STEPS)
-    val note = IntArray(Cfg.STEPS) { 60 }
-    /** How many steps the note holds (1 .. 16). */
-    val len = IntArray(Cfg.STEPS) { 1 }
+    /** grid[step * 128 + note] = length in steps of the note that starts there, 0 = none. */
+    val grid = IntArray(Cfg.STEPS * NOTES)
     @Volatile var enabled = true
     @Volatile var chord = 0
     @Volatile var resetReq = false
     @Volatile var sounding = false
 
-    private val heldN = IntArray(64)
-    private val heldL = IntArray(64)
+    private val heldN = IntArray(128)
+    private val heldL = IntArray(128)
     private var heldCount = 0
 
+    fun lenAt(s: Int, n: Int): Int = if (s in 0 until Cfg.STEPS && n in 0 until NOTES) grid[s * NOTES + n] else 0
+    fun set(s: Int, n: Int, l: Int) {
+        if (s in 0 until Cfg.STEPS && n in 0 until NOTES) grid[s * NOTES + n] = l.coerceIn(0, MAX_LEN)
+    }
+    fun has(s: Int): Boolean {
+        val b = s * NOTES
+        for (n in 0 until NOTES) if (grid[b + n] > 0) return true
+        return false
+    }
+    /** The notes that start on step s, low to high. */
+    fun notesAt(s: Int): IntArray {
+        val b = s * NOTES
+        return (0 until NOTES).filter { grid[b + it] > 0 }.toIntArray()
+    }
+    fun clearStep(s: Int) {
+        java.util.Arrays.fill(grid, s * NOTES, (s + 1) * NOTES, 0)
+    }
+    /** Move every note of step s by d semitones. */
+    fun transposeStep(s: Int, d: Int) {
+        val ns = notesAt(s)
+        val ls = ns.map { grid[s * NOTES + it] }
+        clearStep(s)
+        for ((k, n) in ns.withIndex()) set(s, (n + d).coerceIn(24, 96), ls[k])
+    }
+    fun setStepLen(s: Int, l: Int) {
+        for (n in notesAt(s)) set(s, n, l)
+    }
+    /** Copy step a to step b (all notes). */
+    fun copyStep(a: Int, b: Int) {
+        System.arraycopy(grid, a * NOTES, grid, b * NOTES, NOTES)
+    }
+
     fun clear() {
-        for (i in 0 until Cfg.STEPS) {
-            on[i] = false
-            note[i] = 60
-            len[i] = 1
-        }
+        grid.fill(0)
     }
 
     /** Called by the audio thread on every step. */
@@ -66,15 +123,20 @@ class AnalogSeq(private val syn: AnalogSynth) {
             }
         }
         heldCount = j
-        if (enabled && on[s]) {
+        if (enabled && s in 0 until Cfg.STEPS) {
             val iv = CHORDS[chord.coerceIn(0, CHORDS.size - 1)]
-            for (x in iv) {
-                val n = (note[s] + x).coerceIn(0, 127)
-                syn.noteOn(n)
-                if (heldCount < 64) {
-                    heldN[heldCount] = n
-                    heldL[heldCount] = len[s].coerceIn(1, MAX_LEN)
-                    heldCount++
+            val b = s * NOTES
+            for (root in 0 until NOTES) {
+                val l = grid[b + root]
+                if (l <= 0) continue
+                for (x in iv) {
+                    val n = (root + x).coerceIn(0, 127)
+                    syn.noteOn(n)
+                    if (heldCount < heldN.size) {
+                        heldN[heldCount] = n
+                        heldL[heldCount] = l.coerceIn(1, MAX_LEN)
+                        heldCount++
+                    }
                 }
             }
         }
@@ -83,17 +145,7 @@ class AnalogSeq(private val syn: AnalogSynth) {
 
     fun toJson(): String {
         val o = JSONObject()
-        val a1 = JSONArray()
-        val a2 = JSONArray()
-        val a3 = JSONArray()
-        for (i in 0 until Cfg.STEPS) {
-            a1.put(on[i])
-            a2.put(note[i])
-            a3.put(len[i])
-        }
-        o.put("on", a1)
-        o.put("note", a2)
-        o.put("len", a3)
+        o.put("notes", gridToJson(grid))
         o.put("enabled", enabled)
         o.put("chord", chord)
         return o.toString()
@@ -102,13 +154,23 @@ class AnalogSeq(private val syn: AnalogSynth) {
     fun fromJson(t: String) {
         try {
             val o = JSONObject(t)
-            val a1 = o.optJSONArray("on")
-            val a2 = o.optJSONArray("note")
-            val a3 = o.optJSONArray("len")
-            for (i in 0 until Cfg.STEPS) {
-                if (a1 != null && i < a1.length()) on[i] = a1.optBoolean(i, false)
-                if (a2 != null && i < a2.length()) note[i] = a2.optInt(i, 60).coerceIn(0, 127)
-                if (a3 != null && i < a3.length()) len[i] = a3.optInt(i, 1).coerceIn(1, MAX_LEN)
+            val nt = o.optJSONArray("notes")
+            if (nt != null) {
+                gridFromJson(nt, grid)
+            } else {
+                // the old file: one note per step
+                val a1 = o.optJSONArray("on")
+                val a2 = o.optJSONArray("note")
+                val a3 = o.optJSONArray("len")
+                val on = BooleanArray(Cfg.STEPS)
+                val note = IntArray(Cfg.STEPS) { 60 }
+                val len = IntArray(Cfg.STEPS) { 1 }
+                for (i in 0 until Cfg.STEPS) {
+                    if (a1 != null && i < a1.length()) on[i] = a1.optBoolean(i, false)
+                    if (a2 != null && i < a2.length()) note[i] = a2.optInt(i, 60).coerceIn(0, 127)
+                    if (a3 != null && i < a3.length()) len[i] = a3.optInt(i, 1).coerceIn(1, MAX_LEN)
+                }
+                fromMono(on, note, len, grid)
             }
             enabled = o.optBoolean("enabled", true)
             chord = o.optInt("chord", 0).coerceIn(0, CHORDS.size - 1)
@@ -142,8 +204,8 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         view.addView(ui.text("Step sequencer (analog synth)", 14f, Theme.ACCENT, true))
         view.addView(
             ui.text(
-                "Tap a step to turn it on and pick it. Tap it again to turn it off. " +
-                    "Use the note buttons to change its pitch. It plays with the drums when you press Play.",
+                "Tap a step to turn it on and pick it, tap it again to clear it. The note buttons move all the notes of " +
+                    "the step. For chords and several notes on a step use the piano roll below.",
                 12f, Theme.DIM
             )
         )
@@ -198,13 +260,14 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         val lr = ui.row()
         lenBtn = ui.button("Length: 1") {
             val opts = intArrayOf(1, 2, 3, 4, 6, 8, 12, 16)
-            val k = opts.indexOfFirst { it > seq.len[sel] }
-            seq.len[sel] = if (k < 0) 1 else opts[k]
+            val cur = seq.notesAt(sel).firstOrNull()?.let { seq.lenAt(sel, it) } ?: 1
+            val k = opts.indexOfFirst { it > cur }
+            seq.setStepLen(sel, if (k < 0) 1 else opts[k])
             changed()
         }
         lr.addView(lenBtn, ui.w(1f, 3))
         lr.addView(ui.button("Clear step") {
-            seq.on[sel] = false
+            seq.clearStep(sel)
             changed()
         }, ui.w(1f, 3))
         view.addView(lr, ui.fullWidth(2))
@@ -221,25 +284,29 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
 
     private fun noteName(n: Int): String = names[n % 12] + (n / 12 - 1)
 
+    private var lastNote = 60
+
+    private fun hear(ns: IntArray) {
+        for (n in ns) syn.noteOn(n)
+        view.postDelayed({ for (n in ns) syn.noteOff(n) }, 250)
+    }
+
     private fun tapCell(i: Int) {
-        if (i == sel && seq.on[i]) {
-            seq.on[i] = false
+        if (i == sel && seq.has(i)) {
+            seq.clearStep(i)
         } else {
             sel = i
-            if (!seq.on[i]) seq.on[i] = true
-            val n = seq.note[i]
-            syn.noteOn(n)
-            view.postDelayed({ syn.noteOff(n) }, 250)
+            if (!seq.has(i)) seq.set(i, lastNote, 1)
+            hear(seq.notesAt(i))
         }
         changed()
     }
 
     private fun shift(d: Int) {
-        seq.note[sel] = (seq.note[sel] + d).coerceIn(24, 96)
-        seq.on[sel] = true
-        val n = seq.note[sel]
-        syn.noteOn(n)
-        view.postDelayed({ syn.noteOff(n) }, 250)
+        if (!seq.has(sel)) seq.set(sel, lastNote, 1) else seq.transposeStep(sel, d)
+        val ns = seq.notesAt(sel)
+        if (ns.isNotEmpty()) lastNote = ns[0]
+        hear(ns)
         changed()
     }
 
@@ -249,34 +316,20 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
             0 -> {
                 seq.chord = 1
                 val ns = intArrayOf(60, 65, 67, 65)
-                for (j in 0 until 4) {
-                    seq.on[j * 4] = true
-                    seq.note[j * 4] = ns[j]
-                    seq.len[j * 4] = 4
-                }
+                for (j in 0 until 4) seq.set(j * 4, ns[j], 4)
             }
             1 -> {
                 seq.chord = 0
                 val ns = intArrayOf(60, 64, 67, 72)
-                for (i in 0 until Pat.BAR) {
-                    seq.on[i] = true
-                    seq.note[i] = ns[i % 4]
-                }
+                for (i in 0 until Pat.BAR) seq.set(i, ns[i % 4], 1)
             }
             2 -> {
                 seq.chord = 2
-                for (i in intArrayOf(2, 6, 10, 14)) {
-                    seq.on[i] = true
-                    seq.note[i] = 60
-                }
+                for (i in intArrayOf(2, 6, 10, 14)) seq.set(i, 60, 1)
             }
         }
         // the same bar in every bar of a longer pattern
-        for (i in Pat.BAR until Cfg.STEPS) {
-            seq.on[i] = seq.on[i % Pat.BAR]
-            seq.note[i] = seq.note[i % Pat.BAR]
-            seq.len[i] = seq.len[i % Pat.BAR]
-        }
+        for (i in Pat.BAR until Cfg.STEPS) seq.copyStep(i % Pat.BAR, i)
         changed()
     }
 
@@ -303,7 +356,9 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         if (c !in 0 until Pat.BAR) return
         val b = cells[c]
         val i = Pat.base() + c
-        val base = if (seq.on[i]) {
+        val ns = seq.notesAt(i)
+        val on = ns.isNotEmpty()
+        val base = if (on) {
             Theme.ACCENT
         } else if ((i / 4) % 2 == 0) {
             Theme.PANEL2
@@ -312,9 +367,10 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         }
         val stroke = if (i == playStep) Theme.TEXT else if (i == sel) Theme.GREEN else 0
         b.background = ui.bg(base, 8, stroke, if (stroke != 0) 3 else 0)
-        b.setTextColor(if (seq.on[i]) Color.BLACK else Theme.DIM)
-        b.text = if (seq.on[i]) {
-            noteName(seq.note[i]) + (if (seq.len[i] > 1) "\n×" + seq.len[i] else "")
+        b.setTextColor(if (on) Color.BLACK else Theme.DIM)
+        b.text = if (on) {
+            val l = seq.lenAt(i, ns[0])
+            noteName(ns[0]) + (if (ns.size > 1) " +${ns.size - 1}" else "") + (if (l > 1) "\n×$l" else "")
         } else {
             "${i + 1}"
         }
@@ -325,12 +381,14 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         ui.styleButton(onBtn, seq.enabled, Theme.GREEN)
         for (i in chordBtns.indices) ui.styleButton(chordBtns[i], seq.chord == i)
         for (i in 0 until Pat.BAR) paint(i)
-        info.text = if (seq.on[sel]) {
-            "Step ${sel + 1}: ${noteName(seq.note[sel])}, length ${seq.len[sel]}"
+        val ns = seq.notesAt(sel)
+        val l = ns.firstOrNull()?.let { seq.lenAt(sel, it) } ?: 1
+        info.text = if (ns.isNotEmpty()) {
+            "Step ${sel + 1}: " + ns.joinToString(" ") { noteName(it) } + ", length $l"
         } else {
             "Step ${sel + 1}: off. Tap it to turn it on."
         }
-        lenBtn.text = "Length: ${seq.len[sel]}"
+        lenBtn.text = "Length: $l"
     }
 
     /** Called every screen tick: moves the white frame and releases hanging notes after Stop. */

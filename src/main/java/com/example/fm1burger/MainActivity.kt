@@ -35,13 +35,14 @@ class MainActivity : Activity() {
         const val TAB_MIXER = 2
         const val TAB_LIBRARY = 3
         const val TAB_SETUP = 14
+        const val TAB_AUTO = 15
 
         // the 5 sections of the bottom bar, and the pages inside each one (3.0 Lab)
         val SECTIONS = arrayOf(
             intArrayOf(10, 2),                      // Home: lanes, mixer
             intArrayOf(0, 1, 3),                    // Sampler: sampler, steps, library
             intArrayOf(6, 13, 7, 12, 11, 8),        // Instruments: drums, bassline, analog, guitars, ambient, voice
-            intArrayOf(9),                          // Song
+            intArrayOf(9, 15),                      // Song, automation
             intArrayOf(14)                          // Setup
         )
         val SECTION_NAMES = arrayOf("⌂ Home", "Sampler", "Instruments", "Song", "Setup")
@@ -370,12 +371,13 @@ class MainActivity : Activity() {
         val ambient = AmbientScreen(this)
         guitarScreen = GuitarScreen(this)
         val setup = SetupScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen, bassScreen, setup)
+        val autoScreen = AutomationScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen, bassScreen, setup, autoScreen)
 
         // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
         tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
-        val names = listOf("Sampler", "Steps", "Mixer", "Library", "Edit", "FX", "Drums", "Analog synth", "Voice", "Song", "Lanes", "New Ambient", "Guitars", "Bassline", "Setup")
+        val names = listOf("Sampler", "Steps", "Mixer", "Library", "Edit", "FX", "Drums", "Analog synth", "Voice", "Song", "Lanes", "New Ambient", "Guitars", "Bassline", "Setup", "Automation")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -559,7 +561,7 @@ class MainActivity : Activity() {
             }
             runOnUiThread {
                 if (ok && !isFinishing) {
-                    if (padsEmpty) for (i in 0 until Cfg.PADS) assignPad(i, store.file(RockKit.fileName(RockKit.pads[i])))
+                    if (padsEmpty) for (i in RockKit.pads.indices) assignPad(i, store.file(RockKit.fileName(RockKit.pads[i])))
                     libraryScreen.refresh()
                 }
             }
@@ -813,15 +815,14 @@ class MainActivity : Activity() {
             rep({ b.accent[it] }, { k, v -> b.accent[k] = v })
             rep({ b.slide[it] }, { k, v -> b.slide[k] = v })
             val q = e.analogSeq
-            rep({ q.on[it] }, { k, v -> q.on[k] = v })
-            rep({ q.note[it] }, { k, v -> q.note[k] = v })
-            rep({ q.len[it] }, { k, v -> q.len[k] = v })
+            for (k in old until n) q.copyStep(k % old, k)
             for (g in arrayOf(e.rhythmGtr, e.riffGtr)) {
                 rep({ g.art[it] }, { k, v -> g.art[k] = v })
                 rep({ g.fret[it] }, { k, v -> g.fret[k] = v })
             }
             rep({ e.ambient.steps[it] }, { k, v -> e.ambient.steps[k] = v })
             for (ps in e.bank.parts) ps.extend(old, n)
+            e.auto.extend(old, n)
         }
         Pat.len = n
         if (Pat.view >= Pat.bars()) Pat.view = 0

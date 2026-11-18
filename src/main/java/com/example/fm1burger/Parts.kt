@@ -52,9 +52,8 @@ class PartSnap {
     val bSlide = BooleanArray(Cfg.STEPS)
     var bMute = false
 
-    val aOn = BooleanArray(Cfg.STEPS)
-    val aNote = IntArray(Cfg.STEPS) { 60 }
-    val aLen = IntArray(Cfg.STEPS) { 1 }
+    /** The analog synth notes: [step * 128 + note] = length (see AnalogSeq.grid). */
+    val aGrid = IntArray(Cfg.STEPS * AnalogSeq.NOTES)
     var aEnabled = true
     var aMute = false
 
@@ -70,7 +69,7 @@ class PartSnap {
                 pOn[i][k] = pOn[i][j]; pLvl[i][k] = pLvl[i][j]
             }
             bOn[k] = bOn[j]; bNote[k] = bNote[j]; bAcc[k] = bAcc[j]; bSlide[k] = bSlide[j]
-            aOn[k] = aOn[j]; aNote[k] = aNote[j]; aLen[k] = aLen[j]
+            System.arraycopy(aGrid, j * AnalogSeq.NOTES, aGrid, k * AnalogSeq.NOTES, AnalogSeq.NOTES)
         }
     }
 
@@ -102,11 +101,7 @@ class PartSnap {
         }
         bMute = b.mute
         val s = e.analogSeq
-        for (k in 0 until Cfg.STEPS) {
-            aOn[k] = s.on[k]
-            aNote[k] = s.note[k]
-            aLen[k] = s.len[k]
-        }
+        s.grid.copyInto(aGrid)
         aEnabled = s.enabled
         aMute = e.analog.mute
         used = true
@@ -140,11 +135,7 @@ class PartSnap {
         }
         b.mute = bMute
         val s = e.analogSeq
-        for (k in 0 until Cfg.STEPS) {
-            s.on[k] = aOn[k]
-            s.note[k] = aNote[k]
-            s.len[k] = aLen[k]
-        }
+        aGrid.copyInto(s.grid)
         s.enabled = aEnabled
         e.analog.mute = aMute
     }
@@ -166,9 +157,7 @@ class PartSnap {
         o.bAcc.copyInto(bAcc)
         o.bSlide.copyInto(bSlide)
         bMute = o.bMute
-        o.aOn.copyInto(aOn)
-        o.aNote.copyInto(aNote)
-        o.aLen.copyInto(aLen)
+        o.aGrid.copyInto(aGrid)
         aEnabled = o.aEnabled
         aMute = o.aMute
         used = o.used
@@ -192,9 +181,7 @@ class PartSnap {
         bAcc.fill(false)
         bSlide.fill(false)
         bMute = false
-        aOn.fill(false)
-        aNote.fill(60)
-        aLen.fill(1)
+        aGrid.fill(0)
         aEnabled = true
         aMute = false
         used = true
@@ -206,7 +193,7 @@ class PartSnap {
         for (r in tOn) for (x in r) if (x) n++
         for (r in pOn) for (x in r) if (x) n++
         for (x in bOn) if (x) n++
-        for (x in aOn) if (x) n++
+        for (x in aGrid) if (x > 0) n++
         return n
     }
 
@@ -229,9 +216,7 @@ class PartSnap {
         o.put("bAcc", arrB(bAcc))
         o.put("bSlide", arrB(bSlide))
         o.put("bMute", bMute)
-        o.put("aOn", arrB(aOn))
-        o.put("aNote", arrI(aNote))
-        o.put("aLen", arrI(aLen))
+        o.put("aNotes", AnalogSeq.gridToJson(aGrid))
         o.put("aEnabled", aEnabled)
         o.put("aMute", aMute)
         return o
@@ -253,9 +238,19 @@ class PartSnap {
         readB(o.optJSONArray("bAcc"), bAcc)
         readB(o.optJSONArray("bSlide"), bSlide)
         bMute = o.optBoolean("bMute", false)
-        readB(o.optJSONArray("aOn"), aOn)
-        readI(o.optJSONArray("aNote"), aNote, 60)
-        readI(o.optJSONArray("aLen"), aLen, 1)
+        val an = o.optJSONArray("aNotes")
+        if (an != null) {
+            AnalogSeq.gridFromJson(an, aGrid)
+        } else {
+            // older parts: one note per step
+            val on = BooleanArray(Cfg.STEPS)
+            val note = IntArray(Cfg.STEPS) { 60 }
+            val len = IntArray(Cfg.STEPS) { 1 }
+            readB(o.optJSONArray("aOn"), on)
+            readI(o.optJSONArray("aNote"), note, 60)
+            readI(o.optJSONArray("aLen"), len, 1)
+            AnalogSeq.fromMono(on, note, len, aGrid)
+        }
         aEnabled = o.optBoolean("aEnabled", true)
         aMute = o.optBoolean("aMute", false)
     }

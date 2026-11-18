@@ -73,7 +73,7 @@ class LaneSetup {
     fun reset() {
         var k = 0
         for (i in 0 until Cfg.TRACKS) { type[k] = Inst.SAMPLE; idx[k] = i; k++ }
-        for (i in 0 until Cfg.PADS) { type[k] = Inst.DRUM; idx[k] = i; k++ }
+        for (i in 0 until 8) { type[k] = Inst.DRUM; idx[k] = i; k++ }
         for (t in intArrayOf(Inst.BASS, Inst.SYNTH, Inst.VOICE, Inst.SONG, Inst.AMBIENT, Inst.RHYTHM, Inst.RIFF)) {
             if (k < N) { type[k] = t; idx[k] = 0; k++ }
         }
@@ -99,7 +99,8 @@ class LaneSetup {
 
     fun label(lane: Int): String {
         val t = type[lane]
-        return if (Inst.slots(t) > 1) "${Inst.NAMES[t]} ${idx[lane] + 1}" else Inst.NAMES[t]
+        return if (t == Inst.DRUM) "Drum ${Cfg.padName(idx[lane])}"
+        else if (Inst.slots(t) > 1) "${Inst.NAMES[t]} ${idx[lane] + 1}" else Inst.NAMES[t]
     }
 
     fun toJson(): JSONObject {
@@ -252,7 +253,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
                 else e.audition(k)
             }
             Inst.DRUM -> {
-                if (e.pads[k].data == null) ui.toast("Drum pad ${k + 1} has no sound. Tap the icon to choose one.")
+                if (e.pads[k].data == null) ui.toast("Drum pad ${Cfg.padName(k)} has no sound. Tap the icon to choose one.")
                 else e.padHit(k, 1f)
             }
             Inst.AMBIENT -> e.ambient.callReq = true
@@ -715,9 +716,10 @@ class LaneView(
                 val sq = e.analogSeq
                 var lo = 127
                 var hi = 0
-                for (s in 0 until Pat.len) if (sq.on[s]) { lo = min(lo, sq.note[s]); hi = max(hi, sq.note[s]) }
+                val top = IntArray(Pat.len) { st -> sq.notesAt(st).lastOrNull() ?: -1 }
+                for (v in top) if (v >= 0) { lo = min(lo, v); hi = max(hi, v) }
                 val span = max(12, hi - lo)
-                drawSteps(c, w, h, col, { sq.on[it] }, { 0.25f + 0.75f * (sq.note[it] - lo) / span.toFloat() })
+                drawSteps(c, w, h, col, { top[it] >= 0 }, { 0.25f + 0.75f * (top[it] - lo) / span.toFloat() })
                 if (!sq.enabled) name += " · keyboard only"
             }
             Inst.VOICE -> {

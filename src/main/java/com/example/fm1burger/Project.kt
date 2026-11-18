@@ -119,6 +119,7 @@ class Project(private val a: MainActivity) {
             o.put("patLen", Pat.len)
             o.put("latencyMode", e.latencyMode)
             o.put("stemsOn", e.stemsOn)
+            o.put("auto", e.auto.toJson())
             SafeIo.writeText(file, o.toString())
         } catch (ex: Exception) {
         }
@@ -138,6 +139,7 @@ class Project(private val a: MainActivity) {
             val lm = o.optInt("latencyMode", 1).coerceIn(0, 2)
             if (lm != e.latencyMode) e.latencyMode = lm
             e.stemsOn = o.optBoolean("stemsOn", false)
+            e.auto.fromJson(o.optJSONObject("auto"))
             e.bpm = o.optInt("bpm", 120)
             e.masterVol = o.optDouble("master", 0.9).toFloat()
             e.padVol = o.optDouble("padVol", 0.8).toFloat()

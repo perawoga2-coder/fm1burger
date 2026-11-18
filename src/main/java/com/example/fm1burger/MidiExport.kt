@@ -14,7 +14,10 @@ object MidiExport {
     private const val PPQ = 96
     private const val T16 = PPQ / 4          // ticks in a 16th note
     /** General MIDI drum notes for the 8 pad rows: kick, snare, closed hat, open hat, clap, low tom, high tom, crash. */
-    private val GM_DRUMS = intArrayOf(36, 38, 42, 46, 39, 45, 48, 49)
+    private val GM_DRUMS = intArrayOf(
+        36, 38, 42, 46, 39, 45, 48, 49, 35, 40, 44, 51, 37, 41, 47, 57,      // bank A
+        50, 43, 52, 53, 54, 55, 56, 58, 59, 60, 61, 62, 63, 64, 65, 66       // bank B
+    )
     private val CHORDS = arrayOf(intArrayOf(0), intArrayOf(0, 4, 7), intArrayOf(0, 3, 7), intArrayOf(0, 7), intArrayOf(0, 12))
 
     private class Ev(val tick: Int, val order: Int, val data: ByteArray)
@@ -91,8 +94,12 @@ object MidiExport {
                     bass.note(4, bassRoot + sn.bNote[s], if (sn.bAcc[s]) 120 else 90, t, if (held) T16 + T16 / 4 else T16 * 3 / 5)
                 }
                 // analog synth with its chord
-                if (!sn.aMute && sn.aEnabled && sn.aOn[s]) {
-                    for (x in chord) synth.note(5, sn.aNote[s] + x, 100, t, sn.aLen[s].coerceIn(1, AnalogSeq.MAX_LEN) * T16)
+                if (!sn.aMute && sn.aEnabled) {
+                    val b = s * AnalogSeq.NOTES
+                    for (n in 0 until AnalogSeq.NOTES) {
+                        val l = sn.aGrid[b + n]
+                        if (l > 0) for (x in chord) synth.note(5, n + x, 100, t, l.coerceIn(1, AnalogSeq.MAX_LEN) * T16)
+                    }
                 }
             }
             at += steps * T16

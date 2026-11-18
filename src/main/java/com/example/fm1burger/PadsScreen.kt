@@ -23,7 +23,11 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private val labels = ArrayList<Button>()
     private val muteBtns = ArrayList<Button>()
     private val volBars = ArrayList<SeekBar>()
-    private val cells = Array(Cfg.PADS) { arrayOfNulls<View>(Pat.BAR) }
+    private val cells = Array(Cfg.PAD_BANK) { arrayOfNulls<View>(Pat.BAR) }
+    /** The bank shown: 0 = A (pads 1-16), 1 = B. Rows and pads on screen are the 16 of this bank. */
+    private var bank = 0
+    private val bankBtns = ArrayList<Button>()
+    private fun pi(r: Int): Int = bank * Cfg.PAD_BANK + r
     private var playStep = -1
     private var lastState = -1
 
@@ -49,12 +53,19 @@ class PadsScreen(private val a: MainActivity) : Screen {
         content.addView(ui.title("Pads and drum sequencer"))
         content.addView(
             ui.text(
-                "Tap a pad to play it. Long press a pad to choose its sample. " +
-                    "MIDI notes from the FM-1 also play the pads (note number modulo 8, so notes 0, 8, 16... play pad 1).",
+                "16 pads in each of 2 banks (A and B, 32 sounds). Tap a pad to play it, long press it to choose its sample. " +
+                    "MIDI notes from the FM-1 also play the pads (note number modulo 32: notes 0-15 bank A, 16-31 bank B).",
                 12f, Theme.DIM
             ), ui.fullWidth(4)
         )
-        for (rowIdx in 0 until 2) {
+        val br = ui.row()
+        for (k in 0 until Cfg.PADS / Cfg.PAD_BANK) {
+            val b = ui.button("Bank ${'A' + k}") { setBank(k) }
+            bankBtns.add(b)
+            br.addView(b, ui.w(1f, 3))
+        }
+        content.addView(br, ui.fullWidth(4))
+        for (rowIdx in 0 until 4) {
             val row = ui.row()
             for (c in 0 until 4) {
                 val i = rowIdx * 4 + c
@@ -63,13 +74,14 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 b.textSize = 13f
                 b.setTextColor(Theme.TEXT)
                 b.background = ui.bg(Theme.PANEL2, 14)
-                b.setOnClickListener { e.padHit(i, 1f) }
+                b.setOnClickListener { e.padHit(pi(i), 1f) }
                 b.setOnLongClickListener {
-                    a.pickSample("Sample for pad ${i + 1}") { f -> a.assignPad(i, f) }
+                    val q = pi(i)
+                    a.pickSample("Sample for pad ${Cfg.padName(q)}") { f -> a.assignPad(q, f) }
                     true
                 }
                 pads.add(b)
-                val lp = LinearLayout.LayoutParams(0, ui.dp(72), 1f)
+                val lp = LinearLayout.LayoutParams(0, ui.dp(64), 1f)
                 lp.setMargins(ui.dp(4), ui.dp(4), ui.dp(4), ui.dp(4))
                 row.addView(b, lp)
             }
@@ -103,10 +115,10 @@ class PadsScreen(private val a: MainActivity) : Screen {
         val r0 = ui.row()
         r0.addView(ui.button("Rock Heavy kit → pads") { rockKit() }, ui.w(1.3f, 3))
         r0.addView(ui.button("Electronic kit → pads") { drumKit() }, ui.w(1.3f, 3))
-        r0.addView(ui.button("Clear all") { clearAll() }, ui.w(1f, 3))
+        r0.addView(ui.button("Clear bank") { clearAll() }, ui.w(1f, 3))
         content.addView(r0, ui.fullWidth(6))
 
-        for (r in 0 until Cfg.PADS) content.addView(buildRow(r), ui.fullWidth(2))
+        for (r in 0 until Cfg.PAD_BANK) content.addView(buildRow(r), ui.fullWidth(2))
 
         buildEffects()
 
@@ -212,9 +224,10 @@ class PadsScreen(private val a: MainActivity) : Screen {
         lb.setPadding(ui.dp(4), 0, ui.dp(4), 0)
         lb.setTextColor(Theme.TEXT)
         lb.background = ui.bg(Theme.PANEL2, 8)
-        lb.setOnClickListener { e.padHit(r, 1f) }
+        lb.setOnClickListener { e.padHit(pi(r), 1f) }
         lb.setOnLongClickListener {
-            a.pickSample("Sample for row ${r + 1}") { f -> a.assignPad(r, f) }
+            val q = pi(r)
+            a.pickSample("Sample for pad ${Cfg.padName(q)}") { f -> a.assignPad(q, f) }
             true
         }
         labels.add(lb)
@@ -241,7 +254,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
         mb.setTextColor(Theme.TEXT)
         mb.background = ui.bg(Theme.PANEL2, 8)
         mb.setOnClickListener {
-            e.pads[r].mute = !e.pads[r].mute
+            val pp = e.pads[pi(r)]
+            pp.mute = !pp.mute
             refreshMutes()
         }
         muteBtns.add(mb)
@@ -251,10 +265,10 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
         val vb = SeekBar(a)
         vb.max = 100
-        vb.progress = (e.pads[r].volume * 100f).toInt().coerceIn(0, 100)
+        vb.progress = (e.pads[pi(r)].volume * 100f).toInt().coerceIn(0, 100)
         vb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
-                e.pads[r].volume = p / 100f
+                if (fromUser) e.pads[pi(r)].volume = p / 100f
             }
 
             override fun onStartTrackingTouch(s: SeekBar?) {}
@@ -266,7 +280,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     private fun refreshMutes() {
-        for (r in 0 until Cfg.PADS) ui.styleButton(muteBtns[r], e.pads[r].mute, Theme.RED)
+        for (r in 0 until Cfg.PAD_BANK) ui.styleButton(muteBtns[r], e.pads[pi(r)].mute, Theme.RED)
         val all = e.pads.all { it.mute }
         muteAllBtn.text = if (all) "Unmute all drums" else "Mute all drums"
         ui.styleButton(muteAllBtn, all, Theme.RED)
@@ -285,7 +299,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private fun paint(r: Int, c: Int) {
         if (c !in 0 until Pat.BAR) return
         val s = Pat.base() + c
-        val p = e.pads[r]
+        val p = e.pads[pi(r)]
         val base = if (p.on[s]) {
             alphaColor(Theme.ACCENT, (70 + 185 * p.lvl[s]).toInt())
         } else if ((s / 4) % 2 == 0) {
@@ -298,7 +312,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     private fun cycle(r: Int, s: Int) {
-        val p = e.pads[r]
+        val p = e.pads[pi(r)]
         if (!p.on[s]) {
             p.on[s] = true
             p.lvl[s] = levels[0]
@@ -312,15 +326,22 @@ class PadsScreen(private val a: MainActivity) : Screen {
             }
         }
         paint(r, s - Pat.base())
-        if (p.on[s]) e.padHit(r, p.lvl[s])
+        if (p.on[s]) e.padHit(pi(r), p.lvl[s])
     }
 
     private fun repaintAll() {
-        for (r in 0 until Cfg.PADS) for (c in 0 until Pat.BAR) paint(r, c)
+        for (r in 0 until Cfg.PAD_BANK) for (c in 0 until Pat.BAR) paint(r, c)
+    }
+
+    private fun bankPads(): List<PadVoice> = (0 until Cfg.PAD_BANK).map { e.pads[pi(it)] }
+
+    private fun setBank(k: Int) {
+        bank = k
+        onShow()
     }
 
     private fun clearAll() {
-        for (p in e.pads) {
+        for (p in bankPads()) {
             for (s in 0 until Cfg.STEPS) {
                 p.on[s] = false
                 p.lvl[s] = 1f
@@ -342,8 +363,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 if (made < 0) {
                     ui.toast("Could not make the drum kit")
                 } else {
-                    for (i in 0 until Cfg.PADS) {
-                        a.assignPad(i, a.store.file(DrumKit.fileName(DrumKit.padKit[i])))
+                    for (i in DrumKit.padKit.indices) {
+                        a.assignPad(pi(i), a.store.file(DrumKit.fileName(DrumKit.padKit[i])))
                     }
                     ui.toast(
                         "Drum kit ready: 8 sounds on the pads, " +
@@ -367,7 +388,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 if (!ok) {
                     ui.toast("Could not load the Rock Heavy kit")
                 } else {
-                    for (i in 0 until Cfg.PADS) a.assignPad(i, a.store.file(RockKit.fileName(RockKit.pads[i])))
+                    for (i in RockKit.pads.indices) a.assignPad(pi(i), a.store.file(RockKit.fileName(RockKit.pads[i])))
                     a.libraryScreen.refresh()
                     ui.toast("Rock Heavy kit on the pads: kick, snare, hats, toms, crash, china. 4 more sounds are in the Library.")
                 }
@@ -377,7 +398,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
     private fun setRow(r: Int, steps: IntArray, level: Float = 1f) {
         for (s in steps) {
-            val p = e.pads[r]
+            val p = e.pads[pi(r)]
             p.on[s] = true
             p.lvl[s] = level
         }
@@ -385,7 +406,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
     // rows: 0 kick, 1 snare, 2 closed hat, 3 open hat, 4 clap, 5 tom low, 6 tom high, 7 crash
     private fun beat(kind: Int) {
-        for (p in e.pads) {
+        for (p in bankPads()) {
             for (s in 0 until Cfg.STEPS) {
                 p.on[s] = false
                 p.lvl[s] = 1f
@@ -445,23 +466,25 @@ class PadsScreen(private val a: MainActivity) : Screen {
             }
         }
         // the same beat in every bar of a longer pattern
-        for (p in e.pads) for (s in Pat.BAR until Cfg.STEPS) {
+        for (p in bankPads()) for (s in Pat.BAR until Cfg.STEPS) {
             p.on[s] = p.on[s % Pat.BAR]
             p.lvl[s] = p.lvl[s % Pat.BAR]
         }
         repaintAll()
-        val missing = e.pads.take(5).any { it.data == null }
+        val missing = bankPads().take(5).any { it.data == null }
         if (missing) ui.toast("Tip: press \"Drum kit → pads\" first so the rows have drum sounds.")
     }
 
     override fun onShow() {
-        for (i in 0 until Cfg.PADS) {
-            val n = e.pads[i].name
+        for (i in 0 until Cfg.PAD_BANK) {
+            val q = pi(i)
+            val n = e.pads[q].name
             val shortName = n.removeSuffix(".wav").removePrefix("Drum_").replace('_', ' ')
-            pads[i].text = "${i + 1}\n" + (if (n.isEmpty()) "(empty)" else shortName)
-            labels[i].text = "${i + 1}  " + (if (n.isEmpty()) "(empty)" else shortName)
-            volBars[i].progress = (e.pads[i].volume * 100f).toInt().coerceIn(0, 100)
+            pads[i].text = Cfg.padName(q) + "\n" + (if (n.isEmpty()) "(empty)" else shortName)
+            labels[i].text = Cfg.padName(q) + "  " + (if (n.isEmpty()) "(empty)" else shortName)
+            volBars[i].progress = (e.pads[q].volume * 100f).toInt().coerceIn(0, 100)
         }
+        for (k in bankBtns.indices) ui.styleButton(bankBtns[k], k == bank, Theme.RED)
         refreshEffects()
         lastState = -1
         refreshTransport()
@@ -476,7 +499,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
         if (s != playStep) {
             val old = playStep
             playStep = s
-            for (r in 0 until Cfg.PADS) {
+            for (r in 0 until Cfg.PAD_BANK) {
                 if (old >= 0) paint(r, old - Pat.base())
                 if (s >= 0) paint(r, s - Pat.base())
             }

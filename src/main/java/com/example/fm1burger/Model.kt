@@ -5,7 +5,12 @@ object Cfg {
     const val TRACKS = 4
     /** Room for the longest pattern (4 bars of 16th notes). The pattern plays [Pat.len] of them. */
     const val STEPS = 64
-    const val PADS = 8
+    /** Drum pads: 2 banks (A, B) of 16. */
+    const val PADS = 32
+    const val PAD_BANK = 16
+
+    /** Pad name: A1 .. A16, B1 .. B16. */
+    fun padName(i: Int): String = "${'A' + i / PAD_BANK}${i % PAD_BANK + 1}"
     const val FM1_BUDGET = 496 * 1024
 }
 
