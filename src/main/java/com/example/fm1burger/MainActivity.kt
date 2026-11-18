@@ -55,6 +55,8 @@ class MainActivity : Activity() {
     lateinit var synthScreen: SynthScreen
     lateinit var bassScreen: SynthScreen
     lateinit var homeScreen: HomeScreen
+    lateinit var tracksScreen: TracksScreen
+    lateinit var voiceScreen: VoiceScreen
     lateinit var guitarScreen: GuitarScreen
 
     /** What the 16 lanes of the Home page show (saved with the project). */
@@ -305,6 +307,7 @@ class MainActivity : Activity() {
 
         // screens
         val tracks = TracksScreen(this)
+        tracksScreen = tracks
         val steps = StepsScreen(this)
         val mixer = MixerScreen(this)
         libraryScreen = LibraryScreen(this)
@@ -315,6 +318,7 @@ class MainActivity : Activity() {
         synthScreen = synth
         bassScreen = SynthScreen(this, 0)         // the Bassline page
         val voice = VoiceScreen(this)
+        voiceScreen = voice
         val song = SongScreen(this)
         homeScreen = HomeScreen(this)
         val ambient = AmbientScreen(this)
@@ -340,6 +344,10 @@ class MainActivity : Activity() {
             }
         }
         tabBtns = btns
+        // the editor and the effects now live inside the Sampler page
+        tracks.attachEmbedded(editScreen, fx)
+        btns[TAB_EDIT].visibility = View.GONE
+        btns[TAB_FX].visibility = View.GONE
         tabScroll = HorizontalScrollView(this)
         tabScroll.isHorizontalScrollBarEnabled = false
         tabScroll.setBackgroundColor(Theme.BG)
@@ -375,7 +383,9 @@ class MainActivity : Activity() {
         if (cur != TAB_HOME) showTab(TAB_HOME) else super.onBackPressed()
     }
 
-    fun showTab(i: Int) {
+    fun showTab(i0: Int) {
+        // Edit and FX are sections of the Sampler page now
+        val i = if (i0 == TAB_EDIT || i0 == TAB_FX) TAB_TRACKS else i0
         cur = i
         homeFab.visibility = if (i == TAB_HOME) View.GONE else View.VISIBLE
         screens.forEachIndexed { idx, s -> s.root.visibility = if (idx == i) View.VISIBLE else View.GONE }
@@ -1076,7 +1086,8 @@ class MainActivity : Activity() {
 
     fun openEdit(f: File) {
         editScreen.pendingOpen = f
-        showTab(TAB_EDIT)
+        showTab(TAB_TRACKS)
+        tracksScreen.scrollToEditor()
     }
 
     // ---------------- import / export ----------------

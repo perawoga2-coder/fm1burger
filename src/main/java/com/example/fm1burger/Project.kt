@@ -32,6 +32,21 @@ class Project(private val a: MainActivity) {
                 j.put("end", t.end.toDouble())
                 j.put("reverse", t.reverse)
                 j.put("boostDb", t.boostDb.toDouble())
+                j.put("pingPong", t.pingPong)
+                j.put("loopA", t.loopA.toDouble())
+                j.put("loopB", t.loopB.toDouble())
+                j.put("xfadeMs", t.xfadeMs.toDouble())
+                j.put("fitBars", t.fitBars)
+                j.put("keepPitch", t.keepPitch)
+                j.put("slices", t.slices)
+                val so = JSONArray()
+                val sr = JSONArray()
+                for (k in 0 until Cfg.STEPS) {
+                    so.put(t.sliceOf[k])
+                    sr.put(t.sliceRev[k])
+                }
+                j.put("sliceOf", so)
+                j.put("sliceRev", sr)
                 val so = JSONArray()
                 val sp = JSONArray()
                 val sl = JSONArray()
@@ -132,6 +147,19 @@ class Project(private val a: MainActivity) {
                     t.end = j.optDouble("end", 1.0).toFloat()
                     t.reverse = j.optBoolean("reverse", false)
                     t.boostDb = j.optDouble("boostDb", 0.0).toFloat().coerceIn(0f, 12f)
+                    t.pingPong = j.optBoolean("pingPong", false)
+                    t.loopA = j.optDouble("loopA", 0.0).toFloat().coerceIn(0f, 1f)
+                    t.loopB = j.optDouble("loopB", 1.0).toFloat().coerceIn(0f, 1f)
+                    t.xfadeMs = j.optDouble("xfadeMs", 0.0).toFloat().coerceIn(0f, 100f)
+                    t.fitBars = j.optInt("fitBars", 0).let { if (it in intArrayOf(0, 1, 2, 4, 8)) it else 0 }
+                    t.keepPitch = j.optBoolean("keepPitch", false)
+                    t.slices = j.optInt("slices", 0).let { if (it in intArrayOf(0, 4, 8, 16)) it else 0 }
+                    val so = j.optJSONArray("sliceOf")
+                    val sr = j.optJSONArray("sliceRev")
+                    for (k in 0 until Cfg.STEPS) {
+                        t.sliceOf[k] = so?.optInt(k, -1)?.coerceIn(-1, 15) ?: -1
+                        t.sliceRev[k] = sr?.optBoolean(k, false) ?: false
+                    }
                     val so = j.optJSONArray("stepOn")
                     val sp = j.optJSONArray("stepPitch")
                     val sl = j.optJSONArray("stepLevel")

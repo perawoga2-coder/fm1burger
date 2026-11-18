@@ -22,6 +22,7 @@ class Engine {
 
     companion object {
         const val BLOCK = 256
+        const val GRAIN = 2048          // time stretch grain length (samples)
 
         // PREPARE mode: what plays alone (0-3 = sample track 1-4)
         const val PREP_NONE = -1
@@ -604,31 +605,27 @@ class Engine {
                 p.playing = true
             }
         }
-        for (t in tracks) {
-            if (t.data == null) continue
-            if (t.loop) {
-                if (s == 0) trigger(t, 0, 1f)
-            } else {
-                val st = t.steps[s]
-                if (st.on) trigger(t, st.pitch, st.level)
+        for (t in tracks) stepTrack(t, s)
+    }
+
+    /** One step of a sample track: a loop restarts on its bar, a step plays the sample (or its slice). */
+    private fun stepTrack(t: Track, s: Int) {
+        if (t.data == null) return
+        if (t.loop) {
+            if (s == 0) {
+                val bar = (tickCount / 96L).toInt()
+                if (t.fitBars <= 0 || bar % t.fitBars == 0 || !t.playing) trigger(t, 0, 1f)
             }
+        } else {
+            val st = t.steps[s]
+            if (st.on) trigger(t, st.pitch, st.level, s)
         }
     }
 
     /** PREPARE: step only the part being prepared. */
     private fun prepareStep(pr: Int, s: Int) {
         when (pr) {
-            in 0 until Cfg.TRACKS -> {
-                val t = tracks[pr]
-                if (t.data != null) {
-                    if (t.loop) {
-                        if (s == 0) trigger(t, 0, 1f)
-                    } else {
-                        val st = t.steps[s]
-                        if (st.on) trigger(t, st.pitch, st.level)
-                    }
-                }
-            }
+            in 0 until Cfg.TRACKS -> stepTrack(tracks[pr], s)
             PREP_PADS -> for (p in pads) {
                 if (p.on[s] && p.data != null) {
                     p.gain = p.lvl[s]
@@ -644,24 +641,94 @@ class Engine {
         }
     }
 
-    private fun trigger(t: Track, semis: Int, level: Float) {
+    private fun trigger(t: Track, semis: Int, level: Float, step: Int = -1) {
         val d = t.data ?: return
         val n = d.size
         if (n < 2) return
-        val a = (t.start * n).toInt().coerceIn(0, n - 1)
-        val e = (t.end * n).toInt().coerceIn(a + 1, n)
+        var a = (t.start * n).toInt().coerceIn(0, n - 1)
+        var e = (t.end * n).toInt().coerceIn(a + 1, n)
+        var rev = t.reverse
+        // slices: this step plays one equal part of start..end
+        if (!t.loop && t.slices > 0 && step >= 0) {
+            val k = (if (t.sliceOf[step] >= 0) t.sliceOf[step] else step) % t.slices
+            val len = (e - a).toDouble() / t.slices
+            val sa = a + (k * len).toInt()
+            val se = (a + ((k + 1) * len).toInt()).coerceAtMost(e)
+            a = sa
+            e = se.coerceAtLeast(a + 1)
+            if (t.sliceRev[step]) rev = !rev
+        }
         t.vStart = a.toDouble()
         t.vEnd = e.toDouble()
         t.rate = 2.0.pow((t.pitch + semis) / 12.0)
         t.gain = level
-        if (t.reverse) {
+        // fit the loop to N bars of the tempo
+        t.stretch = false
+        t.tlRate = 1.0
+        if (t.loop && t.fitBars > 0) {
+            val want = t.fitBars * Cfg.SR * 240.0 / bpmF          // samples in N bars
+            val fit = (e - a) / want
+            if (t.keepPitch) {
+                t.stretch = true
+                t.tlRate = fit
+            } else {
+                t.rate = fit * 2.0.pow(t.pitch / 12.0)
+            }
+        }
+        if (rev) {
             t.dir = -1
             t.pos = (e - 1).toDouble()
         } else {
             t.dir = 1
             t.pos = a.toDouble()
         }
+        t.tl = t.pos
+        t.gAge[0] = 0
+        t.gAge[1] = GRAIN / 2
+        t.gPos[0] = t.pos
+        t.gPos[1] = t.pos
         t.playing = true
+    }
+
+    private fun sampleAt(d: FloatArray, p: Double): Float {
+        val i = p.toInt()
+        if (i < 0 || i >= d.size) return 0f
+        val fr = (p - i).toFloat()
+        val s0 = d[i]
+        val s1 = if (i + 1 < d.size) d[i + 1] else 0f
+        return s0 + (s1 - s0) * fr
+    }
+
+    /** Moves a position by one step inside the loop (forward wraps, ping-pong turns around). Returns false at the end of a one-shot. */
+    private fun advance(t: Track, rate: Double): Boolean {
+        var p = t.tl + t.dir * rate
+        val la = t.vStart + t.loopA.coerceIn(0f, 1f) * (t.vEnd - t.vStart)
+        var lb = t.vStart + t.loopB.coerceIn(0f, 1f) * (t.vEnd - t.vStart)
+        if (lb - la < 8.0) lb = (la + 8.0).coerceAtMost(t.vEnd)
+        if (!t.loop) {
+            if (p >= t.vEnd || p < t.vStart) return false
+            t.tl = p
+            return true
+        }
+        if (t.dir > 0 && p >= lb) {
+            if (t.pingPong) {
+                t.dir = -1
+                p = lb - (p - lb)
+            } else {
+                p = la + (p - lb)
+                if (p >= lb) p = la
+            }
+        } else if (t.dir < 0 && p < la) {
+            if (t.pingPong) {
+                t.dir = 1
+                p = la + (la - p)
+            } else {
+                p = lb - (la - p)
+                if (p < la) p = lb - 1.0
+            }
+        }
+        t.tl = p.coerceIn(t.vStart, t.vEnd - 1.0)
+        return true
     }
 
     private fun renderTrack(t: Track): Float {
@@ -671,37 +738,41 @@ class Engine {
             t.playing = false
             return 0f
         }
-        var p = t.pos
-        val i = p.toInt()
-        if (p < 0.0 || i >= d.size) {
+        if (t.tl < 0.0 || t.tl.toInt() >= d.size) {
             t.playing = false
             return 0f
         }
-        val fr = (p - i).toFloat()
-        val s0 = d[i]
-        val s1 = if (i + 1 < d.size) d[i + 1] else 0f
-        val s = (s0 + (s1 - s0) * fr) * t.gain
-        p += t.dir * t.rate
-        if (t.dir > 0) {
-            if (p >= t.vEnd) {
-                if (t.loop) {
-                    p = t.vStart + (p - t.vEnd)
-                    if (p >= t.vEnd) p = t.vStart
-                } else {
-                    t.playing = false
-                }
+        var s: Float
+        if (t.stretch) {
+            // time stretch: two overlapping grains read at the pitch rate, the loop moves at the fit rate
+            s = 0f
+            val pr = 2.0.pow(t.pitch / 12.0)
+            for (k in 0 until 2) {
+                if (t.gAge[k] == 0) t.gPos[k] = t.tl
+                val w = 0.5f - 0.5f * cos(6.2831855f * t.gAge[k] / GRAIN)
+                s += sampleAt(d, t.gPos[k]) * w
+                t.gPos[k] = (t.gPos[k] + t.dir * pr).coerceIn(0.0, d.size - 1.0)
+                t.gAge[k] = (t.gAge[k] + 1) % GRAIN
             }
+            s *= t.gain
+            if (!advance(t, t.tlRate)) t.playing = false
         } else {
-            if (p < t.vStart) {
-                if (t.loop) {
-                    p = t.vEnd - 1.0 - (t.vStart - p)
-                    if (p < t.vStart) p = t.vEnd - 1.0
-                } else {
-                    t.playing = false
+            s = sampleAt(d, t.tl)
+            // crossfade into the loop start just before the loop end (forward loops)
+            if (t.loop && t.xfadeMs > 0.5f && t.dir > 0 && !t.pingPong) {
+                val la = t.vStart + t.loopA * (t.vEnd - t.vStart)
+                val lb = t.vStart + t.loopB * (t.vEnd - t.vStart)
+                val xf = (t.xfadeMs / 1000.0 * Cfg.SR).coerceAtMost((lb - la) / 2.0)
+                val into = t.tl - (lb - xf)
+                if (xf > 1.0 && into >= 0.0) {
+                    val k = (into / xf).toFloat().coerceIn(0f, 1f)
+                    s = s * (1f - k) + sampleAt(d, t.tl - (lb - la)) * k
                 }
             }
+            s *= t.gain
+            if (!advance(t, t.rate)) t.playing = false
         }
-        t.pos = p
+        t.pos = t.tl
         return s
     }
 

@@ -201,7 +201,7 @@ class VoiceScreen(private val a: MainActivity) : Screen {
         eqView.invalidate()
     }
 
-    private fun toggleMic() {
+    fun toggleMic() {
         if (v.on) {
             v.stop()
         } else {

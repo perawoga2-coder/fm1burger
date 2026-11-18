@@ -27,6 +27,26 @@ class Track(val index: Int) {
     @Volatile var reverse = false
     /** Extra gain before the effects, 0 .. +12 dB (for quiet samples, and to drive the effects harder). */
     @Volatile var boostDb = 0f
+
+    // ---- loops (LOOP mode) ----
+    @Volatile var pingPong = false        // forward / back / forward ... (with reverse on: starts backwards)
+    @Volatile var loopA = 0f              // loop points inside start..end, 0..1
+    @Volatile var loopB = 1f
+    @Volatile var xfadeMs = 0f            // crossfade at the loop point, 0..100 ms
+    @Volatile var fitBars = 0             // 0 off, or the loop is stretched to 1 / 2 / 4 / 8 bars of the tempo
+    @Volatile var keepPitch = false       // fit without changing the pitch (time stretch) instead of like a tape
+
+    // ---- slices (STEP mode) ----
+    @Volatile var slices = 0              // 0 off, 4 / 8 / 16 equal slices of start..end
+    val sliceOf = IntArray(Cfg.STEPS) { -1 }      // which slice each step plays (-1 = slice number of the step)
+    val sliceRev = BooleanArray(Cfg.STEPS)        // play that slice backwards
+
+    // time stretch state (audio thread)
+    var tl = 0.0
+    val gPos = DoubleArray(2)
+    val gAge = IntArray(2)
+    var stretch = false
+    var tlRate = 1.0
     val steps = Array(Cfg.STEPS) { Step() }
     val fx = FxChain()
 

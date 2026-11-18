@@ -1,6 +1,7 @@
 package com.example.fm1burger
 
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.CheckBox
 import android.widget.ScrollView
 
@@ -41,6 +42,13 @@ class FxScreen(private val a: MainActivity) : Screen {
                 "phaser and wobble, crunchier lo-fi, harder chop.", 11f, Theme.DIM), ui.fullWidth(0)
         )
         content.addView(listBox, ui.fullWidth(6))
+    }
+
+    /** Takes the effects out of their own page, to sit inside the Sampler page. */
+    fun detach(): LinearLayout {
+        root.removeView(content)
+        content.setPadding(0, 0, 0, 0)
+        return content
     }
 
     override fun onShow() {

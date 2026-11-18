@@ -43,7 +43,8 @@ class EditScreen(private val a: MainActivity) : Screen {
         content.addView(ui.text("Drag on the waveform to select a part. Without a selection, the whole sample is used.", 12f, Theme.DIM))
 
         row(
-            "● Record new sample (any input)" to { a.flow.recordForEdit() }
+            "● Record new sample (any input)" to { a.flow.recordForEdit() },
+            "Import WAV" to { a.importFiles() }
         )
         row(
             "Play" to { playSel() },
@@ -73,6 +74,42 @@ class EditScreen(private val a: MainActivity) : Screen {
             "Save (overwrite)" to { save(true) },
             "Save as copy" to { save(false) }
         )
+        val sr = ui.row()
+        sr.addView(ui.text("Send to", 13f, Theme.TEXT, true), ui.w(0f, 4))
+        for (i in 0 until Cfg.TRACKS) {
+            sr.addView(ui.button("Sampler ${i + 1}") { sendTo(i) }.also {
+                ui.styleButton(it, true, Theme.TRACK_COLORS[i])
+            }, ui.w(1f, 3))
+        }
+        content.addView(sr, ui.fullWidth(8))
+    }
+
+    /** Takes the editor out of its own page, to sit inside the Sampler page. */
+    fun detach(): LinearLayout {
+        root.removeView(content)
+        content.setPadding(0, 0, 0, 0)
+        return content
+    }
+
+    /** Puts what is in the editor on a sampler track (an edited sample is saved as a copy first). */
+    private fun sendTo(i: Int) {
+        var f = current
+        if (f == null || buf.isEmpty()) {
+            ui.toast("Record, import or pick a sample first")
+            return
+        }
+        if (undo.isNotEmpty()) {
+            f = store.saveNew(f.nameWithoutExtension + "_edit", buf, rate)
+            current = f
+            undo.clear()
+            files = store.list()
+            ui.fill(spinner, files.map { it.name })
+            spinner.setSelection(files.indexOfFirst { it.name == f.name }.coerceAtLeast(0))
+            a.libraryScreen.refresh()
+        }
+        a.assignTrack(i, f)
+        a.sel = i
+        ui.toast("Sampler ${i + 1} now plays ${f.name}")
     }
 
     private fun row(vararg items: Pair<String, () -> Unit>) {
