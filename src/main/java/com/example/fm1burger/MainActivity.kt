@@ -27,6 +27,7 @@ class MainActivity : Activity() {
         const val REQ_IMPORT = 10
         const val REQ_EXPORT = 11
         const val REQ_EXPORT_FILE = 12
+        const val REQ_SYX = 13
 
         // page numbers (the order of the screens list)
         const val TAB_TRACKS = 0
@@ -454,6 +455,10 @@ class MainActivity : Activity() {
                 true
             } catch (ex: Exception) {
                 false
+            }
+            try {
+                FmBank.install(this, store)
+            } catch (ex: Exception) {
             }
             runOnUiThread {
                 if (ok && !isFinishing) {
@@ -1084,11 +1089,68 @@ class MainActivity : Activity() {
         startActivityForResult(i, REQ_IMPORT)
     }
 
-    fun saveBytes(name: String, bytes: ByteArray) {
+    /** Library: pick a DX7 / FM-1 .syx file to turn into samples. */
+    fun importSyx() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "*/*"
+        startActivityForResult(i, REQ_SYX)
+    }
+
+    /** Choose the voices of a bank and the note, then render them into the library. */
+    private fun syxDialog(bank: String, voices: List<FmRender.Voice>) {
+        val names = Array(voices.size) { "${it + 1}. ${voices[it].name}" }
+        val checked = BooleanArray(voices.size) { true }
+        AlertDialog.Builder(this)
+            .setTitle("$bank: ${voices.size} FM voices. Which ones become samples?")
+            .setMultiChoiceItems(names, checked) { _, which, on -> checked[which] = on }
+            .setPositiveButton("Next") { _, _ ->
+                val pick = voices.filterIndexed { i, _ -> checked[i] }
+                if (pick.isEmpty()) {
+                    ui.toast("Nothing chosen")
+                    return@setPositiveButton
+                }
+                val notes = intArrayOf(36, 48, 60, 72)
+                val labels = arrayOf("C2 (bass)", "C3", "C4 (middle)", "C5 (bells, leads)")
+                AlertDialog.Builder(this)
+                    .setTitle("Record them on which note? (the Sampler can pitch them later)")
+                    .setItems(labels) { _, w -> renderSyx(bank, pick, notes[w]) }
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun renderSyx(bank: String, pick: List<FmRender.Voice>, note: Int) {
+        ui.toast("Turning ${pick.size} FM voices into samples...")
+        val nn = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+        val nName = nn[note % 12] + (note / 12 - 1)
+        Thread {
+            var made = 0
+            for (v in pick) {
+                try {
+                    val d = FmRender.render(v.p, note, 100, 1.2, 1.8)
+                    if (d.isNotEmpty()) {
+                        store.saveNew("$bank ${v.name} $nName", d, Cfg.SR)
+                        made++
+                    }
+                } catch (ex: Exception) {
+                } catch (ex: OutOfMemoryError) {
+                    break
+                }
+            }
+            runOnUiThread {
+                libraryScreen.refresh()
+                ui.toast("$made FM sounds added to the Library. Load them into the Sampler with L.")
+            }
+        }.start()
+    }
+
+    fun saveBytes(name: String, bytes: ByteArray, mime: String = "audio/wav") {
         pendingBytes = bytes
         val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
         i.addCategory(Intent.CATEGORY_OPENABLE)
-        i.type = "audio/wav"
+        i.type = mime
         i.putExtra(Intent.EXTRA_TITLE, name)
         startActivityForResult(i, REQ_EXPORT)
     }
@@ -1125,6 +1187,21 @@ class MainActivity : Activity() {
                     if (target >= 0 && imported.isNotEmpty()) assignTrack(target, imported[0])
                     libraryScreen.refresh()
                     if (imported.size > 1) ui.toast("Imported ${imported.size} files")
+                }
+            }.start()
+        } else if (requestCode == REQ_SYX) {
+            val uri = data.data ?: return
+            Thread {
+                val voices = try {
+                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes == null || bytes.size > 1_000_000) null else FmRender.readSyx(bytes)
+                } catch (ex: Exception) {
+                    null
+                }
+                val bank = displayName(uri).removeSuffix(".syx").removeSuffix(".SYX").take(20)
+                runOnUiThread {
+                    if (voices == null) ui.toast("This is not a DX7 / FM-1 .syx bank (32 voices) or single voice")
+                    else syxDialog(bank, voices)
                 }
             }.start()
         } else if (requestCode == REQ_EXPORT) {

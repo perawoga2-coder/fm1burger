@@ -1,0 +1,19 @@
+The FM voice renderer of Burger Studio (src/main/java/com/example/fm1burger/FmRender.kt and
+tools/fm6.py) follows the structure of the DX7 engine in "Music Synthesizer for Android"
+(https://github.com/google/music-synthesizer-for-android):
+
+  Copyright 2012, 2013 Google Inc.
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software distributed under
+  the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+  KIND, either express or implied.
+
+Taken from it, re-written in floating point: the 32 algorithm routing table, the envelope
+level / rate arithmetic and its tables (level, velocity, exponential key scaling), the
+coarse / fine / detune frequency formulas and the DX7 voice unpacking layout.
+
+The "MakerHip FM" voices (tools/make_fm_bank.py, src/main/assets/fmbank) are original to
+Burger Studio.

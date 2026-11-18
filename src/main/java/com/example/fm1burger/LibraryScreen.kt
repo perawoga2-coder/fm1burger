@@ -30,6 +30,38 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         top.addView(ui.button("Stop preview") { a.engine.previewStop() }, ui.w(1f, 3))
         content.addView(top, ui.fullWidth(6))
 
+        // FM sound banks
+        val fm = ui.row()
+        fm.addView(ui.button("MakerHip FM bank (32)") {
+            ui.toast("Adding the MakerHip FM bank...")
+            Thread {
+                val n = try { FmBank.install(a, store) } catch (ex: Exception) { -1 }
+                a.runOnUiThread {
+                    refresh()
+                    ui.toast(when {
+                        n < 0 -> "Could not add the FM bank"
+                        n == 0 -> "The 32 MakerHip FM sounds are already in the Library (search \"FM\")"
+                        else -> "Added $n MakerHip FM sounds (search \"FM\")"
+                    })
+                }
+            }.start()
+        }, ui.w(1f, 3))
+        fm.addView(ui.button("Import FM bank (.syx)") { a.importSyx() }, ui.w(1f, 3))
+        content.addView(fm, ui.fullWidth(4))
+        val fm2 = ui.row()
+        fm2.addView(ui.button("Save MakerHip_FM.syx (for the FM-1)") {
+            try {
+                a.saveBytes(FmBank.SYX, FmBank.syxBytes(a), "application/octet-stream")
+            } catch (ex: Exception) {
+                ui.toast("Could not read the bank")
+            }
+        }, ui.w(1f, 3))
+        content.addView(fm2, ui.fullWidth(2))
+        content.addView(
+            ui.text("FM banks: any DX7 / FM-1 .syx bank (32 voices) can be turned into samples here. " +
+                "The MakerHip FM bank is our own and can also be loaded into the FM-1.", 11f, Theme.DIM), ui.fullWidth(2)
+        )
+
         search.hint = "Search name or tag..."
         search.setSingleLine(true)
         search.setTextColor(Theme.TEXT)

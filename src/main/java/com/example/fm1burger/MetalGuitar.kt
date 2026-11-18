@@ -432,3 +432,25 @@ object RockKit {
         return n
     }
 }
+
+/** The "MakerHip FM" bank: 32 FM sounds made by tools/make_fm_bank.py, shipped inside the app as WAV files. */
+object FmBank {
+    const val SYX = "MakerHip_FM.syx"
+
+    fun files(ctx: android.content.Context): List<String> =
+        (ctx.assets.list("fmbank") ?: emptyArray()).filter { it.endsWith(".wav") }.sorted()
+
+    /** Copies the bank into the sample library (only the files that are missing). Background thread. Returns how many. */
+    fun install(ctx: android.content.Context, store: Store): Int {
+        var n = 0
+        for (name in files(ctx)) {
+            val target = store.file(name)
+            if (target.exists()) continue
+            ctx.assets.open("fmbank/$name").use { input -> SafeIo.writeBytes(target, input.readBytes()) }
+            n++
+        }
+        return n
+    }
+
+    fun syxBytes(ctx: android.content.Context): ByteArray = ctx.assets.open("fmbank/$SYX").use { it.readBytes() }
+}
