@@ -21,12 +21,16 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * The 5 second retro 8-bit intro: "BURGER STUDIO".
+ * The retro 8-bit intro: first the company logo "MAKER HIT" (3 s), then "BURGER STUDIO" (5 s).
  *
  * Everything is drawn on a tiny low-resolution picture (about 128 pixels wide) and
  * blown up without smoothing, so every pixel shows as a crisp block like an old console.
  * It also runs at a choppy 15 frames per second on purpose, and plays a short chiptune.
  *
+ * MAKER HIT: a hammer winds up and hits a gold block (flash, sparks, clunk),
+ * the letters pop up, PRESENTS blinks in, then a 4 step fade to dark.
+ *
+ * BURGER STUDIO (times from the start of this scene):
  * 0.0 - 0.7 s  stars appear, a cursor blinks
  * 0.7 - 1.8 s  the burger drops in, layer by layer, with a blip for each one
  * 1.8 - 3.0 s  BURGER STUDIO types itself in
@@ -41,8 +45,12 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         const val LINE1 = "BURGER"
         const val LINE2 = "STUDIO"
         const val TAGLINE = "GROOVEBOX"
-        const val TOTAL_MS = 5000L
+        const val COMPANY = "MAKER HIT"
+        const val PRESENTS = "PRESENTS"
+        const val CO_MS = 3000L            // length of the company logo scene
+        const val TOTAL_MS = CO_MS + 5000L
         private const val FRAME_MS = 66   // 15 frames per second, on purpose
+        private const val PI_F = 3.1415927f
 
         // an NES-like palette
         private val C_BG = Color.parseColor("#0B0B1A")
@@ -59,6 +67,13 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         private val C_PINK = Color.parseColor("#F878F8")
         private val C_WHITE = Color.parseColor("#FCFCFC")
         private val C_GREY = Color.parseColor("#7C7C9C")
+        private val C_GOLD = Color.parseColor("#F8B800")
+        private val C_GOLD_HI = Color.parseColor("#FCE0A8")
+        private val C_GOLD_LO = Color.parseColor("#AC7C00")
+        private val C_STEEL = Color.parseColor("#BCBCBC")
+        private val C_STEEL_HI = Color.parseColor("#FCFCFC")
+        private val C_STEEL_LO = Color.parseColor("#7C7C7C")
+        private val C_HIT = Color.parseColor("#F83800")
         private val CYCLE = intArrayOf(
             Color.parseColor("#F83800"), Color.parseColor("#F87858"), Color.parseColor("#F8B800"),
             Color.parseColor("#B8F818"), Color.parseColor("#58F898"), Color.parseColor("#3CBCFC"),
@@ -82,7 +97,12 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
             'V' to "10001100011000110001100010101000100",
             'X' to "10001100010101000100010101000110001",
             '1' to "00100011000010000100001000010001110",
-            '-' to "00000000000000011111000000000000000"
+            '-' to "00000000000000011111000000000000000",
+            'A' to "01110100011000111111100011000110001",
+            'K' to "10001100101010011000101001001010001",
+            'H' to "10001100011000111111100011000110001",
+            'P' to "11110100011000111110100001000010000",
+            'N' to "10001110011010110011100011000110001"
         )
 
         /** One 8 x 8 block order for the dissolve (a Bayer pattern), values 0..63. */
@@ -96,9 +116,26 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         /** The chiptune that goes with the animation, as mono samples at the engine rate. */
         fun jingle(): FloatArray {
             val sr = Cfg.SR
-            val out = FloatArray((sr * 4.6).toInt())
+            val out = FloatArray((sr * (CO_MS / 1000.0 + 4.6)).toInt())
+            var shift = 0
+            fun noise(ms: Int, durMs: Int, vol: Float) {
+                val start = (ms + shift) * sr / 1000
+                val len = durMs * sr / 1000
+                var seed = 0x1234
+                var v = 0f
+                for (i in 0 until len) {
+                    val k = start + i
+                    if (k >= out.size) break
+                    if (i % 6 == 0) {
+                        seed = seed * 1103515245 + 12345
+                        v = ((seed ushr 16) and 0x7fff) / 16384f - 1f
+                    }
+                    val x = i.toFloat() / len
+                    out[k] += v * (1f - x) * (1f - x) * vol
+                }
+            }
             fun note(ms: Int, midi: Int, durMs: Int, vol: Float, duty: Float, slide: Float = 0f, tri: Boolean = false) {
-                val start = ms * sr / 1000
+                val start = (ms + shift) * sr / 1000
                 val len = durMs * sr / 1000
                 var ph = 0.0
                 for (i in 0 until len) {
@@ -118,6 +155,20 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
                     out[k] += wave * env * vol
                 }
             }
+            // ---- MAKER HIT: wind-up, the hammer hit, the letters, PRESENTS ----
+            note(300, 45, 450, 0.05f, 0.5f, 14f)
+            noise(900, 140, 0.35f)
+            note(900, 40, 160, 0.40f, 0f, -12f, true)
+            note(905, 88, 280, 0.13f, 0.25f)
+            note(965, 93, 380, 0.11f, 0.25f)
+            val pop = intArrayOf(67, 69, 71, 72, 74, 0, 76, 79, 84)
+            for (i in pop.indices) if (pop[i] > 0) note(1000 + i * 70, pop[i], 60, 0.10f, 0.125f)
+            note(1800, 72, 420, 0.09f, 0.5f)
+            note(1950, 79, 520, 0.09f, 0.5f)
+            note(1800, 48, 600, 0.25f, 0f, 0f, true)
+            shift = CO_MS.toInt()
+
+            // ---- BURGER STUDIO ----
             // a blip for each burger layer (falling pitch)
             val layerNotes = intArrayOf(72, 74, 76, 77, 79)
             for (i in layerNotes.indices) note(760 + i * 210, layerNotes[i], 90, 0.22f, 0.25f, -5f)
@@ -140,7 +191,8 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         }
     }
 
-    private var t = 0f
+    private var tAll = 0f       // time since the very start
+    private var t = 0f          // time inside the BURGER STUDIO scene (negative during the logo)
     private var finished = false
     private val anim = ValueAnimator.ofFloat(0f, TOTAL_MS.toFloat())
 
@@ -166,8 +218,9 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         anim.addUpdateListener {
             val v = it.animatedValue as Float
             val q = (v / FRAME_MS).toInt() * FRAME_MS.toFloat()
-            if (q != t) {
-                t = q
+            if (q != tAll) {
+                tAll = q
+                t = q - CO_MS
                 invalidate()
             }
         }
@@ -277,12 +330,147 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         box(cx - 17, y + 4, 34, 1, C_BUN_LO)
     }
 
+    // ---------------- MAKER HIT: the company logo scene ----------------
+
+    private fun partAt(time: Float, start: Float, len: Float): Float = ((time - start) / len).coerceIn(0f, 1f)
+
+    /** The gold block that gets hit, with a small M on it. */
+    private fun block(x: Int, y: Int) {
+        box(x, y, 16, 16, C_GOLD_LO)
+        box(x + 1, y + 1, 14, 14, C_GOLD)
+        box(x + 1, y + 1, 14, 1, C_GOLD_HI)
+        box(x + 1, y + 1, 1, 14, C_GOLD_HI)
+        box(x + 2, y + 14, 13, 1, C_GOLD_LO)
+        box(x + 14, y + 2, 1, 13, C_GOLD_LO)
+        glyph('M', x + 5, y + 4, 1, C_GOLD_LO)
+    }
+
+    /**
+     * The hammer, drawn pixel by pixel around its pivot (the end of the handle).
+     * deg = 0: lying flat with the head on the block; bigger = raised (turned clockwise).
+     */
+    private fun hammer(pvx: Int, pvy: Int, deg: Float) {
+        val a = Math.toRadians(deg.toDouble())
+        val cs = kotlin.math.cos(a)
+        val sn = kotlin.math.sin(a)
+        for (y in pvy - 30..pvy + 30) {
+            for (x in pvx - 30..pvx + 30) {
+                val dx = x + 0.5 - pvx
+                val dy = y + 0.5 - pvy
+                // turn back into the flat hammer
+                val ux = dx * cs + dy * sn
+                val uy = -dx * sn + dy * cs
+                val col = when {
+                    ux >= -28 && ux < -18 && uy >= -5 && uy < 5 -> when {
+                        uy < -3 -> C_STEEL_HI
+                        uy >= 3 -> C_STEEL_LO
+                        else -> C_STEEL
+                    }
+                    ux >= -18 && ux < -4 && uy >= -1.5 && uy < 1.5 -> C_BUN_LO
+                    ux >= -4 && ux < 0 && uy >= -2 && uy < 2 -> C_HIT
+                    else -> 0
+                }
+                if (col != 0) dot(x, y, col)
+            }
+        }
+    }
+
+    private fun drawCompany(g: Canvas, T: Float) {
+        if (T < 250f) return
+        val cx = lw / 2
+        val top = (lh - 128) / 2
+        val frame = (T / FRAME_MS).toInt()
+        val hit = 900f
+
+        // one white frame at the moment of the hit
+        if (T >= hit && T < hit + FRAME_MS) {
+            g.drawColor(C_WHITE)
+            return
+        }
+
+        val by = top + 34
+        val sink = if (T >= hit && T < hit + 200f) 2 else 0
+        block(cx - 8, by + sink)
+
+        // sparks fly out from the hit
+        if (T >= hit && T < hit + 450f) {
+            val k = (T - hit) / 450f
+            for (d in 0 until 8) {
+                val an = d * PI_F / 4f
+                val r = 6f + k * 24f
+                val sx = cx - 1 + (kotlin.math.cos(an) * r).toInt()
+                val sy = by + (kotlin.math.sin(an) * r * 0.7f).toInt()
+                val size = if (k < 0.5f) 2 else 1
+                box(sx, sy, size, size, if (d % 2 == 0) C_WHITE else C_GOLD)
+            }
+        }
+
+        // the hammer: a slow wind-up, a fast swing down, a little bounce, then rest
+        val ang = when {
+            T < 300f -> 30f
+            T < 750f -> 30f + 80f * (1f - (1f - (T - 300f) / 450f).let { it * it })
+            T < hit -> 110f * (1f - ((T - 750f) / 150f).let { it * it })
+            T < hit + 260f -> 14f * kotlin.math.sin(PI_F * (T - hit) / 260f)
+            else -> 0f
+        }
+        hammer(cx + 22, by - 5 + sink, ang)
+
+        // MAKER HIT: the letters pop up one after another
+        val ty = by + 28
+        val x0 = cx - textWidth(COMPANY, 2) / 2
+        for (i in COMPANY.indices) {
+            val ch = COMPANY[i]
+            if (ch == ' ') continue
+            val p = partAt(T, 1000f + i * 70f, 240f)
+            if (p <= 0f) continue
+            // rise with a small overshoot
+            val s = 1.9f
+            val q = p - 1f
+            val back = 1f + q * q * ((s + 1f) * q + s)
+            val y = ty + ((1f - back) * 14f).toInt()
+            val col = if (i >= 6) C_HIT else C_WHITE
+            glyph(ch, x0 + i * 12, y, 2, col)
+        }
+
+        // PRESENTS, blinking a few times before it stays
+        if (T >= 1800f && (T > 2200f || frame % 4 < 2)) {
+            val px0 = cx - textWidth(PRESENTS, 1) / 2
+            for (i in PRESENTS.indices) glyph(PRESENTS[i], px0 + i * 6, ty + 22, 1, C_GREY)
+        }
+
+        // a little twinkle on the corner of the block
+        if (T in 2000f..2500f) {
+            val sx = cx - 10
+            val sy = by + 1
+            val big = frame % 4 < 2
+            dot(sx, sy, C_WHITE)
+            dot(sx - 1, sy, C_WHITE); dot(sx + 1, sy, C_WHITE)
+            dot(sx, sy - 1, C_WHITE); dot(sx, sy + 1, C_WHITE)
+            if (big) {
+                dot(sx - 2, sy, C_GOLD_HI); dot(sx + 2, sy, C_GOLD_HI)
+                dot(sx, sy - 2, C_GOLD_HI); dot(sx, sy + 2, C_GOLD_HI)
+            }
+        }
+
+        // fade to dark in 4 steps, like an old console palette fade
+        val f = ((T - 2550f) / 450f * 4f).toInt().coerceIn(0, 4)
+        if (f > 0) {
+            fill.color = Color.argb(minOf(255, f * 64), Color.red(C_BG), Color.green(C_BG), Color.blue(C_BG))
+            g.drawRect(0f, 0f, lw.toFloat(), lh.toFloat(), fill)
+        }
+    }
+
     // ---------------- frame ----------------
 
     override fun onDraw(c: Canvas) {
         val b = bmp ?: return
         val g = lc ?: return
         g.drawColor(C_BG)
+        if (tAll < CO_MS) {
+            drawCompany(g, tAll)
+            present(c, b, true)
+            return
+        }
         val cx = lw / 2
         val top = (lh - 128) / 2
         val frame = (t / FRAME_MS).toInt()
@@ -385,11 +573,15 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
             }
         }
 
-        // blow the picture up with hard pixel edges, then add CRT scanlines
+        present(c, b, dp == 0f)
+    }
+
+    /** Blows the picture up with hard pixel edges, then adds CRT scanlines. */
+    private fun present(c: Canvas, b: Bitmap, scanlines: Boolean) {
         src.set(0, 0, lw, lh)
         dst.set(0, 0, lw * px, lh * px)
         c.drawBitmap(b, src, dst, blit)
-        if (px >= 3 && dp == 0f) {
+        if (px >= 3 && scanlines) {
             var y = px - 1
             val hh = height
             while (y < hh) {
