@@ -14,7 +14,7 @@ import kotlin.math.sin
 import kotlin.math.tanh
 
 /** An RBJ biquad filter (one channel). */
-class Biquad(kind: Int, hz: Float, q: Float = 0.707f, db: Float = 0f) {
+class GtrFilter(kind: Int, hz: Float, q: Float = 0.707f, db: Float = 0f) {
     companion object {
         const val LP = 0
         const val HP = 1
@@ -180,15 +180,15 @@ class MetalGuitar(val riff: Boolean) {
     private var wCount = 0
 
     private val strings = Array(3) { GuitarString() }
-    private val preHp = Biquad(Biquad.HP, if (riff) 90f else 110f)
-    private val preMid = Biquad(Biquad.PEAK, 900f, 0.8f, 7f)
+    private val preHp = GtrFilter(GtrFilter.HP, if (riff) 90f else 110f)
+    private val preMid = GtrFilter(GtrFilter.PEAK, 900f, 0.8f, 7f)
     private val cab = arrayOf(
-        Biquad(Biquad.HP, 75f),
-        Biquad(Biquad.PEAK, 115f, 1f, 3.5f),
-        Biquad(Biquad.PEAK, 650f, 0.9f, if (riff) -3f else -6f),   // the nu-metal mid scoop
-        Biquad(Biquad.PEAK, 2900f, 1f, 3.5f),
-        Biquad(Biquad.LP, 5200f, 0.7f),
-        Biquad(Biquad.LP, 5200f, 0.7f)
+        GtrFilter(GtrFilter.HP, 75f),
+        GtrFilter(GtrFilter.PEAK, 115f, 1f, 3.5f),
+        GtrFilter(GtrFilter.PEAK, 650f, 0.9f, if (riff) -3f else -6f),   // the nu-metal mid scoop
+        GtrFilter(GtrFilter.PEAK, 2900f, 1f, 3.5f),
+        GtrFilter(GtrFilter.LP, 5200f, 0.7f),
+        GtrFilter(GtrFilter.LP, 5200f, 0.7f)
     )
     private var env = 0f
     private var dc = 0f
@@ -279,8 +279,8 @@ class MetalGuitar(val riff: Boolean) {
             lastTone = tone
             // brighter tone opens the cabinet a little
             val lp = 3600f + 3400f * tone
-            cab[4].set(Biquad.LP, lp, 0.7f)
-            cab[5].set(Biquad.LP, lp, 0.7f)
+            cab[4].set(GtrFilter.LP, lp, 0.7f)
+            cab[5].set(GtrFilter.LP, lp, 0.7f)
         }
         var x = 0f
         for (k in strings.indices) x += strings[k].tick() * (if (riff && k == 1) 0.6f else 1f)
@@ -319,8 +319,8 @@ class MetalGuitar(val riff: Boolean) {
 /** The drum bus "HEAVY": low-end weight, a fast compressor and saturation on all the drums together. */
 class DrumHeavy {
     @Volatile var amount = 0.5f
-    private val low = Biquad(Biquad.PEAK, 70f, 0.8f, 0f)
-    private val snap = Biquad(Biquad.PEAK, 4200f, 0.9f, 0f)
+    private val low = GtrFilter(GtrFilter.PEAK, 70f, 0.8f, 0f)
+    private val snap = GtrFilter(GtrFilter.PEAK, 4200f, 0.9f, 0f)
     private var env = 0f
     private var lastAmount = -1f
 
@@ -329,8 +329,8 @@ class DrumHeavy {
         if (a <= 0.001f) return x
         if (a != lastAmount) {
             lastAmount = a
-            low.set(Biquad.PEAK, 70f, 0.8f, 7f * a)
-            snap.set(Biquad.PEAK, 4200f, 0.9f, 4f * a)
+            low.set(GtrFilter.PEAK, 70f, 0.8f, 7f * a)
+            snap.set(GtrFilter.PEAK, 4200f, 0.9f, 4f * a)
         }
         var y = snap.run(low.run(x))
         // compressor: threshold falls and ratio rises with the amount, then make-up gain
