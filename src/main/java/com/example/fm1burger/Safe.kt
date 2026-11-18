@@ -68,7 +68,7 @@ object CrashLog {
                 val sw = StringWriter()
                 ex.printStackTrace(PrintWriter(sw))
                 val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
-                File(dir, NAME).writeText("FM1 Burger crash at $stamp on thread ${th.name}\n\n$sw")
+                File(dir, NAME).writeText("Burger Studio crash at $stamp on thread ${th.name}\n\n$sw")
             } catch (e: Throwable) {
             }
             prev?.uncaughtException(th, ex)

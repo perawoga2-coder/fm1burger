@@ -8,7 +8,7 @@
 
     <application
         android:icon="@mipmap/ic_launcher"
-        android:label="FM1 Burger"
+        android:label="Burger Studio"
         android:theme="@style/BurgerTheme">
         <activity
             android:name=".MainActivity"

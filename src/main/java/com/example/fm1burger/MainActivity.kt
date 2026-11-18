@@ -158,7 +158,7 @@ class MainActivity : Activity() {
             .setView(sc)
             .setPositiveButton("Copy report") { _, _ ->
                 val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("FM1 Burger crash", report))
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Burger Studio crash", report))
                 ui.toast("Report copied")
             }
             .setNegativeButton("Close", null)
