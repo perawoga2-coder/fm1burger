@@ -145,8 +145,21 @@ object Bq {
 /**
  * Records everything you hear (the final stereo mix) into a WAV file while you play.
  * The audio is written to the file all the time, so there is no length limit except free storage.
+ * Formats: 16 bit (small, with dither), 24 bit (studio), 32 bit float (never clips, for a DAW).
+ * It records the mix before it is turned into 16 bit for the speaker, so 24 bit and float are real.
  */
 class MixRecorder {
+
+    companion object {
+        const val BITS_16 = 16
+        const val BITS_24 = 24
+        const val FLOAT_32 = 32
+        fun label(bits: Int): String = when (bits) {
+            BITS_16 -> "16 bit"
+            FLOAT_32 -> "32 bit float"
+            else -> "24 bit"
+        }
+    }
 
     @Volatile var recording = false
         private set
@@ -160,7 +173,13 @@ class MixRecorder {
     var file: File? = null
         private set
 
-    private val q = ArrayBlockingQueue<ShortArray>(800)
+    /** The format of the next recording (16, 24 or 32 = float). */
+    @Volatile var bits = BITS_24
+    /** The format of the recording in progress. */
+    var recBits = BITS_24
+        private set
+
+    private val q = ArrayBlockingQueue<FloatArray>(800)
     private var thread: Thread? = null
     @Volatile private var writing = false
 
@@ -171,7 +190,8 @@ class MixRecorder {
             dir.mkdirs()
             if (dir.usableSpace < 50L * 1024 * 1024) return null
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val f = File(dir, "Mix_$stamp.wav")
+            recBits = bits
+            val f = File(dir, "Mix_${stamp}_${if (recBits == FLOAT_32) "32f" else recBits.toString() + "bit"}.wav")
             q.clear()
             frames = 0L
             dropped = 0
@@ -179,7 +199,7 @@ class MixRecorder {
             autoStopped = false
             file = f
             writing = true
-            val th = Thread { writer(f, dir) }
+            val th = Thread { writer(f, dir, recBits) }
             th.isDaemon = true
             th.name = "burger-mixrec"
             th.start()
@@ -206,53 +226,87 @@ class MixRecorder {
         return if (f != null && f.exists()) f else null
     }
 
-    /** Called by the audio thread with every finished block (interleaved stereo 16 bit). */
-    fun feed(out: ShortArray) {
+    /** Called by the audio thread with every finished block (interleaved stereo floats, -1..1). */
+    fun feed(out: FloatArray) {
         if (!recording) return
         if (!q.offer(out.copyOf())) dropped++
         frames += (out.size / 2).toLong()
     }
 
-    private fun header(dataLen: Long): ByteArray {
-        val b = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-        b.put("RIFF".toByteArray())
-        b.putInt((36L + dataLen).toInt())
-        b.put("WAVE".toByteArray())
-        b.put("fmt ".toByteArray())
-        b.putInt(16)
-        b.putShort(1.toShort())
-        b.putShort(2.toShort())
-        b.putInt(Cfg.SR)
-        b.putInt(Cfg.SR * 4)
-        b.putShort(4.toShort())
-        b.putShort(16.toShort())
-        b.put("data".toByteArray())
-        b.putInt(dataLen.toInt())
-        return b.array()
+    /** WAV header: PCM for 16 / 24 bit, IEEE float (with its fact chunk) for 32 bit float. */
+    private fun header(dataLen: Long, b: Int): ByteArray {
+        val isFloat = b == FLOAT_32
+        val bytesPer = b / 8
+        val fmtLen = if (isFloat) 18 else 16
+        val headLen = 12 + 8 + fmtLen + (if (isFloat) 12 else 0) + 8
+        val bb = ByteBuffer.allocate(headLen).order(ByteOrder.LITTLE_ENDIAN)
+        bb.put("RIFF".toByteArray())
+        bb.putInt((headLen - 8 + dataLen).toInt())
+        bb.put("WAVE".toByteArray())
+        bb.put("fmt ".toByteArray())
+        bb.putInt(fmtLen)
+        bb.putShort((if (isFloat) 3 else 1).toShort())
+        bb.putShort(2.toShort())
+        bb.putInt(Cfg.SR)
+        bb.putInt(Cfg.SR * 2 * bytesPer)
+        bb.putShort((2 * bytesPer).toShort())
+        bb.putShort(b.toShort())
+        if (isFloat) {
+            bb.putShort(0.toShort())
+            bb.put("fact".toByteArray())
+            bb.putInt(4)
+            bb.putInt((dataLen / (2 * bytesPer)).toInt())
+        }
+        bb.put("data".toByteArray())
+        bb.putInt(dataLen.toInt())
+        return bb.array()
     }
 
-    private fun writer(f: File, dir: File) {
+    private fun writer(f: File, dir: File, b: Int) {
         var raf: RandomAccessFile? = null
+        val bytesPer = b / 8
+        var rnd = 0x13579BDF
         try {
             raf = RandomAccessFile(f, "rw")
-            raf.write(header(0L))
+            raf.write(header(0L, b))
             var total = 0L
             var sinceCheck = 0
-            var bb = ByteArray(Engine.BLOCK * 4)
+            var out = ByteArray(Engine.BLOCK * 2 * bytesPer)
             while (true) {
-                val b = q.poll(200, TimeUnit.MILLISECONDS)
-                if (b == null) {
+                val blk = q.poll(200, TimeUnit.MILLISECONDS)
+                if (blk == null) {
                     if (!writing) break
                     continue
                 }
-                if (bb.size != b.size * 2) bb = ByteArray(b.size * 2)
+                val need = blk.size * bytesPer
+                if (out.size != need) out = ByteArray(need)
                 var j = 0
-                for (s in b) {
-                    val v = s.toInt()
-                    bb[j++] = (v and 0xFF).toByte()
-                    bb[j++] = (v shr 8).toByte()
+                when (b) {
+                    BITS_16 -> for (x in blk) {
+                        // TPDF dither: two random values, about one bit of soft noise instead of hard steps
+                        rnd = rnd xor (rnd shl 13); rnd = rnd xor (rnd ushr 17); rnd = rnd xor (rnd shl 5)
+                        val r1 = (rnd ushr 9) / 8388608f
+                        rnd = rnd xor (rnd shl 13); rnd = rnd xor (rnd ushr 17); rnd = rnd xor (rnd shl 5)
+                        val r2 = (rnd ushr 9) / 8388608f
+                        val v = Math.round(x * 32767f + (r1 - r2)).coerceIn(-32768, 32767)
+                        out[j++] = (v and 0xFF).toByte()
+                        out[j++] = (v shr 8).toByte()
+                    }
+                    FLOAT_32 -> for (x in blk) {
+                        val v = java.lang.Float.floatToRawIntBits(x)
+                        out[j++] = (v and 0xFF).toByte()
+                        out[j++] = ((v shr 8) and 0xFF).toByte()
+                        out[j++] = ((v shr 16) and 0xFF).toByte()
+                        out[j++] = ((v shr 24) and 0xFF).toByte()
+                    }
+                    else -> for (x in blk) {
+                        val v = Math.round(x * 8388607f).coerceIn(-8388608, 8388607)
+                        out[j++] = (v and 0xFF).toByte()
+                        out[j++] = ((v shr 8) and 0xFF).toByte()
+                        out[j++] = ((v shr 16) and 0xFF).toByte()
+                    }
                 }
-                raf.write(bb, 0, j)
+                raf.write(out, 0, j)
                 total += j.toLong()
                 bytesWritten = total
                 sinceCheck++
@@ -266,7 +320,7 @@ class MixRecorder {
                 }
             }
             raf.seek(0L)
-            raf.write(header(total))
+            raf.write(header(total, b))
         } catch (e: Exception) {
             autoStopped = true
             recording = false

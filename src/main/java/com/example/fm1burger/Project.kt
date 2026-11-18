@@ -97,6 +97,8 @@ class Project(private val a: MainActivity) {
             o.put("drumFxA", dfa)
             o.put("drumFxB", dfb)
             o.put("lanes", a.lanes.toJson())
+            o.put("mixBits", e.mixRec.bits)
+            o.put("clockIdle", e.clockIdle)
             SafeIo.writeText(file, o.toString())
         } catch (ex: Exception) {
         }
@@ -108,6 +110,9 @@ class Project(private val a: MainActivity) {
             val e = a.engine
             val o = JSONObject(file.readText())
             a.lanes.fromJson(o.optJSONObject("lanes"))
+            val mb = o.optInt("mixBits", MixRecorder.BITS_24)
+            e.mixRec.bits = if (mb == 16 || mb == 24 || mb == 32) mb else MixRecorder.BITS_24
+            e.clockIdle = o.optBoolean("clockIdle", true)
             e.bpm = o.optInt("bpm", 120)
             e.masterVol = o.optDouble("master", 0.9).toFloat()
             e.padVol = o.optDouble("padVol", 0.8).toFloat()

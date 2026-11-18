@@ -58,13 +58,44 @@ class Engine {
     @Volatile var masterPeak = 0f
     @Volatile var startReq = false
     @Volatile var stopReq = false
-    @Volatile var midiOut: ((Int, Long) -> Unit)? = null
+    @Volatile var midiOut: ((ByteArray, Long) -> Unit)? = null
+
+    /** LEAD: keep sending MIDI clock while stopped, so followers lock the tempo before Start (standard). */
+    @Volatile var clockIdle = true
+    /** FOLLOW: Continue was received (play on from the Song Position Pointer). */
+    @Volatile var continueReq = false
+    /** FOLLOW: the last Song Position Pointer (16th notes), or -1. */
+    @Volatile private var sppReq = -1
+
+    // FOLLOW: arrival times of incoming clock ticks (one producer: the MIDI thread)
+    private val tickTimes = LongArray(256)
+    @Volatile private var tickHead = 0
+    @Volatile private var tickTail = 0
+    private val tickFrames = IntArray(64)
+    private var idleAcc = 0.0
+
+    /** The final mix of the last block as floats (before 16 bit), for the 24 bit / float recorder. */
+    private val fout = FloatArray(BLOCK * 2)
 
     @Volatile private var outDevice: AudioDeviceInfo? = null
     @Volatile private var restartOut = false
     @Volatile private var running = false
     private var thread: Thread? = null
     val pendingTicks = AtomicInteger(0)
+
+    /** MIDI thread: a clock tick arrived at time ns (FOLLOW). */
+    fun followTick(ns: Long) {
+        val h = tickHead
+        val next = (h + 1) and 255
+        if (next == tickTail) return      // full: drop (cannot happen at sane tempos)
+        tickTimes[h] = ns
+        tickHead = next
+    }
+
+    /** MIDI thread: Song Position Pointer received (FOLLOW), in 16th notes. */
+    fun songPosition(sixteenths: Int) {
+        sppReq = sixteenths.coerceAtLeast(0)
+    }
 
     /** How many audio blocks failed and were replaced by silence (for the status line). */
     @Volatile var errors = 0
@@ -254,24 +285,48 @@ class Engine {
                 tpk[i] = 0f
             }
 
+            // FOLLOW: place every clock tick at its own sample, one block late, so the spacing stays exact
+            var nTicks = 0
             if (follow && playing && !paused) {
-                var n = pendingTicks.getAndSet(0)
-                while (n > 0) {
-                    onTick(0, t0)
-                    n--
+                val blockNs = BLOCK * 1_000_000_000L / Cfg.SR
+                val base = t0 - blockNs
+                while (tickTail != tickHead) {
+                    val ts = tickTimes[tickTail]
+                    if (ts > t0) break
+                    tickTail = (tickTail + 1) and 255
+                    val fr = ((ts - base) * Cfg.SR / 1_000_000_000L).toInt().coerceIn(0, BLOCK - 1)
+                    if (nTicks < tickFrames.size) tickFrames[nTicks++] = fr
                 }
             } else {
-                pendingTicks.set(0)
+                tickTail = tickHead
             }
+            pendingTicks.set(0)
+            var nextTick = 0
 
             val bpmNow = bpmF
             val spt = Cfg.SR * 60.0 / (bpmNow * 24.0)
+
+            // LEAD while stopped or paused: the clock keeps running (no Start), at the current tempo
+            if (!follow && sendClock && clockIdle && (!playing || paused)) {
+                idleAcc += BLOCK.toDouble()
+                while (idleAcc >= spt) {
+                    idleAcc -= spt
+                    val fr = (BLOCK - idleAcc).toInt().coerceIn(0, BLOCK - 1)
+                    send(0xF8, t0 + fr * 1_000_000_000L / Cfg.SR + latencyNs + offsetMs * 1_000_000L)
+                }
+            } else {
+                idleAcc = 0.0
+            }
             val beatInc = 1.0 / (Cfg.SR * 60.0 / bpmNow)
             val mv = masterVol
             val pv = padVol
             var mpk = 0f
 
             for (f in 0 until BLOCK) {
+                while (nextTick < nTicks && tickFrames[nextTick] <= f) {
+                    onTick(f, t0)
+                    nextTick++
+                }
                 if (playing && !paused) {
                     if (!follow) {
                         tickAcc += 1.0
@@ -329,19 +384,29 @@ class Engine {
                 if (al > mpk) mpk = al
                 val ar = abs(r)
                 if (ar > mpk) mpk = ar
+                fout[f * 2] = l
+                fout[f * 2 + 1] = r
                 out[f * 2] = (l * 32767f).toInt().coerceIn(-32768, 32767).toShort()
                 out[f * 2 + 1] = (r * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             }
 
             bank.feedRec(out)
-            mixRec.feed(out)
+            mixRec.feed(fout)
             for (i in 0 until Cfg.TRACKS) tracks[i].peak = tpk[i]
             masterPeak = mpk
     }
 
     private fun send(b: Int, target: Long) {
         val m = midiOut
-        if (m != null) m(b, target)
+        if (m != null) m(byteArrayOf(b.toByte()), target)
+    }
+
+    /** Song Position Pointer (16th notes), then a realtime message (Start / Continue). */
+    private fun sendPositionThen(sixteenths: Long, status: Int, target: Long) {
+        val m = midiOut ?: return
+        val v = sixteenths.coerceIn(0L, 16383L).toInt()
+        m(byteArrayOf(0xF2.toByte(), (v and 0x7F).toByte(), ((v shr 7) and 0x7F).toByte()), target)
+        m(byteArrayOf(status.toByte()), target)
     }
 
     private fun handleRequests(t0: Long) {
@@ -367,13 +432,30 @@ class Engine {
             curStep = -1
             for (t in tracks) t.playing = false
             if (bank.songOn) bank.songStart() else bank.whileStopped()
-            if (!follow && sendClock) send(0xFA, t0 + latencyNs + off)
+            if (!follow && sendClock) sendPositionThen(0L, 0xFA, t0 + latencyNs + off)
+        }
+        if (continueReq) {
+            // FOLLOW: Continue, from the Song Position Pointer if one came (16th notes = 6 clocks)
+            continueReq = false
+            if (!playing || paused) {
+                val spp = sppReq
+                sppReq = -1
+                if (spp >= 0) {
+                    tickCount = spp * 6L
+                    beatPos = tickCount / 24.0
+                }
+                playing = true
+                paused = false
+            }
         }
         if (pauseReq) {
             pauseReq = false
             if (playing) {
                 paused = !paused
-                if (!follow && sendClock) send(if (paused) 0xFC else 0xFB, t0 + latencyNs + off)
+                if (!follow && sendClock) {
+                    if (paused) send(0xFC, t0 + latencyNs + off)
+                    else sendPositionThen(tickCount / 6L, 0xFB, t0 + latencyNs + off)
+                }
             }
         }
         for (t in tracks) {

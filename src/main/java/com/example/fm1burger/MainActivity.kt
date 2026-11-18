@@ -271,6 +271,10 @@ class MainActivity : Activity() {
         })
         recPartBtn = ui.button("● REC PART") { toggleRecPart() }
         recMixBtn = ui.button("● REC MIX") { toggleMixRec() }
+        recMixBtn.setOnLongClickListener {
+            mixFormatDialog()
+            true
+        }
         r2.addView(recPartBtn, ui.w(0f, 3))
         r2.addView(recMixBtn, ui.w(0f, 3))
         head.addView(r2, ui.fullWidth(6))
@@ -624,18 +628,56 @@ class MainActivity : Activity() {
             2 -> "FOLLOW"
             else -> "off"
         }
+        val devs = if (midi.connected) midi.deviceName else "none"
         val items = arrayOf(
-            "FOLLOW the FM-1: the FM-1 is the boss. Start, stop and tempo come from the FM-1. Press play on the FM-1.",
-            "LEAD the FM-1: the app is the boss. The play button here starts and stops the FM-1 too.",
-            "Sync off"
+            "FOLLOW: the other device is the boss. Clock, Start, Stop, Continue and Song Position come from it.",
+            "LEAD: the app is the boss. It sends Clock, Start, Stop, Continue and Song Position to every connected device.",
+            "Sync off",
+            "Connect another MIDI device (connected: $devs)",
+            "Clock while stopped (LEAD): " + (if (engine.clockIdle) "ON" else "OFF") + "  · tap to switch",
+            "MIDI Thru (pass incoming MIDI on to the other devices): " + (if (midi.thru) "ON" else "OFF"),
+            "Disconnect all MIDI devices"
         )
         AlertDialog.Builder(this)
-            .setTitle("Sync with the FM-1 (now: $now)")
+            .setTitle("MIDI sync (now: $now)")
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> startSync(2)
                     1 -> startSync(1)
-                    else -> syncOff()
+                    2 -> syncOff()
+                    3 -> connectAnother()
+                    4 -> {
+                        engine.clockIdle = !engine.clockIdle
+                        ui.toast(if (engine.clockIdle) "LEAD sends the clock all the time, also while stopped (standard)" else "LEAD sends the clock only while playing")
+                    }
+                    5 -> {
+                        midi.thru = !midi.thru
+                        ui.toast(if (midi.thru) "MIDI Thru on" else "MIDI Thru off")
+                    }
+                    else -> {
+                        syncOff()
+                        midi.close()
+                        syncNote = ""
+                        ui.toast("All MIDI devices disconnected")
+                    }
+                }
+            }
+            .show()
+    }
+
+    /** Adds one more MIDI device: the clock (LEAD) goes to all of them. */
+    private fun connectAnother() {
+        val infos = midi.freeDevices()
+        if (infos.isEmpty()) {
+            ui.toast("No other MIDI device found. Connect it by USB (a hub works) or pair it in the Bluetooth settings.")
+            return
+        }
+        val names = Array(infos.size) { midi.nameOf(infos[it]) }
+        AlertDialog.Builder(this)
+            .setTitle("Connect which MIDI device?")
+            .setItems(names) { _, which ->
+                midi.open(infos[which]) { ok ->
+                    ui.toast(if (ok) "Connected: ${midi.nameOf(infos[which])} (${midi.count} MIDI devices)" else "Could not open the MIDI device")
                 }
             }
             .show()
@@ -828,9 +870,27 @@ class MainActivity : Activity() {
             if (f == null) {
                 ui.toast("Cannot start the mix recording (not enough free storage?)")
             } else {
-                ui.toast("Recording the whole mix. Press ■ REC to stop. There is no length limit.")
+                ui.toast("Recording the whole mix in ${MixRecorder.label(m.recBits)}. Press ■ REC to stop. Long press REC MIX to change the format.")
             }
         }
+    }
+
+    /** Long press on REC MIX: the format of the next mix recording. */
+    fun mixFormatDialog() {
+        val m = engine.mixRec
+        val opts = intArrayOf(MixRecorder.BITS_24, MixRecorder.FLOAT_32, MixRecorder.BITS_16)
+        val items = arrayOf(
+            "24 bit: studio quality, about 15 MB a minute",
+            "32 bit float: never clips, best to finish in a DAW, about 20 MB a minute",
+            "16 bit: smaller (CD quality, with dither), about 10 MB a minute"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Mix recording format (now: ${MixRecorder.label(m.bits)})")
+            .setItems(items) { _, which ->
+                m.bits = opts[which]
+                ui.toast("The next mix recording will be ${MixRecorder.label(m.bits)}" + (if (m.recording) " (this one stays ${MixRecorder.label(m.recBits)})" else ""))
+            }
+            .show()
     }
 
     fun mixDialog() {
@@ -839,7 +899,7 @@ class MainActivity : Activity() {
             ui.toast("No mix recorded yet. Press ● REC MIX while you play.")
             return
         }
-        val secs = ((f.length() - 44L) / (Cfg.SR * 4L)).toInt().coerceAtLeast(0)
+        val secs = (Wav.info(f)?.seconds ?: 0.0).toInt().coerceAtLeast(0)
         val mb = f.length() / 1048576.0
         val items = arrayOf(
             "Save to device (choose a folder)...",

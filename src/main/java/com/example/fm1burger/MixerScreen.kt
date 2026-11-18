@@ -75,6 +75,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         mixRecBtn = ui.button("● Record mix") { a.toggleMixRec() }
         mr.addView(mixRecBtn, ui.w(1f, 3))
         mr.addView(ui.button("Last mix...") { a.mixDialog() }, ui.w(1f, 3))
+        mr.addView(ui.button("Format...") { a.mixFormatDialog() }, ui.w(0.8f, 3))
         mp.addView(mr, ui.fullWidth(4))
         mixInfo = ui.text("", 12f, Theme.DIM)
         mp.addView(mixInfo)
