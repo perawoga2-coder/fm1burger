@@ -112,8 +112,8 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         AlertDialog.Builder(a)
             .setTitle(f.name)
             .setItems(arrayOf(
-                "FM-1: send into a sample slot over USB (Burger Studio firmware)",
-                "FM-1: export a WAV that fits its sample memory"
+                "Send into the sample slots of " + (a.hub.slotDevice ?: "a connected device") + " (USB)",
+                "Export a WAV that fits a 496 KB sample memory (M-VAVE FM-1)"
             )) { _, w ->
                 if (w == 0) {
                     Thread {

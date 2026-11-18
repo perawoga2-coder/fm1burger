@@ -15,6 +15,7 @@ class SetupScreen(private val a: MainActivity) : Screen {
     private lateinit var syncInfo: TextView
     private lateinit var recInfo: TextView
     private lateinit var latInfo: TextView
+    private lateinit var devList: TextView
     private lateinit var stemBtn: android.widget.Button
     private val latBtns = ArrayList<android.widget.Button>()
 
@@ -102,12 +103,18 @@ class SetupScreen(private val a: MainActivity) : Screen {
         // Devices: everything for one piece of gear in one place (the rest of the app needs no device)
         val dv = ui.panel()
         dv.addView(ui.text("Devices", 14f, Theme.ACCENT, true))
-        dv.addView(ui.text("Burger Studio works on its own. Gear you connect adds to it: any MIDI keyboard or controller " +
-            "(MIDI sync), any instrument to sample (S on a sampler track), any USB audio interface (Mixer).", 12f, Theme.DIM),
-            ui.fullWidth(4))
-        dv.addView(ui.text("M-VAVE FM-1 (optional)", 13f, Theme.TEXT, true), ui.fullWidth(8))
-        dv.addView(ui.text("With the Burger Studio firmware on the FM-1, samples go from the app into its sample slots: " +
-            "Library > Devices… or the editor's Devices… button.", 11f, Theme.DIM), ui.fullWidth(2))
+        dv.addView(ui.text("Plug in any instrument (USB, or Bluetooth MIDI): it connects by itself. A new one asks once " +
+            "whether to follow its tempo, lead it or just play the pads, and is remembered. Its sound can be sampled with S " +
+            "on a sampler track; a device that takes samples into slots of its own shows up in Library > Devices….",
+            12f, Theme.DIM), ui.fullWidth(4))
+        devList = ui.text("", 12f, Theme.TEXT)
+        dv.addView(devList, ui.fullWidth(4))
+        dv.addView(ui.button("Forget the devices (they ask again)") {
+            a.hub.forgetAll()
+            onTick()
+            ui.toast("Forgotten: every device asks again when plugged in")
+        }, ui.fullWidth(4))
+        dv.addView(ui.text("Firmware for the M-VAVE FM-1 that takes samples from the app (optional)", 12f, Theme.DIM), ui.fullWidth(10))
         val dr = ui.row()
         dr.addView(ui.button("Firmware installer (Chrome)") {
             try {
@@ -167,5 +174,10 @@ class SetupScreen(private val a: MainActivity) : Screen {
             e.outRate, e.outFrames, e.latencyMs(), if (e.outFast) "yes" else "no", e.underruns) +
             (if (e.outRate != Cfg.SR) " · engine 44.1 kHz, resampled" else "")
         if (latInfo.text.toString() != li) latInfo.text = li
+        val names = a.hub.rememberedNames()
+        val dl = "Connected now: " + (if (a.midi.connected) a.midi.deviceName else "none") +
+            (a.hub.slotDevice?.let { " · $it takes samples" } ?: "") +
+            "\nRemembered: " + (if (names.isEmpty()) "none yet" else names.joinToString(", "))
+        if (devList.text.toString() != dl) devList.text = dl
     }
 }

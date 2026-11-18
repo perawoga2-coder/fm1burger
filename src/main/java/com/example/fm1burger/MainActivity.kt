@@ -149,6 +149,7 @@ class MainActivity : Activity() {
         val crash = CrashLog.take(this)
         if (crash != null) showCrash(crash)
 
+        hub.start()                                    // plug and play: instruments connect by themselves
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
         }
@@ -168,6 +169,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        hub.stop()
         handler.removeCallbacksAndMessages(null)
         saveAll()
         engine.vocal.stop()
@@ -786,6 +788,15 @@ class MainActivity : Activity() {
     // ---------------- Send to FM-1 (Burger Studio firmware: user sample slots over USB) ----------------
 
     private val fm1Link by lazy { Fm1SampleLink(midi) }
+    val hub by lazy { DeviceHub(this) }
+
+    /** The sample-slot protocol (DeviceHub asks a new device with it). */
+    fun sampleLink(): Fm1SampleLink = fm1Link
+
+    /** Tempo sync with the connected devices: DeviceHub.SYNC_OFF / SYNC_LEAD / SYNC_FOLLOW. */
+    fun setSyncMode(m: Int) {
+        if (m == DeviceHub.SYNC_OFF) syncOff() else applySync(m)
+    }
 
     /** Puts a sample (44.1 kHz mono) into USR1..USR3 of the FM-1 running the Burger Studio firmware. */
     fun sendToFm1(name: String, data: FloatArray) {
@@ -795,22 +806,22 @@ class MainActivity : Activity() {
         }
         if (!midi.connected) {
             AlertDialog.Builder(this)
-                .setTitle("Send to FM-1")
-                .setMessage("Connect the FM-1 (running the Burger Studio firmware) by USB, then connect it in MIDI sync.")
+                .setTitle("Send to a device")
+                .setMessage("Plug in the device (USB): it connects by itself.")
                 .setPositiveButton("MIDI sync…") { _, _ -> openSyncMenu() }
                 .setNegativeButton("Cancel", null)
                 .show()
             return
         }
-        ui.toast("Asking the FM-1…")
+        ui.toast("Asking ${hub.slotDevice ?: midi.deviceName}…")
         Thread {
             val slots = try { fm1Link.info() } catch (ex: Exception) { null }
             runOnUiThread {
                 if (slots == null) {
                     AlertDialog.Builder(this)
-                        .setTitle("Send to FM-1")
-                        .setMessage("The FM-1 does not answer. Send to FM-1 needs the Burger Studio firmware on the FM-1 " +
-                            "(install it from perawoga2-coder.github.io/Fm1sampa in Chrome). The official firmware cannot take samples this way.")
+                        .setTitle("Send to a device")
+                        .setMessage("No connected device takes samples into slots of its own. This works with devices whose firmware " +
+                            "speaks the sample-slot protocol (for the M-VAVE FM-1: the Burger Studio firmware, Setup > Devices).")
                         .setPositiveButton("OK", null)
                         .show()
                     return@runOnUiThread
@@ -834,7 +845,7 @@ class MainActivity : Activity() {
         box.setPadding(ui.dp(20), ui.dp(12), ui.dp(20), ui.dp(4))
         box.addView(ui.text("Writing into USR${slot + 1}. Keep the cable in.", 13f, Theme.DIM))
         box.addView(bar, ui.fullWidth(8))
-        val dlg = AlertDialog.Builder(this).setTitle("Send to FM-1").setView(box).setCancelable(false).show()
+        val dlg = AlertDialog.Builder(this).setTitle("Send to ${hub.slotDevice ?: "device"}").setView(box).setCancelable(false).show()
         val nm = name.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9 _-]"), "").ifEmpty { "BURGER" }
         Thread {
             val res = try {
@@ -846,9 +857,9 @@ class MainActivity : Activity() {
                 try { dlg.dismiss() } catch (e: Exception) {}
                 val ok = res.getOrNull()
                 AlertDialog.Builder(this)
-                    .setTitle(if (ok != null) "On the FM-1 now" else "Send to FM-1 failed")
+                    .setTitle(if (ok != null) "On ${hub.slotDevice ?: "the device"} now" else "Sending failed")
                     .setMessage(if (ok != null)
-                        "${nm.uppercase().take(8)} ($ok) is in USR${slot + 1}.\n\nOn the FM-1: a track with the SAMPLE engine, SET = USR${slot + 1}, " +
+                        "${nm.uppercase().take(8)} ($ok) is in USR${slot + 1}.\n\nOn the device: a track with the SAMPLE engine, SET = USR${slot + 1}, " +
                             "plays it on the keys; the SLICE engine, SRC = USR${slot + 1}, chops it on its hits (DIV AUTO)."
                     else (res.exceptionOrNull()?.message ?: "?"))
                     .setPositiveButton("OK", null)

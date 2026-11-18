@@ -85,7 +85,7 @@ class EditScreen(private val a: MainActivity) : Screen {
         val fr = ui.row()
         fr.addView(ui.button("Devices…") {
             android.app.AlertDialog.Builder(a)
-                .setItems(arrayOf("FM-1: send the selection into a sample slot (USB, Burger Studio firmware)")) { _, _ -> sendFm1() }
+                .setItems(arrayOf("Send the selection into the sample slots of " + (a.hub.slotDevice ?: "a connected device") + " (USB)")) { _, _ -> sendFm1() }
                 .show()
         }, ui.w(1f, 3))
         content.addView(fr, ui.fullWidth(6))

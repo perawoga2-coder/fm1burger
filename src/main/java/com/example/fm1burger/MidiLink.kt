@@ -136,6 +136,16 @@ class MidiLink(ctx: Context, private val engine: Engine) {
         }
     }
 
+    fun isOpen(id: Int): Boolean = conns.any { it.id == id }
+
+    /** The device went away (unplugged): drop it. */
+    fun closeId(id: Int) {
+        val c = conns.firstOrNull { it.id == id } ?: return
+        conns.remove(c)
+        if (clockSource == id) clockSource = -1
+        closeConn(c)
+    }
+
     private fun closeConn(c: Conn) {
         try {
             c.outPort?.disconnect(c.rx)
