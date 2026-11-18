@@ -172,6 +172,8 @@ class Engine {
         private set
     private var outCapacity = 0
     private var lastUnderrun = 0
+    private var outStartNs = 0L
+    private var lastGrowNs = 0L
     private val rs = OutResampler()
 
     /** Output latency of the buffer in milliseconds. */
@@ -298,7 +300,17 @@ class Engine {
             outRate = rate
             outFrames = t.bufferSizeInFrames
             rs.reset(Cfg.SR.toDouble() / rate)
+            // fill the buffer with silence before it starts, so the start itself is no underrun
+            try {
+                val z = ShortArray(outFrames * 2)
+                t.write(z, 0, z.size, AudioTrack.WRITE_NON_BLOCKING)
+            } catch (e: Exception) {
+            }
             t.play()
+            outStartNs = System.nanoTime()
+            underruns = 0
+            lastGrowNs = 0L
+            if (Build.VERSION.SDK_INT >= 24) lastUnderrun = t.underrunCount
             latencyNs = outFrames.toLong() * 1_000_000_000L / rate
             t
         } catch (e: Exception) {
@@ -311,9 +323,19 @@ class Engine {
         if (Build.VERSION.SDK_INT < 24 || latencyMode == 2) return
         val u = t.underrunCount
         if (u > lastUnderrun) {
+            val now = System.nanoTime()
+            // the first second after a start (the device settling) is not counted
+            if (now - outStartNs < 1_000_000_000L) {
+                lastUnderrun = u
+                return
+            }
             underruns += u - lastUnderrun
             lastUnderrun = u
+            // one glitch often comes as several underruns: grow at most once in 300 ms, and to 12 bursts at most
+            if (now - lastGrowNs < 300_000_000L) return
+            lastGrowNs = now
             val cur = t.bufferSizeInFrames
+            if (cur >= burst.coerceIn(64, 2048) * 12) return
             if (cur < outCapacity) {
                 val got = t.setBufferSizeInFrames((cur + burst.coerceIn(64, 2048)).coerceAtMost(outCapacity))
                 if (got > 0) {

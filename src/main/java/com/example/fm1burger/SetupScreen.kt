@@ -33,14 +33,15 @@ class SetupScreen(private val a: MainActivity) : Screen {
         val lp = ui.panel()
         lp.addView(ui.text("Audio latency", 14f, Theme.ACCENT, true))
         lp.addView(ui.text("How quickly a tap is heard. Low uses the tablet's fast audio path at its own sample rate " +
-            "and makes the buffer a little bigger by itself if the sound breaks up. Safe is the old big buffer, for slow tablets.",
+            "and makes the buffer a little bigger by itself if the sound breaks up. Tap it again to start over small. " +
+            "Safe is the old big buffer, for slow tablets.",
             12f, Theme.DIM), ui.fullWidth(4))
         val lr = ui.row()
         for ((k, n) in listOf("Low", "Normal", "Safe").withIndex()) {
             val b = ui.button(n) {
-                a.engine.latencyMode = k
+                a.engine.latencyMode = k              // (the same one again: starts over from the small buffer)
                 refreshButtons()
-                ui.toast("Audio latency: $n")
+                ui.toast("Audio latency: $n (started over)")
             }
             latBtns.add(b)
             lr.addView(b, ui.w(1f, 3))
