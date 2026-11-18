@@ -28,9 +28,11 @@ object Inst {
     const val VOICE = 5
     const val SONG = 6
     const val AMBIENT = 7
-    const val COUNT = 8
+    const val RHYTHM = 8
+    const val RIFF = 9
+    const val COUNT = 10
 
-    val NAMES = arrayOf("Empty", "Sample", "Drum", "Bass", "Synth", "Voice", "Song rec", "New Ambient")
+    val NAMES = arrayOf("Empty", "Sample", "Drum", "Bass", "Synth", "Voice", "Song rec", "New Ambient", "Rhythm gtr", "Riff gtr")
 
     fun color(t: Int): Int = when (t) {
         SAMPLE -> Theme.ACCENT
@@ -40,6 +42,8 @@ object Inst {
         VOICE -> Theme.PINK
         SONG -> Theme.GREEN
         AMBIENT -> Theme.TEAL
+        RHYTHM -> Theme.STEEL
+        RIFF -> Theme.LIME
         else -> Theme.FAINT
     }
 
@@ -55,7 +59,7 @@ object Inst {
 /** What each of the 17 lanes on the Home page shows. Saved with the project. */
 class LaneSetup {
     companion object {
-        const val N = 17
+        const val N = 19
     }
 
     val type = IntArray(N)
@@ -70,7 +74,7 @@ class LaneSetup {
         var k = 0
         for (i in 0 until Cfg.TRACKS) { type[k] = Inst.SAMPLE; idx[k] = i; k++ }
         for (i in 0 until Cfg.PADS) { type[k] = Inst.DRUM; idx[k] = i; k++ }
-        for (t in intArrayOf(Inst.BASS, Inst.SYNTH, Inst.VOICE, Inst.SONG, Inst.AMBIENT)) {
+        for (t in intArrayOf(Inst.BASS, Inst.SYNTH, Inst.VOICE, Inst.SONG, Inst.AMBIENT, Inst.RHYTHM, Inst.RIFF)) {
             if (k < N) { type[k] = t; idx[k] = 0; k++ }
         }
         while (k < N) { type[k] = Inst.EMPTY; idx[k] = 0; k++ }
@@ -233,6 +237,8 @@ class HomeScreen(private val a: MainActivity) : Screen {
             Inst.VOICE -> a.showTab(MainActivity.TAB_VOICE)
             Inst.SONG -> a.showTab(MainActivity.TAB_SONG)
             Inst.AMBIENT -> a.showTab(MainActivity.TAB_AMBIENT)
+            Inst.RHYTHM -> a.openGuitar(0)
+            Inst.RIFF -> a.openGuitar(1)
             else -> ui.toast("This lane is empty. Tap the number ${i + 1} to choose an instrument.")
         }
     }
@@ -250,6 +256,8 @@ class HomeScreen(private val a: MainActivity) : Screen {
                 else e.padHit(k, 1f)
             }
             Inst.AMBIENT -> e.ambient.callReq = true
+            Inst.RHYTHM -> e.rhythmGtr.audition(MetalGuitar.CHUG, 0)
+            Inst.RIFF -> e.riffGtr.audition(MetalGuitar.OPEN, 12)
             Inst.EMPTY -> ui.toast("Tap the number ${i + 1} to choose an instrument")
             else -> openLane(i)
         }
@@ -265,6 +273,8 @@ class HomeScreen(private val a: MainActivity) : Screen {
             Inst.VOICE -> e.vocal.mute
             Inst.SONG -> e.bank.clipMute
             Inst.AMBIENT -> e.ambient.mute
+            Inst.RHYTHM -> e.rhythmGtr.mute
+            Inst.RIFF -> e.riffGtr.mute
             else -> false
         }
     }
@@ -280,6 +290,8 @@ class HomeScreen(private val a: MainActivity) : Screen {
             Inst.VOICE -> e.vocal.mute = m
             Inst.SONG -> e.bank.clipMute = m
             Inst.AMBIENT -> e.ambient.mute = m
+            Inst.RHYTHM -> e.rhythmGtr.mute = m
+            Inst.RIFF -> e.riffGtr.mute = m
             else -> return
         }
         // several lanes can show the same instrument: repaint them all
@@ -327,6 +339,8 @@ class HomeScreen(private val a: MainActivity) : Screen {
                 Inst.VOICE -> e.vocal.on
                 Inst.SONG -> e.playing
                 Inst.AMBIENT -> e.ambient.active()
+                Inst.RHYTHM -> e.rhythmGtr.ringing()
+                Inst.RIFF -> e.riffGtr.ringing()
                 else -> false
             }
             if (stepChanged || live) v.invalidate()
@@ -445,6 +459,30 @@ class InstIconView(ctx: Context) : View(ctx) {
                 path.lineTo(cx + s * 0.4f, cy + s * 0.38f)
                 path.lineTo(cx + s * 0.55f, cy + s * 0.65f)
                 c.drawPath(path, p)
+            }
+            Inst.RHYTHM, Inst.RIFF -> {
+                // a pointy metal guitar: V body, long neck, headstock
+                p.style = Paint.Style.FILL
+                path.reset()
+                path.moveTo(cx - s * 0.95f, cy + s * 0.15f)
+                path.lineTo(cx - s * 0.1f, cy + s * 0.95f)
+                path.lineTo(cx - s * 0.05f, cy + s * 0.35f)
+                path.lineTo(cx + s * 0.15f, cy + s * 0.15f)
+                path.lineTo(cx - s * 0.35f, cy + s * 0.05f)
+                path.close()
+                c.drawPath(path, p)
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 3f * d
+                c.drawLine(cx - s * 0.2f, cy + s * 0.4f, cx + s * 0.75f, cy - s * 0.55f, p)
+                p.strokeWidth = 5f * d
+                c.drawLine(cx + s * 0.7f, cy - s * 0.5f, cx + s * 0.95f, cy - s * 0.85f, p)
+                if (kind == Inst.RIFF) {
+                    // a lightning bolt for the lead
+                    p.strokeWidth = 1.8f * d
+                    c.drawLine(cx + s * 0.35f, cy + s * 0.25f, cx + s * 0.6f, cy + s * 0.5f, p)
+                    c.drawLine(cx + s * 0.6f, cy + s * 0.5f, cx + s * 0.45f, cy + s * 0.55f, p)
+                    c.drawLine(cx + s * 0.45f, cy + s * 0.55f, cx + s * 0.75f, cy + s * 0.85f, p)
+                }
             }
             Inst.AMBIENT -> {
                 // a little sky whale: body, tail, eye, and a sparkle
@@ -695,6 +733,23 @@ class LaneView(
                 } else {
                     name += " · nothing recorded in " + PartNames.NAMES[e.bank.cur]
                 }
+            }
+            Inst.RHYTHM, Inst.RIFF -> {
+                val gt = if (t == Inst.RHYTHM) e.rhythmGtr else e.riffGtr
+                val n = MetalGuitar.WF
+                val cw = w / n
+                val mid = h / 2f
+                p.color = Theme.alpha(col, 120)
+                val pos = gt.wfPos
+                for (i in 0 until n) {
+                    val idx = (pos + i) % n
+                    val top = mid - (gt.wfMax[idx] * 2f).coerceIn(-1f, 1f) * mid * 0.85f
+                    val bot = mid - (gt.wfMin[idx] * 2f).coerceIn(-1f, 1f) * mid * 0.85f
+                    c.drawRect(i * cw, top, i * cw + cw + 0.5f, max(bot, top + 1f), p)
+                }
+                drawSteps(c, w, h, col, { gt.art[it] == MetalGuitar.CHUG || gt.art[it] == MetalGuitar.OPEN },
+                    { if (gt.art[it] == MetalGuitar.OPEN) 0.4f + gt.fret[it] / 24f else 0.25f })
+                name += " · " + MetalGuitar.TUNINGS[gt.tuning.coerceIn(0, MetalGuitar.TUNINGS.size - 1)]
             }
             Inst.AMBIENT -> {
                 val am = e.ambient

@@ -32,6 +32,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private lateinit var stopBtn: Button
     private lateinit var muteAllBtn: Button
     private lateinit var volS: SliderRow
+    private lateinit var heavyS: SliderRow
     private lateinit var reverbS: SliderRow
     private lateinit var delayS: SliderRow
     private lateinit var lpS: SliderRow
@@ -96,7 +97,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
         )
 
         val r0 = ui.row()
-        r0.addView(ui.button("Drum kit → pads") { drumKit() }, ui.w(1f, 3))
+        r0.addView(ui.button("Rock Heavy kit → pads") { rockKit() }, ui.w(1.3f, 3))
+        r0.addView(ui.button("Electronic kit → pads") { drumKit() }, ui.w(1.3f, 3))
         r0.addView(ui.button("Clear all") { clearAll() }, ui.w(1f, 3))
         content.addView(r0, ui.fullWidth(6))
 
@@ -110,6 +112,13 @@ class PadsScreen(private val a: MainActivity) : Screen {
         r1.addView(ui.button("4 on the floor") { beat(1) }, ui.w(1f, 3))
         r1.addView(ui.button("Hip-hop") { beat(2) }, ui.w(1f, 3))
         content.addView(r1, ui.fullWidth(6))
+        content.addView(ui.text("Metal beats (made for the Rock Heavy kit)", 13f, Theme.DIM), ui.fullWidth(8))
+        val r2 = ui.row()
+        r2.addView(ui.button("Nu-metal") { beat(3) }, ui.w(1f, 3))
+        r2.addView(ui.button("Double kick") { beat(4) }, ui.w(1f, 3))
+        r2.addView(ui.button("Techno metal") { beat(5) }, ui.w(1f, 3))
+        r2.addView(ui.button("Psy metal") { beat(6) }, ui.w(1f, 3))
+        content.addView(r2, ui.fullWidth(4))
     }
 
     // ---------------- drum effects (the whole drum kit together) ----------------
@@ -117,6 +126,11 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private fun buildEffects() {
         val p = ui.panel()
         p.addView(ui.text("Drum volume and effects (all drums together)", 14f, Theme.ACCENT, true))
+        heavyS = ui.slider("HEAVY: weight, punch and density", 100, (e.drumHeavy.amount * 100f).toInt(),
+            { if (it == 0) "off" else if (it > 80) "crushing" else "$it%" }) { v ->
+            e.drumHeavy.amount = v / 100f
+        }
+        p.addView(heavyS.view, ui.fullWidth(4))
         val fx = e.drumFx
         val row = ui.row()
         volS = ui.slider("Volume", 100, (e.padVol * 100f).toInt(), { "$it%" }) { v ->
@@ -150,6 +164,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private fun refreshEffects() {
         val fx = e.drumFx
         volS.set((e.padVol * 100f).toInt())
+        heavyS.set((e.drumHeavy.amount * 100f).toInt())
         reverbS.set(if (fx.on[2]) (fx.a[2] * 100).toInt() else 0)
         delayS.set(if (fx.on[3]) (fx.a[3] * 100).toInt() else 0)
         lpS.set(if (fx.on[0]) (fx.a[0] * 100).toInt() else 100)
@@ -332,6 +347,27 @@ class PadsScreen(private val a: MainActivity) : Screen {
         }.start()
     }
 
+    private fun rockKit() {
+        ui.toast("Loading the Rock Heavy kit...")
+        Thread {
+            val ok = try {
+                RockKit.install(a, a.store)
+                true
+            } catch (ex: Exception) {
+                false
+            }
+            a.runOnUiThread {
+                if (!ok) {
+                    ui.toast("Could not load the Rock Heavy kit")
+                } else {
+                    for (i in 0 until Cfg.PADS) a.assignPad(i, a.store.file(RockKit.fileName(RockKit.pads[i])))
+                    a.libraryScreen.refresh()
+                    ui.toast("Rock Heavy kit on the pads: kick, snare, hats, toms, crash, china. 4 more sounds are in the Library.")
+                }
+            }
+        }.start()
+    }
+
     private fun setRow(r: Int, steps: IntArray, level: Float = 1f) {
         for (s in steps) {
             val p = e.pads[r]
@@ -359,6 +395,39 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 setRow(4, intArrayOf(4, 12))
                 setRow(2, intArrayOf(0, 4, 8, 12), 0.65f)
                 setRow(3, intArrayOf(2, 6, 10, 14), 0.65f)
+            }
+            3 -> {
+                // nu-metal: syncopated kick, big snare on 2 and 4, open hat lift, crash on 1
+                setRow(0, intArrayOf(0, 3, 6, 10, 11))
+                setRow(1, intArrayOf(4, 12))
+                setRow(2, intArrayOf(0, 2, 4, 6, 8, 10, 12), 0.6f)
+                setRow(3, intArrayOf(14), 0.6f)
+                setRow(6, intArrayOf(0), 0.8f)
+            }
+            4 -> {
+                // double kick 16ths, snare 2 and 4, china on the beats
+                setRow(0, IntArray(16) { it })
+                for (s in 0 until 16) e.pads[0].lvl[s] = if (s % 2 == 0) 1f else 0.75f
+                setRow(1, intArrayOf(4, 12))
+                setRow(7, intArrayOf(0, 8), 0.7f)
+                setRow(2, intArrayOf(2, 6, 10, 14), 0.5f)
+            }
+            5 -> {
+                // techno metal: four on the floor, offbeat open hats, 16th closed hats, snare on 2 and 4
+                setRow(0, intArrayOf(0, 4, 8, 12))
+                setRow(1, intArrayOf(4, 12))
+                setRow(3, intArrayOf(2, 6, 10, 14), 0.6f)
+                setRow(2, intArrayOf(1, 3, 5, 7, 9, 11, 13, 15), 0.35f)
+                setRow(6, intArrayOf(0), 0.7f)
+            }
+            6 -> {
+                // psytrance metal: kick on the beat, the rolling bass lives in the gaps (rhythm guitar "Psy roll")
+                setRow(0, intArrayOf(0, 4, 8, 12))
+                setRow(1, intArrayOf(4, 12), 0.9f)
+                setRow(3, intArrayOf(2, 6, 10, 14), 0.55f)
+                setRow(2, intArrayOf(0, 1, 3, 4, 5, 7, 8, 9, 11, 12, 13, 15), 0.3f)
+                setRow(4, intArrayOf(15), 0.7f)
+                setRow(5, intArrayOf(14), 0.8f)
             }
             else -> {
                 setRow(0, intArrayOf(0, 7, 10))

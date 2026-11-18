@@ -37,6 +37,7 @@ class MainActivity : Activity() {
         const val TAB_SONG = 9
         const val TAB_HOME = 10
         const val TAB_AMBIENT = 11
+        const val TAB_GUITAR = 12
     }
 
     lateinit var ui: Ui
@@ -50,6 +51,7 @@ class MainActivity : Activity() {
     lateinit var libraryScreen: LibraryScreen
     lateinit var synthScreen: SynthScreen
     lateinit var homeScreen: HomeScreen
+    lateinit var guitarScreen: GuitarScreen
 
     /** What the 16 lanes of the Home page show (saved with the project). */
     val lanes = LaneSetup()
@@ -104,9 +106,11 @@ class MainActivity : Activity() {
         SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
         VocalSave.load(File(filesDir, "vocal.json"), engine.vocal)
         AmbientSave.load(File(filesDir, "ambient.json"), engine.ambient)
+        GuitarSave.load(File(filesDir, "guitars.json"), engine.rhythmGtr, engine.riffGtr, engine.drumHeavy)
         engine.bank.load(File(filesDir, "parts.json"))
         engine.bank.loadClips(filesDir)
         lastPartVersion = engine.bank.version
+        installRockKit()
         showTab(TAB_HOME)
 
         val crash = CrashLog.take(this)
@@ -147,6 +151,7 @@ class MainActivity : Activity() {
         try { SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog) } catch (e: Exception) { }
         try { VocalSave.save(File(filesDir, "vocal.json"), engine.vocal) } catch (e: Exception) { }
         try { AmbientSave.save(File(filesDir, "ambient.json"), engine.ambient) } catch (e: Exception) { }
+        try { GuitarSave.save(File(filesDir, "guitars.json"), engine.rhythmGtr, engine.riffGtr, engine.drumHeavy) } catch (e: Exception) { }
         try { engine.bank.save(File(filesDir, "parts.json")) } catch (e: Exception) { }
     }
 
@@ -304,12 +309,13 @@ class MainActivity : Activity() {
         val song = SongScreen(this)
         homeScreen = HomeScreen(this)
         val ambient = AmbientScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient)
+        guitarScreen = GuitarScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen)
 
         // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
         tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
-        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song", "⌂ Home", "New Ambient")
+        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song", "⌂ Home", "New Ambient", "Guitars")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -410,6 +416,31 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /** Opens the Guitars page on the rhythm (0) or the riff (1) guitar. */
+    fun openGuitar(mode: Int) {
+        guitarScreen.showMode(mode)
+        showTab(TAB_GUITAR)
+    }
+
+    /** First start: put the Rock Heavy kit into the library, and on the pads when they are all empty. */
+    private fun installRockKit() {
+        val padsEmpty = !project.hadPads
+        Thread {
+            val ok = try {
+                RockKit.install(this, store)
+                true
+            } catch (ex: Exception) {
+                false
+            }
+            runOnUiThread {
+                if (ok && !isFinishing) {
+                    if (padsEmpty) for (i in 0 until Cfg.PADS) assignPad(i, store.file(RockKit.fileName(RockKit.pads[i])))
+                    libraryScreen.refresh()
+                }
+            }
+        }.start()
     }
 
     /** Opens the Synth page on the bassline (0) or the analog synth (1). */

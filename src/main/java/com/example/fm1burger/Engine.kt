@@ -32,6 +32,9 @@ class Engine {
     val analogSeq = AnalogSeq(analog)
     val vocal = VocalChannel()
     val ambient = NewAmbient()
+    val rhythmGtr = MetalGuitar(false)
+    val riffGtr = MetalGuitar(true)
+    val drumHeavy = DrumHeavy()
     val mixRec = MixRecorder()
     val bank = PartBank(this)
     private val preview = PadVoice()
@@ -296,7 +299,7 @@ class Engine {
                 for (p in pads) {
                     pm += renderPad(p) * (if (p.mute) 0f else p.volume)
                 }
-                pm = drumFx.process(pm * pv, bpmNow, beatPos)
+                pm = drumFx.process(drumHeavy.process(pm * pv), bpmNow, beatPos)
                 l += pm
                 r += pm
                 val bz = bass.render()
@@ -308,6 +311,11 @@ class Engine {
                 ambient.render()
                 l += ambient.outL
                 r += ambient.outR
+                // the two guitars, a little apart: rhythm left of centre, riff right
+                val gR = rhythmGtr.render()
+                val gF = riffGtr.render()
+                l += gR * 0.9f + gF * 0.55f
+                r += gR * 0.55f + gF * 0.9f
                 r += vocal.outR
                 bank.renderClip()
                 l += bank.outL
@@ -345,6 +353,8 @@ class Engine {
             paused = false
             curStep = -1
             for (t in tracks) t.playing = false
+            rhythmGtr.hit(MetalGuitar.OFF, 0)
+            riffGtr.hit(MetalGuitar.OFF, 0)
             bank.onTransportStop(bpmF)
         }
         if (startReq) {
@@ -438,6 +448,8 @@ class Engine {
         }
         bass.step(s, bpmF)
         ambient.step(s)
+        rhythmGtr.step(s)
+        riffGtr.step(s)
         analogSeq.step(s)
         for (p in pads) {
             if (p.on[s] && p.data != null) {

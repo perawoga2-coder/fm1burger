@@ -9,6 +9,9 @@ class Project(private val a: MainActivity) {
 
     private val file = File(a.filesDir, "project.json")
 
+    /** True when the saved project had sounds on the pads (so a first-start kit must not replace them). */
+    var hadPads = false
+
     fun save() {
         try {
             val e = a.engine
@@ -151,6 +154,7 @@ class Project(private val a: MainActivity) {
             if (ps != null) {
                 for (i in 0 until minOf(ps.length(), Cfg.PADS)) {
                     val name = ps.optString(i, "")
+                    if (name.isNotEmpty()) hadPads = true
                     if (name.isNotEmpty() && a.store.file(name).exists()) a.assignPad(i, a.store.file(name))
                 }
             }

@@ -41,6 +41,8 @@ object Theme {
     val PURPLE = Color.parseColor("#B07CFF")
     val PINK = Color.parseColor("#FF5CA8")
     val TEAL = Color.parseColor("#2DD4BF")
+    val STEEL = Color.parseColor("#C0C7D6")
+    val LIME = Color.parseColor("#B8F23C")
     val TRACK_COLORS = intArrayOf(ACCENT, BLUE, GREEN, YELLOW)
 
     /** Text color that reads well on top of a filled color. */
