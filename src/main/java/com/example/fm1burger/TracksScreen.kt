@@ -40,7 +40,6 @@ class TracksScreen(private val a: MainActivity) : Screen {
 
     // the editor and the full effects live inside this page (they are put in by attachEmbedded)
     private val editBox = ui.panel()
-    private val fxBox = ui.panel()
     private var editScreen: EditScreen? = null
     private var fxScreen: FxScreen? = null
 
@@ -49,19 +48,6 @@ class TracksScreen(private val a: MainActivity) : Screen {
     private lateinit var voiceMicBtn: Button
     private lateinit var voiceMuteBtn: Button
     private lateinit var voiceVol: SliderRow
-
-    // loops and slices of the selected track
-    private lateinit var fwdBtn: Button
-    private lateinit var pingBtn: Button
-    private lateinit var loopAS: SliderRow
-    private lateinit var loopBS: SliderRow
-    private lateinit var xfadeS: SliderRow
-    private val fitBtns = ArrayList<Button>()
-    private lateinit var keepPitchBtn: Button
-    private val sliceBtns = ArrayList<Button>()
-    private lateinit var sliceMap: TextView
-    private val FITS = intArrayOf(0, 1, 2, 4, 8)
-    private val SLICES = intArrayOf(0, 4, 8, 16)
 
     init {
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
@@ -81,9 +67,12 @@ class TracksScreen(private val a: MainActivity) : Screen {
         buildVoiceCard()
         buildEffects()
         buildSettings()
-        buildLoops()
-        fxBox.addView(ui.text("All effects of the selected track", 14f, Theme.ACCENT, true))
-        content.addView(fxBox, ui.fullWidth(10))
+    }
+
+    /** The sub-page of a track: its effects (EF) or its loop and slices (LOOP). */
+    fun openTrackPage(i: Int, tab: Int) {
+        a.sel = i
+        TrackPage(a, i, tab).open()
     }
 
     /** MainActivity puts the editor and the effects chain into this page once all pages exist. */
@@ -91,16 +80,12 @@ class TracksScreen(private val a: MainActivity) : Screen {
         editScreen = edit
         fxScreen = fx
         editBox.addView(edit.detach(), ui.fullWidth(4))
-        fxBox.addView(fx.detach(), ui.fullWidth(4))
     }
 
     fun scrollToEditor() {
         root.post { root.smoothScrollTo(0, editBox.top) }
     }
 
-    fun scrollToEffects() {
-        root.post { root.smoothScrollTo(0, fxBox.top) }
-    }
 
     // ---------------- track 5: voice ----------------
 
@@ -142,123 +127,6 @@ class TracksScreen(private val a: MainActivity) : Screen {
         voiceVol.set((v.volume * 100).toInt())
     }
 
-    // ---------------- loops and slices ----------------
-
-    private fun buildLoops() {
-        val p = ui.panel()
-        p.addView(ui.text("Loop (LOOP mode)", 14f, Theme.ACCENT, true))
-        val r1 = ui.row()
-        fwdBtn = ui.button("Forward") {
-            sel().pingPong = false
-            refresh()
-        }
-        pingBtn = ui.button("Ping-pong") {
-            sel().pingPong = true
-            refresh()
-        }
-        r1.addView(fwdBtn, ui.w(1f, 3))
-        r1.addView(pingBtn, ui.w(1f, 3))
-        r1.addView(ui.text("Reverse (above) = loop backwards", 11f, Theme.DIM), ui.w(1.3f, 4))
-        p.addView(r1)
-        loopAS = ui.slider("Loop start", 100, 0, { "$it%" }) { v ->
-            val t = sel()
-            t.loopA = (v / 100f).coerceAtMost(t.loopB - 0.01f)
-        }
-        loopBS = ui.slider("Loop end", 100, 100, { "$it%" }) { v ->
-            val t = sel()
-            t.loopB = (v / 100f).coerceAtLeast(t.loopA + 0.01f)
-        }
-        xfadeS = ui.slider("Crossfade (no click at the loop point)", 100, 0, { if (it == 0) "off" else "$it ms" }) { v ->
-            sel().xfadeMs = v.toFloat()
-        }
-        p.addView(loopAS.view)
-        p.addView(loopBS.view)
-        p.addView(xfadeS.view)
-        p.addView(ui.text("Fit the loop to bars of the tempo", 12f, Theme.DIM), ui.fullWidth(6))
-        val r2 = ui.row()
-        for (k in FITS.indices) {
-            val b = ui.button(if (FITS[k] == 0) "Off" else "${FITS[k]} bar" + (if (FITS[k] > 1) "s" else "")) {
-                sel().fitBars = FITS[k]
-                refresh()
-            }
-            fitBtns.add(b)
-            r2.addView(b, ui.w(1f, 2))
-        }
-        p.addView(r2)
-        keepPitchBtn = ui.button("Keep pitch (time stretch)") {
-            val t = sel()
-            t.keepPitch = !t.keepPitch
-            refresh()
-        }
-        p.addView(keepPitchBtn, ui.fullWidth(4))
-        content.addView(p, ui.fullWidth(10))
-
-        val sp = ui.panel()
-        sp.addView(ui.text("Slices (STEP mode): chop start..end into equal parts, one per step", 14f, Theme.ACCENT, true))
-        val r3 = ui.row()
-        for (k in SLICES.indices) {
-            val b = ui.button(if (SLICES[k] == 0) "Off" else "${SLICES[k]}") {
-                val t = sel()
-                t.slices = SLICES[k]
-                if (t.slices > 0) {
-                    t.loop = false
-                    slicePattern(0)
-                }
-                refresh()
-            }
-            sliceBtns.add(b)
-            r3.addView(b, ui.w(1f, 2))
-        }
-        sp.addView(r3)
-        val r4 = ui.row()
-        r4.addView(ui.button("In order") { slicePattern(0) }, ui.w(1f, 2))
-        r4.addView(ui.button("Shuffle") { slicePattern(1) }, ui.w(1f, 2))
-        r4.addView(ui.button("Reverse some") { slicePattern(2) }, ui.w(1f, 2))
-        r4.addView(ui.button("Stutter") { slicePattern(3) }, ui.w(1f, 2))
-        sp.addView(r4, ui.fullWidth(4))
-        sliceMap = ui.text("", 12f, Theme.DIM)
-        sliceMap.typeface = android.graphics.Typeface.MONOSPACE
-        sp.addView(sliceMap, ui.fullWidth(4))
-        content.addView(sp, ui.fullWidth(10))
-    }
-
-    /** 0 in order, 1 shuffle, 2 reverse some, 3 stutter. All 16 steps play, so the slices make a beat. */
-    private fun slicePattern(kind: Int) {
-        val t = sel()
-        if (t.slices == 0) {
-            t.slices = 8
-            t.loop = false
-        }
-        val n = t.slices
-        val rnd = java.util.Random()
-        for (s in 0 until Cfg.STEPS) {
-            t.steps[s].on = true
-            t.steps[s].pitch = 0
-            t.steps[s].level = 1f
-            when (kind) {
-                1 -> {
-                    t.sliceOf[s] = rnd.nextInt(n)
-                    t.sliceRev[s] = false
-                }
-                2 -> {
-                    t.sliceOf[s] = s % n
-                    t.sliceRev[s] = rnd.nextInt(4) == 0
-                }
-                3 -> {
-                    // the first half in order, then the same slice repeating faster and faster
-                    t.sliceOf[s] = if (s < 8) s % n else if (s < 12) (8 % n) else (12 % n)
-                    t.sliceRev[s] = false
-                    if (s >= 12) t.steps[s].level = 0.7f + 0.1f * (s - 12)
-                }
-                else -> {
-                    t.sliceOf[s] = s % n
-                    t.sliceRev[s] = false
-                }
-            }
-        }
-        refresh()
-    }
-
     private fun buildEffects() {
         val p = ui.panel()
         fxTitle = ui.text("Track 1 effects", 14f, Theme.ACCENT, true)
@@ -294,7 +162,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
             sel().fx.intensity = 1f + v / 100f
         }
         r2.addView(intensityS.view, ui.w(2f, 4))
-        r2.addView(ui.button("All 10 effects ↓") { scrollToEffects() }, ui.w(1f, 3))
+        r2.addView(ui.button("All 10 effects (EF)") { openTrackPage(a.sel, TrackPage.TAB_FX) }, ui.w(1f, 3))
         p.addView(r2)
         content.addView(p, ui.fullWidth(0))
     }
@@ -331,6 +199,19 @@ class TracksScreen(private val a: MainActivity) : Screen {
             refresh()
         }
         top.addView(m, ui.w(0f, 2))
+        val ef = ui.button("EF") { openTrackPage(i, TrackPage.TAB_FX) }
+        ui.styleButton(ef, true, Theme.TRACK_COLORS[i])
+        top.addView(ef, ui.w(0f, 2))
+        top.addView(ui.button("LOOP") { openTrackPage(i, TrackPage.TAB_LOOP) }, ui.w(0f, 2))
+        // 7 buttons in one row: keep them compact so they fit a phone
+        for (k in 0 until top.childCount) {
+            val c = top.getChildAt(k)
+            if (c is Button) {
+                c.textSize = 12f
+                c.setPadding(ui.dp(7), ui.dp(6), ui.dp(7), ui.dp(6))
+                (c.layoutParams as? LinearLayout.LayoutParams)?.setMargins(ui.dp(1), ui.dp(1), ui.dp(1), ui.dp(1))
+            }
+        }
         card.addView(top)
 
         val wv = WaveformView(a)
@@ -398,7 +279,6 @@ class TracksScreen(private val a: MainActivity) : Screen {
 
     override fun onShow() {
         editScreen?.onShow()
-        fxScreen?.onShow()
         refresh()
         refreshVoice()
     }
@@ -439,21 +319,6 @@ class TracksScreen(private val a: MainActivity) : Screen {
         ui.styleButton(stepBtn, !t.loop)
         ui.styleButton(loopBtn, t.loop)
         ui.styleButton(revBtn, t.reverse)
-        ui.styleButton(fwdBtn, !t.pingPong)
-        ui.styleButton(pingBtn, t.pingPong)
-        loopAS.set((t.loopA * 100).toInt())
-        loopBS.set((t.loopB * 100).toInt())
-        xfadeS.set(t.xfadeMs.toInt())
-        for (k in fitBtns.indices) ui.styleButton(fitBtns[k], t.fitBars == FITS[k])
-        ui.styleButton(keepPitchBtn, t.keepPitch, Theme.GREEN)
-        for (k in sliceBtns.indices) ui.styleButton(sliceBtns[k], t.slices == SLICES[k])
-        sliceMap.text = if (t.slices == 0) "Slices off" else
-            "Step:  " + (1..16).joinToString(" ") { String.format("%2d", it) } + "\nSlice: " +
-                (0 until Cfg.STEPS).joinToString(" ") { s ->
-                    val k = (if (t.sliceOf[s] >= 0) t.sliceOf[s] else s) % t.slices
-                    String.format("%2d", k + 1).let { if (t.sliceRev[s]) it.trim() + "r" else it }
-                }
-        fxScreen?.onShow()
         modeHint.text = if (t.loop) {
             "LOOP: the sample restarts at every bar and repeats. The steps are ignored."
         } else {

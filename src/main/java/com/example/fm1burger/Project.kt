@@ -39,14 +39,14 @@ class Project(private val a: MainActivity) {
                 j.put("fitBars", t.fitBars)
                 j.put("keepPitch", t.keepPitch)
                 j.put("slices", t.slices)
-                val so = JSONArray()
-                val sr = JSONArray()
+                val slo = JSONArray()
+                val slr = JSONArray()
                 for (k in 0 until Cfg.STEPS) {
-                    so.put(t.sliceOf[k])
-                    sr.put(t.sliceRev[k])
+                    slo.put(t.sliceOf[k])
+                    slr.put(t.sliceRev[k])
                 }
-                j.put("sliceOf", so)
-                j.put("sliceRev", sr)
+                j.put("sliceOf", slo)
+                j.put("sliceRev", slr)
                 val so = JSONArray()
                 val sp = JSONArray()
                 val sl = JSONArray()
@@ -154,11 +154,11 @@ class Project(private val a: MainActivity) {
                     t.fitBars = j.optInt("fitBars", 0).let { if (it in intArrayOf(0, 1, 2, 4, 8)) it else 0 }
                     t.keepPitch = j.optBoolean("keepPitch", false)
                     t.slices = j.optInt("slices", 0).let { if (it in intArrayOf(0, 4, 8, 16)) it else 0 }
-                    val so = j.optJSONArray("sliceOf")
-                    val sr = j.optJSONArray("sliceRev")
+                    val slo = j.optJSONArray("sliceOf")
+                    val slr = j.optJSONArray("sliceRev")
                     for (k in 0 until Cfg.STEPS) {
-                        t.sliceOf[k] = so?.optInt(k, -1)?.coerceIn(-1, 15) ?: -1
-                        t.sliceRev[k] = sr?.optBoolean(k, false) ?: false
+                        t.sliceOf[k] = slo?.optInt(k, -1)?.coerceIn(-1, 15) ?: -1
+                        t.sliceRev[k] = slr?.optBoolean(k, false) ?: false
                     }
                     val so = j.optJSONArray("stepOn")
                     val sp = j.optJSONArray("stepPitch")
