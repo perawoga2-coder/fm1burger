@@ -39,6 +39,7 @@ class MainActivity : Activity() {
         const val TAB_HOME = 10
         const val TAB_AMBIENT = 11
         const val TAB_GUITAR = 12
+        const val TAB_BASS = 13
     }
 
     lateinit var ui: Ui
@@ -51,6 +52,7 @@ class MainActivity : Activity() {
     lateinit var editScreen: EditScreen
     lateinit var libraryScreen: LibraryScreen
     lateinit var synthScreen: SynthScreen
+    lateinit var bassScreen: SynthScreen
     lateinit var homeScreen: HomeScreen
     lateinit var guitarScreen: GuitarScreen
 
@@ -80,7 +82,6 @@ class MainActivity : Activity() {
     private lateinit var statusDot: View
     private lateinit var tabScroll: HorizontalScrollView
     private lateinit var homeFab: Button
-    private var bassTabBtn: Button? = null
     private var dotColor = 0
     private val cueBtns = ArrayList<Button>()
     private var cueKey = ""
@@ -309,19 +310,20 @@ class MainActivity : Activity() {
         editScreen = EditScreen(this)
         val fx = FxScreen(this)
         val pads = PadsScreen(this)
-        val synth = SynthScreen(this)
+        val synth = SynthScreen(this, 1)          // the Analog synth page
         synthScreen = synth
+        bassScreen = SynthScreen(this, 0)         // the Bassline page
         val voice = VoiceScreen(this)
         val song = SongScreen(this)
         homeScreen = HomeScreen(this)
         val ambient = AmbientScreen(this)
         guitarScreen = GuitarScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen, bassScreen)
 
         // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
         tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
-        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song", "⌂ Home", "New Ambient", "Guitars")
+        val names = listOf("Sampler", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Analog synth", "Voice", "Song", "⌂ Home", "New Ambient", "Guitars", "Bassline")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -329,18 +331,14 @@ class MainActivity : Activity() {
             b.minimumHeight = ui.dp(36)
             b.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6))
             btns.add(b)
-            // Home is the first tab on the left
-            if (i == TAB_HOME) tabRow.addView(b, 0, ui.w(0f, 3)) else tabRow.addView(b, ui.w(0f, 3))
+            // Home is the first tab on the left; Bassline sits just before Analog synth
+            when (i) {
+                TAB_HOME -> tabRow.addView(b, 0, ui.w(0f, 3))
+                TAB_BASS -> tabRow.addView(b, tabRow.indexOfChild(btns[TAB_SYNTH]), ui.w(0f, 3))
+                else -> tabRow.addView(b, ui.w(0f, 3))
+            }
         }
         tabBtns = btns
-        // "Bassline" has its own tab: the Synth page opened on the bassline ("Synth" opens the analog synth)
-        val bb = ui.button("Bassline") { openSynth(0) }
-        bb.minHeight = ui.dp(36)
-        bb.minimumHeight = ui.dp(36)
-        bb.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6))
-        bassTabBtn = bb
-        tabRow.addView(bb, tabRow.indexOfChild(btns[TAB_SYNTH]), ui.w(0f, 3))
-        btns[TAB_SYNTH].setOnClickListener { openSynth(1) }
         tabScroll = HorizontalScrollView(this)
         tabScroll.isHorizontalScrollBarEnabled = false
         tabScroll.setBackgroundColor(Theme.BG)
@@ -400,11 +398,7 @@ class MainActivity : Activity() {
     }
 
     private fun paintTabs() {
-        val synthMode = if (::synthScreen.isInitialized) synthScreen.currentMode else 1
-        tabBtns.forEachIndexed { idx, b ->
-            styleTab(b, idx == cur && !(idx == TAB_SYNTH && synthMode == 0))
-        }
-        bassTabBtn?.let { styleTab(it, cur == TAB_SYNTH && synthMode == 0) }
+        tabBtns.forEachIndexed { idx, b -> styleTab(b, idx == cur) }
     }
 
     private fun styleTab(b: Button, active: Boolean) {
@@ -472,8 +466,7 @@ class MainActivity : Activity() {
 
     /** Opens the Synth page on the bassline (0) or the analog synth (1). */
     fun openSynth(mode: Int) {
-        synthScreen.showMode(mode)
-        showTab(TAB_SYNTH)
+        showTab(if (mode == 0) TAB_BASS else TAB_SYNTH)
     }
 
     fun refreshCurrent() {
@@ -876,7 +869,7 @@ class MainActivity : Activity() {
         if (bk.version != lastPartVersion) {
             lastPartVersion = bk.version
             // the patterns changed to another part: redraw the pages that show patterns
-            if (cur in intArrayOf(0, 1, 2, 6, 7, 9, TAB_HOME)) screens[cur].onShow()
+            if (cur in intArrayOf(0, 1, 2, 6, 7, 9, TAB_HOME, TAB_BASS)) screens[cur].onShow()
         }
         if (preparing && statusText.currentTextColor != Theme.RED) {
             statusText.setTextColor(Theme.YELLOW)

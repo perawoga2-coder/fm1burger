@@ -25,6 +25,8 @@ class Track(val index: Int) {
     @Volatile var start = 0f
     @Volatile var end = 1f
     @Volatile var reverse = false
+    /** Extra gain before the effects, 0 .. +12 dB (for quiet samples, and to drive the effects harder). */
+    @Volatile var boostDb = 0f
     val steps = Array(Cfg.STEPS) { Step() }
     val fx = FxChain()
 

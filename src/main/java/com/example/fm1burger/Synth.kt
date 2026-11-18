@@ -80,7 +80,8 @@ class Bassline {
     @Volatile var decay = 0.35f
     @Volatile var accentAmt = 0.6f
     @Volatile var drive = 0.2f
-    @Volatile var volume = 0.7f
+    @Volatile var volume = 0.85f
+    @Volatile var boostDb = 0f      // extra gain 0 .. +12 dB
     @Volatile var mute = false
     @Volatile var key = 0
     @Volatile var octave = 1
@@ -178,39 +179,86 @@ class Bassline {
 }
 
 /**
- * Analog style synth: 6 voices, each with two slightly detuned oscillators
- * (sine / saw / square / triangle), a resonant low-pass filter and an ADSR envelope.
- * Played from the on-screen keyboard.
+ * Analog synth, built like a small 3-oscillator analog keyboard synth:
+ *  - 3 VCOs and a VOICING mode: POLY (3 notes), UNISON (all 3 on one note, detuned), OCTAVE (+ an octave up),
+ *    FIFTH (+ a fifth up), UNISON RING and POLY RING (ring modulation between the oscillators)
+ *  - VCO octave, detune and portamento (glide)
+ *  - one shared VCF (resonant low-pass with drive) and one shared EG for filter and amp (paraphonic, like the real ones)
+ *  - LFO (saw / triangle / square), rate or tempo sync, to pitch and to cutoff
+ *  - its own delay (time + feedback)
+ *  - analog drift: every oscillator wanders a few cents, each note starts at a random phase
+ * Played from the keyboard on its page and by its step sequencer.
  */
 class AnalogSynth {
-    @Volatile var wave = 1
+    // the original controls (kept: saved projects load as before)
+    @Volatile var wave = 1              // 0 sine, 1 saw, 2 square, 3 triangle
     @Volatile var detune = 0.3f
     @Volatile var attack = 0.05f
     @Volatile var decay = 0.4f
     @Volatile var sustain = 0.6f
     @Volatile var release = 0.3f
     @Volatile var cutoff = 0.6f
-    @Volatile var res = 0.2f
-    @Volatile var filtEnv = 0.3f
-    @Volatile var volume = 0.6f
+    @Volatile var res = 0.2f            // the VCF "peak"
+    @Volatile var filtEnv = 0.3f        // EG int to the cutoff
+    @Volatile var volume = 0.85f
     @Volatile var mute = false
     val fx = FxChain()
 
-    private class V {
-        var note = -1
-        var freq = 0.0
-        var ph1 = 0.0
-        var ph2 = 0.0
-        var stage = 0   // 0 idle, 1 attack, 2 decay, 3 sustain, 4 release
-        var level = 0.0
-        var age = 0L
-        val f = Svf()
+    // the analog keyboard synth controls
+    @Volatile var voicing = 0           // see VOICINGS
+    @Volatile var octave = 0            // -2 .. +2
+    @Volatile var portamento = 0f
+    @Volatile var drive = 0.2f
+    @Volatile var lfoWave = 1           // 0 saw, 1 triangle, 2 square
+    @Volatile var lfoRate = 0.3f
+    @Volatile var lfoSync = false       // rate follows the tempo
+    @Volatile var lfoPitch = 0f
+    @Volatile var lfoCutoff = 0f
+    @Volatile var delayTime = 0.4f
+    @Volatile var delayFb = 0f          // 0 = delay off
+    @Volatile var bpm = 120.0
+    @Volatile var boostDb = 0f      // extra gain 0 .. +12 dB
+
+    companion object {
+        val VOICINGS = arrayOf("Poly", "Unison", "Octave", "Fifth", "Uni Ring", "Poly Ring")
+        val LFO_WAVES = arrayOf("Saw", "Tri", "Square")
+        private val SYNC_BEATS = doubleArrayOf(4.0, 2.0, 1.0, 0.5, 0.25, 0.125)
     }
 
-    private val voices = Array(6) { V() }
+    private class Osc {
+        var ph = 0.0
+        var freq = 0.0          // where it is (glides toward target)
+        var target = 0.0
+        var drift = 0.0         // cents
+        var driftTo = 0.0
+        var note = -1
+        var on = false
+    }
+
+    private val oscs = Array(3) { Osc() }
+    private val held = ArrayList<Int>()
     private val events = ConcurrentLinkedQueue<Int>()
-    private var counter = 0L
+    private val f1 = Svf()
+    private val f2 = Svf()
+    private var eg = 0.0
+    private var egStage = 0     // 0 idle, 1 attack, 2 decay / sustain, 3 release
+    private var lfoPh = 0.0
+    private var lfoVal = 0.0
     private var cc = 0
+    private var rnd = 0x5EED1234
+    private val dly = FloatArray(Cfg.SR)
+    private var dw = 0
+    private var dlp = 0f
+    private var nextOsc = 0
+
+    private fun rand(): Double {
+        var x = rnd
+        x = x xor (x shl 13)
+        x = x xor (x ushr 17)
+        x = x xor (x shl 5)
+        rnd = x
+        return (x ushr 8) / 16777216.0
+    }
 
     fun noteOn(n: Int) {
         events.add(n)
@@ -224,30 +272,75 @@ class AnalogSynth {
         events.add(-1)
     }
 
+    private fun hz(n: Int): Double = 440.0 * 2.0.pow((n + 12 * octave - 69) / 12.0)
+
+    private fun isUnison(): Boolean = voicing in intArrayOf(1, 2, 3, 4)
+
+    /** Puts the held notes on the 3 oscillators the way the voicing wants. */
+    private fun assign(newNote: Int) {
+        val glide = portamento > 0.01f
+        if (isUnison()) {
+            // one note (the last one held) on all three oscillators
+            val n = held.lastOrNull() ?: return
+            val base = hz(n)
+            val det = 2.0.pow(detune * 30.0 / 1200.0)
+            val f = when (voicing) {
+                2 -> doubleArrayOf(base, base * 2.0 * det, base / det)          // octave
+                3 -> doubleArrayOf(base, base * 1.4983 * det, base / det)       // fifth
+                else -> doubleArrayOf(base, base * det, base / det)             // unison (+ ring)
+            }
+            for (k in 0 until 3) {
+                val o = oscs[k]
+                o.target = f[k]
+                if (!glide || o.freq <= 0.0) o.freq = f[k]
+                if (!o.on) o.ph = rand()
+                o.on = true
+                o.note = n
+            }
+        } else {
+            // poly: a note per oscillator (the oldest is taken when all three are busy)
+            if (newNote < 0) return
+            var o = oscs.firstOrNull { !it.on || it.note == newNote }
+            if (o == null) {
+                o = oscs[nextOsc % 3]
+                nextOsc++
+            }
+            val f = hz(newNote) * (if (nextOsc % 2 == 0) 2.0.pow(detune * 8.0 / 1200.0) else 1.0)
+            if (!glide || o.freq <= 0.0) o.freq = f
+            o.target = f
+            if (!o.on) o.ph = rand()
+            o.on = true
+            o.note = newNote
+        }
+    }
+
     private fun poll() {
         while (true) {
             val e = events.poll() ?: break
             if (e == -1) {
-                for (v in voices) if (v.stage != 0) v.stage = 4
+                held.clear()
+                if (egStage != 0) egStage = 3
             } else if (e >= 1000) {
                 val n = e - 1000
-                for (v in voices) if (v.note == n && v.stage in 1..3) v.stage = 4
+                held.remove(n)
+                if (isUnison()) {
+                    if (held.isEmpty()) egStage = 3 else assign(-1)
+                } else {
+                    for (o in oscs) if (o.note == n) o.on = false
+                    if (held.isEmpty()) {
+                        egStage = 3
+                        // keep the oscillators sounding through the release
+                        for (o in oscs) if (o.note >= 0 && o.freq > 0) o.on = true
+                    }
+                }
             } else {
-                var pick: V? = null
-                for (v in voices) if (v.stage == 0) {
-                    pick = v
-                    break
-                }
-                if (pick == null) {
-                    var oldest = voices[0]
-                    for (v in voices) if (v.age < oldest.age) oldest = v
-                    pick = oldest
-                }
-                pick.note = e
-                pick.freq = 440.0 * 2.0.pow((e - 69) / 12.0)
-                pick.stage = 1
-                counter++
-                pick.age = counter
+                held.remove(e)
+                held.add(e)
+                val wasIdle = held.size == 1
+                assign(e)
+                // the EG starts again on a new note (from where it is, like the real thing)
+                egStage = 1
+                if (wasIdle && eg < 0.001) eg = 0.0
             }
         }
     }
@@ -265,59 +358,113 @@ class AnalogSynth {
     }
 
     fun render(): Float {
-        if ((cc and 63) == 0) poll()
-        val upd = (cc and 31) == 0
+        if ((cc and 31) == 0) poll()
+        val upd = (cc and 15) == 0
         cc++
-        val w = wave
+
+        // the EG (shared by filter and amp)
+        val atkT = 0.002 + attack.toDouble() * attack * 2.5
+        val decT = 0.01 + decay.toDouble() * decay * 2.5
+        val relT = 0.01 + release.toDouble() * release * 4.0
         val sus = sustain.toDouble()
-        val atkT = 0.002 + attack.toDouble() * attack * 2.0
-        val decT = 0.01 + decay.toDouble() * decay * 2.0
-        val relT = 0.01 + release.toDouble() * release * 3.0
-        val atkStep = 1.0 / (atkT * Cfg.SR)
-        val decC = 1.0 - exp(-1.0 / (decT * Cfg.SR))
-        val relC = exp(-1.0 / (relT * Cfg.SR))
-        val ratio = 2.0.pow(detune * 25.0 / 1200.0)
-        var sum = 0.0
-        for (v in voices) {
-            if (v.stage == 0) continue
-            when (v.stage) {
-                1 -> {
-                    v.level += atkStep
-                    if (v.level >= 1.0) {
-                        v.level = 1.0
-                        v.stage = 2
-                    }
-                }
-                2 -> {
-                    v.level += (sus - v.level) * decC
-                    if (abs(v.level - sus) < 0.001) v.stage = 3
-                }
-                3 -> v.level = sus
-                else -> {
-                    v.level *= relC
-                    if (v.level < 0.0005) {
-                        v.level = 0.0
-                        v.stage = 0
-                        v.f.reset()
-                        continue
-                    }
+        when (egStage) {
+            1 -> {
+                eg += (1.0 - eg) / (atkT * Cfg.SR) * 3.0 + 1.0 / (atkT * Cfg.SR) * 0.2
+                if (eg >= 0.999) {
+                    eg = 1.0
+                    egStage = 2
                 }
             }
-            if (upd) {
-                val fc = 60.0 * 2.0.pow(cutoff * 7.5) * 2.0.pow(filtEnv * 3.0 * v.level)
-                v.f.setup(fc, res.toDouble())
+            2 -> eg += (sus - eg) * (1.0 - exp(-1.0 / (decT * Cfg.SR)))
+            3 -> {
+                eg *= exp(-1.0 / (relT * Cfg.SR))
+                if (eg < 0.0003) {
+                    eg = 0.0
+                    egStage = 0
+                    for (o in oscs) o.on = false
+                }
             }
-            val dt1 = v.freq * ratio / Cfg.SR
-            val dt2 = v.freq / ratio / Cfg.SR
-            v.ph1 += dt1
-            if (v.ph1 >= 1.0) v.ph1 -= 1.0
-            v.ph2 += dt2
-            if (v.ph2 >= 1.0) v.ph2 -= 1.0
-            val o = (osc(w, v.ph1, dt1) + osc(w, v.ph2, dt2)) * 0.5
-            sum += v.f.process(o) * v.level * 0.3
         }
+
+        // the LFO
+        val lr = if (lfoSync) bpm / 60.0 / SYNC_BEATS[(lfoRate * 5.99f).toInt().coerceIn(0, 5)]
+        else 0.05 * 2.0.pow(lfoRate * 9.2)                 // 0.05 .. ~30 Hz
+        lfoPh += lr / Cfg.SR
+        if (lfoPh >= 1.0) lfoPh -= 1.0
+        lfoVal = when (lfoWave) {
+            0 -> 1.0 - 2.0 * lfoPh
+            2 -> if (lfoPh < 0.5) 1.0 else -1.0
+            else -> 4.0 * abs(lfoPh - 0.5) - 1.0
+        }
+
+        // oscillators
+        val glideC = if (portamento > 0.01f) 1.0 - exp(-1.0 / ((0.005 + portamento * portamento * 1.2) * Cfg.SR)) else 1.0
+        val pitchMod = 2.0.pow(lfoVal * lfoPitch * lfoPitch * 1.0)   // up to ±1 octave
+        val w = wave
+        val ring = voicing == 4 || voicing == 5
+        var sum = 0.0
+        var ringOut = 1.0
+        var active = 0
+        for (k in 0 until 3) {
+            val o = oscs[k]
+            if (!o.on && egStage == 0) continue
+            if (o.freq <= 0.0) continue
+            o.freq += (o.target - o.freq) * glideC
+            if (upd) {
+                if (abs(o.drift - o.driftTo) < 0.05) o.driftTo = (rand() - 0.5) * 6.0
+                o.drift += (o.driftTo - o.drift) * 0.002
+            }
+            val f = o.freq * pitchMod * 2.0.pow(o.drift / 1200.0)
+            val dt = f / Cfg.SR
+            o.ph += dt
+            if (o.ph >= 1.0) o.ph -= 1.0
+            val v = osc(w, o.ph, dt)
+            if (o.on || egStage == 3) {
+                sum += v
+                ringOut *= v
+                active++
+            }
+        }
+        if (active == 0 && egStage == 0) return delayOnly()
+        var x = if (ring && active >= 2) (sum / active) * 0.4 + ringOut * 0.8 else sum / 3.0 * (if (isUnison()) 1.0 else 1.4)
+
+        // the VCF: drive into a 4-pole resonant low-pass, cutoff moved by the EG and the LFO
+        if (upd) {
+            val fc = 40.0 * 2.0.pow(cutoff * 9.0 + filtEnv * 5.0 * eg + lfoVal * lfoCutoff * 3.0)
+            f1.setup(fc, res * 0.6)
+            f2.setup(fc, res.toDouble())
+        }
+        val dr = 1.0 + drive * 6.0
+        x = kotlin.math.tanh(x * dr) / kotlin.math.tanh(dr) * (1.0 + drive * 0.5)
+        x = f2.process(f1.process(x))
+        x *= eg
+        var y = x.toFloat()
+
+        // its own delay
+        y = addDelay(y)
         if (mute) return 0f
-        return (sum * volume * 1.5).toFloat()
+        return y * volume * 1.4f
+    }
+
+    private fun addDelay(x: Float): Float {
+        if (delayFb <= 0.01f) {
+            dly[dw] = 0f
+            dw = (dw + 1) % dly.size
+            return x
+        }
+        val n = (Cfg.SR * (0.02f + delayTime * 0.95f)).toInt().coerceIn(1, dly.size - 1)
+        var r = dw - n
+        if (r < 0) r += dly.size
+        val d = dly[r]
+        dlp += (d - dlp) * 0.35f                       // the repeats get darker, like a tape / BBD delay
+        dly[dw] = x + dlp * (delayFb * 0.9f)
+        dw = (dw + 1) % dly.size
+        return x + d * 0.6f
+    }
+
+    private fun delayOnly(): Float {
+        if (mute) return 0f
+        return addDelay(0f) * volume * 1.4f
     }
 }
 
@@ -353,6 +500,7 @@ object SynthSave {
             bo.put("drive", b.drive.toDouble())
             bo.put("volume", b.volume.toDouble())
             bo.put("mute", b.mute)
+            bo.put("boostDb", b.boostDb.toDouble())
             bo.put("key", b.key)
             bo.put("octave", b.octave)
             o.put("bass", bo)
@@ -368,6 +516,18 @@ object SynthSave {
             ao.put("filtEnv", s.filtEnv.toDouble())
             ao.put("volume", s.volume.toDouble())
             ao.put("mute", s.mute)
+            ao.put("voicing", s.voicing)
+            ao.put("boostDb", s.boostDb.toDouble())
+            ao.put("octave", s.octave)
+            ao.put("portamento", s.portamento.toDouble())
+            ao.put("drive", s.drive.toDouble())
+            ao.put("lfoWave", s.lfoWave)
+            ao.put("lfoRate", s.lfoRate.toDouble())
+            ao.put("lfoSync", s.lfoSync)
+            ao.put("lfoPitch", s.lfoPitch.toDouble())
+            ao.put("lfoCutoff", s.lfoCutoff.toDouble())
+            ao.put("delayTime", s.delayTime.toDouble())
+            ao.put("delayFb", s.delayFb.toDouble())
             val fo = JSONArray()
             val fa = JSONArray()
             val fb = JSONArray()
@@ -410,6 +570,7 @@ object SynthSave {
                 b.drive = bo.optDouble("drive", 0.2).toFloat()
                 b.volume = bo.optDouble("volume", 0.7).toFloat()
                 b.mute = bo.optBoolean("mute", false)
+                b.boostDb = bo.optDouble("boostDb", 0.0).toFloat().coerceIn(0f, 12f)
                 b.key = bo.optInt("key", 0).coerceIn(0, 11)
                 b.octave = bo.optInt("octave", 1).coerceIn(1, 3)
             }
@@ -426,6 +587,18 @@ object SynthSave {
                 s.filtEnv = ao.optDouble("filtEnv", 0.3).toFloat()
                 s.volume = ao.optDouble("volume", 0.6).toFloat()
                 s.mute = ao.optBoolean("mute", false)
+                s.voicing = ao.optInt("voicing", 0).coerceIn(0, AnalogSynth.VOICINGS.size - 1)
+                s.boostDb = ao.optDouble("boostDb", 0.0).toFloat().coerceIn(0f, 12f)
+                s.octave = ao.optInt("octave", 0).coerceIn(-2, 2)
+                s.portamento = ao.optDouble("portamento", 0.0).toFloat().coerceIn(0f, 1f)
+                s.drive = ao.optDouble("drive", 0.2).toFloat().coerceIn(0f, 1f)
+                s.lfoWave = ao.optInt("lfoWave", 1).coerceIn(0, 2)
+                s.lfoRate = ao.optDouble("lfoRate", 0.3).toFloat().coerceIn(0f, 1f)
+                s.lfoSync = ao.optBoolean("lfoSync", false)
+                s.lfoPitch = ao.optDouble("lfoPitch", 0.0).toFloat().coerceIn(0f, 1f)
+                s.lfoCutoff = ao.optDouble("lfoCutoff", 0.0).toFloat().coerceIn(0f, 1f)
+                s.delayTime = ao.optDouble("delayTime", 0.4).toFloat().coerceIn(0f, 1f)
+                s.delayFb = ao.optDouble("delayFb", 0.0).toFloat().coerceIn(0f, 1f)
                 val fo = ao.optJSONArray("fxOn")
                 val fa = ao.optJSONArray("fxA")
                 val fb = ao.optJSONArray("fxB")

@@ -117,7 +117,7 @@ class StepsScreen(private val a: MainActivity) : Screen {
         grid.track = t
         for (i in 0 until Cfg.TRACKS) ui.styleButton(trackBtns[i], i == a.sel, Theme.TRACK_COLORS[i])
         info.text = if (t.loop) {
-            "Track ${a.sel + 1} is in LOOP mode, so its steps are ignored. Switch it to STEP on the Tracks tab."
+            "Track ${a.sel + 1} is in LOOP mode, so its steps are ignored. Switch it to STEP on the Sampler tab."
         } else {
             "Editing track ${a.sel + 1}" + (if (t.sampleName.isEmpty()) " (no sample loaded yet)" else ": ${t.sampleName}")
         }

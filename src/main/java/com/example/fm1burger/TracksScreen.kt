@@ -28,6 +28,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
     private lateinit var lpS: SliderRow
     private lateinit var hpS: SliderRow
     private lateinit var intensityS: SliderRow
+    private lateinit var boostS: SliderRow
     private lateinit var startS: SliderRow
     private lateinit var endS: SliderRow
     private lateinit var stepBtn: Button
@@ -176,6 +177,10 @@ class TracksScreen(private val a: MainActivity) : Screen {
         }
         p.addView(startS.view)
         p.addView(endS.view)
+        boostS = ui.slider("Gain boost (before the effects)", 12, 0, { if (it == 0) "0 dB" else "+$it dB" }) { v ->
+            sel().boostDb = v.toFloat()
+        }
+        p.addView(boostS.view)
         content.addView(p, ui.fullWidth(10))
     }
 
@@ -222,6 +227,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
         intensityS.set(((t.fx.intensity - 1f) * 100).toInt().coerceIn(0, 100))
         startS.set((t.start * 100).toInt())
         endS.set((t.end * 100).toInt())
+        boostS.set(t.boostDb.toInt())
         ui.styleButton(stepBtn, !t.loop)
         ui.styleButton(loopBtn, t.loop)
         ui.styleButton(revBtn, t.reverse)

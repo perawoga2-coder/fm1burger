@@ -103,6 +103,7 @@ class Engine {
 
     /** The final mix of the last block as floats (before 16 bit), for the 24 bit / float recorder. */
     private val fout = FloatArray(BLOCK * 2)
+    private val tb = FloatArray(Cfg.TRACKS)
 
     @Volatile private var outDevice: AudioDeviceInfo? = null
     @Volatile private var restartOut = false
@@ -356,6 +357,10 @@ class Engine {
             val pv = padVol
             var mpk = 0f
 
+            analog.bpm = bpmNow
+            for (i in 0 until Cfg.TRACKS) tb[i] = 10f.pow(tracks[i].boostDb / 20f)
+            val bassBoost = 10f.pow(bass.boostDb / 20f)
+            val synthBoost = 10f.pow(analog.boostDb / 20f)
             val pr = prepare
             val gPads = if (pr < 0 || pr == PREP_PADS) 1f else 0f
             val gBass = if (pr < 0 || pr == PREP_BASS) 1f else 0f
@@ -384,7 +389,7 @@ class Engine {
                 var r = 0f
                 for (i in 0 until Cfg.TRACKS) {
                     val t = tracks[i]
-                    var s = renderTrack(t)
+                    var s = renderTrack(t) * tb[i]
                     s = t.fx.process(s, bpmNow, beatPos)
                     if (!t.mute && (pr < 0 || pr == i)) {
                         l += s * tl[i]
@@ -400,8 +405,8 @@ class Engine {
                 pm = drumFx.process(drumHeavy.process(pm * pv), bpmNow, beatPos) * gPads
                 l += pm
                 r += pm
-                val bz = bass.render() * gBass
-                val sy = analog.fx.process(analog.render(), bpmNow, beatPos) * gSynth
+                val bz = bass.render() * gBass * bassBoost
+                val sy = analog.fx.process(analog.render() * synthBoost, bpmNow, beatPos) * gSynth
                 l += bz + sy
                 r += bz + sy
                 vocal.render()

@@ -32,7 +32,7 @@ object Inst {
     const val RIFF = 9
     const val COUNT = 10
 
-    val NAMES = arrayOf("Empty", "Sample", "Drum", "Bass", "Synth", "Voice", "Song rec", "New Ambient", "Rhythm gtr", "Riff gtr")
+    val NAMES = arrayOf("Empty", "Sampler", "Drum", "Bassline", "Analog synth", "Voice", "Song rec", "New Ambient", "Rhythm gtr", "Riff gtr")
 
     fun color(t: Int): Int = when (t) {
         SAMPLE -> Theme.ACCENT

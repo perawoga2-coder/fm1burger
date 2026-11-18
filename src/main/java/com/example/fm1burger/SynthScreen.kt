@@ -14,7 +14,10 @@ import android.widget.TextView
  *  - Bassline: classic one-note-at-a-time bass with a 16 step pattern (note, accent, slide).
  *  - Analog synth: 6-voice keyboard synth with sine / saw / square / triangle waves, filter and ADSR.
  */
-class SynthScreen(private val a: MainActivity) : Screen {
+/**
+ * [fixed] = 0: the Bassline page, 1: the Analog synth page (each on its own, with its own transport, P and mute).
+ */
+class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Screen {
 
     private val ui = a.ui
     private val e = a.engine
@@ -30,6 +33,10 @@ class SynthScreen(private val a: MainActivity) : Screen {
     private val cells = ArrayList<Button>()
     private val refreshers = ArrayList<() -> Unit>()
     private var mode = 0
+    private val voiceBtns = ArrayList<Button>()
+    private val lfoBtns = ArrayList<Button>()
+    private lateinit var lfoSyncBtn: Button
+    private lateinit var vcoOctText: TextView
     private val prep = PrepareBar(a, false) { if (mode == 0) Engine.PREP_BASS else Engine.PREP_SYNTH }
     private var selStep = 0
     private var playStep = -1
@@ -54,13 +61,14 @@ class SynthScreen(private val a: MainActivity) : Screen {
     init {
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
         root.addView(content)
-        content.addView(ui.title("Synth"))
+        content.addView(ui.title(when (fixed) { 0 -> "Bassline"; 1 -> "Analog synth"; else -> "Synth" }))
         val tabs = ui.row()
         bassTab = ui.button("Bassline") { showMode(0) }
         anaTab = ui.button("Analog synth") { showMode(1) }
         tabs.addView(bassTab, ui.w(1f, 3))
         tabs.addView(anaTab, ui.w(1f, 3))
         content.addView(tabs, ui.fullWidth(6))
+        if (fixed >= 0) tabs.visibility = View.GONE
         val tr = ui.row()
         playBtn = ui.button("▶ Play") { doPlay() }
         pauseBtn = ui.button("|| Pause") { doPause() }
@@ -77,13 +85,14 @@ class SynthScreen(private val a: MainActivity) : Screen {
         buildAnalog()
         content.addView(bassBox)
         content.addView(anaBox)
-        showMode(0)
+        showMode(if (fixed >= 0) fixed else 0)
     }
 
     /** 0 = Bassline, 1 = Analog synth (the tab bar shows which one is open). */
     val currentMode: Int get() = mode
 
-    fun showMode(m: Int) {
+    fun showMode(m0: Int) {
+        val m = if (fixed >= 0) fixed else m0
         mode = m
         a.onSynthModeChanged()
         bassBox.visibility = if (m == 0) View.VISIBLE else View.GONE
@@ -127,6 +136,12 @@ class SynthScreen(private val a: MainActivity) : Screen {
     private fun slider(name: String, get: () -> Float, set: (Float) -> Unit): SliderRow {
         val row = ui.slider(name, 100, (get() * 100f).toInt(), { "$it%" }) { v -> set(v / 100f) }
         refreshers.add { row.set((get() * 100f).toInt()) }
+        return row
+    }
+
+    private fun boostSlider(get: () -> Float, set: (Float) -> Unit): SliderRow {
+        val row = ui.slider("Boost", 12, get().toInt(), { if (it == 0) "0 dB" else "+$it dB" }) { v -> set(v.toFloat()) }
+        refreshers.add { row.set(get().toInt()) }
         return row
     }
 
@@ -261,7 +276,8 @@ class SynthScreen(private val a: MainActivity) : Screen {
                 slider("Decay", { bs.decay }, { bs.decay = it }),
                 slider("Accent", { bs.accentAmt }, { bs.accentAmt = it }),
                 slider("Drive", { bs.drive }, { bs.drive = it }),
-                slider("Volume", { bs.volume }, { bs.volume = it })
+                slider("Volume", { bs.volume }, { bs.volume = it }),
+                boostSlider({ bs.boostDb }, { bs.boostDb = it })
             )
         )
         bassBox.addView(panel, ui.fullWidth(8))
@@ -474,11 +490,88 @@ class SynthScreen(private val a: MainActivity) : Screen {
         refreshers.add { rev.set(if (fx.on[2]) (fx.a[2] * 100).toInt() else 0) }
         refreshers.add { dly.set(if (fx.on[3]) (fx.a[3] * 100).toInt() else 0) }
         panel.addView(sliderLine(rev, dly))
+        panel.addView(sliderLine(boostSlider({ an.boostDb }, { an.boostDb = it })))
         anaBox.addView(panel, ui.fullWidth(8))
+
+        // ---- the analog keyboard synth section: VCO, voicing, VCF, LFO, delay ----
+        val vp = ui.panel()
+        vp.addView(ui.text("VCO · voicing", 14f, Theme.ACCENT, true))
+        val vr = ui.row()
+        for (i in AnalogSynth.VOICINGS.indices) {
+            val b = ui.button(AnalogSynth.VOICINGS[i]) {
+                an.allOff()
+                an.voicing = i
+                refreshAnalog()
+            }
+            b.textSize = 11f
+            voiceBtns.add(b)
+            vr.addView(b, ui.w(1f, 2))
+        }
+        vp.addView(vr)
+        val orow = ui.row()
+        orow.addView(ui.button("VCO octave −") {
+            an.octave = (an.octave - 1).coerceAtLeast(-2)
+            refreshAnalog()
+        }, ui.w(1f, 3))
+        vcoOctText = ui.text("", 14f, Theme.TEXT, true)
+        vcoOctText.gravity = Gravity.CENTER
+        orow.addView(vcoOctText, LinearLayout.LayoutParams(ui.dp(70), LinearLayout.LayoutParams.WRAP_CONTENT))
+        orow.addView(ui.button("VCO octave +") {
+            an.octave = (an.octave + 1).coerceAtMost(2)
+            refreshAnalog()
+        }, ui.w(1f, 3))
+        vp.addView(orow, ui.fullWidth(4))
+        vp.addView(
+            sliderLine(
+                slider("Portamento", { an.portamento }, { an.portamento = it }),
+                slider("VCF drive", { an.drive }, { an.drive = it })
+            )
+        )
+        anaBox.addView(vp, ui.fullWidth(8))
+
+        val lp = ui.panel()
+        lp.addView(ui.text("LFO", 14f, Theme.ACCENT, true))
+        val lr = ui.row()
+        for (i in AnalogSynth.LFO_WAVES.indices) {
+            val b = ui.button(AnalogSynth.LFO_WAVES[i]) {
+                an.lfoWave = i
+                refreshAnalog()
+            }
+            lfoBtns.add(b)
+            lr.addView(b, ui.w(1f, 3))
+        }
+        lfoSyncBtn = ui.button("Tempo sync") {
+            an.lfoSync = !an.lfoSync
+            refreshAnalog()
+        }
+        lr.addView(lfoSyncBtn, ui.w(1.3f, 3))
+        lp.addView(lr)
+        lp.addView(
+            sliderLine(
+                slider("Rate", { an.lfoRate }, { an.lfoRate = it }),
+                slider("Pitch int", { an.lfoPitch }, { an.lfoPitch = it }),
+                slider("Cutoff int", { an.lfoCutoff }, { an.lfoCutoff = it })
+            )
+        )
+        anaBox.addView(lp, ui.fullWidth(8))
+
+        val dp = ui.panel()
+        dp.addView(ui.text("Delay (its own)", 14f, Theme.ACCENT, true))
+        dp.addView(
+            sliderLine(
+                slider("Time", { an.delayTime }, { an.delayTime = it }),
+                slider("Feedback", { an.delayFb }, { an.delayFb = it })
+            )
+        )
+        anaBox.addView(dp, ui.fullWidth(8))
     }
 
     private fun refreshAnalog() {
         octText.text = "Octave $kbOct"
+        for (i in voiceBtns.indices) ui.styleButton(voiceBtns[i], an.voicing == i)
+        for (i in lfoBtns.indices) ui.styleButton(lfoBtns[i], an.lfoWave == i)
+        ui.styleButton(lfoSyncBtn, an.lfoSync, Theme.GREEN)
+        vcoOctText.text = if (an.octave > 0) "+${an.octave}" else "${an.octave}"
         for (i in waveBtns.indices) ui.styleButton(waveBtns[i], an.wave == i)
         ui.styleButton(aMuteBtn, an.mute, Theme.RED)
         refreshMute()
