@@ -41,6 +41,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
     // 0 = off, then full / medium / soft
     private val levels = floatArrayOf(1f, 0.65f, 0.35f)
+    private val prep = PrepareBar(a, false) { Engine.PREP_PADS }
 
     init {
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
@@ -86,7 +87,9 @@ class PadsScreen(private val a: MainActivity) : Screen {
         tr.addView(pauseBtn, ui.w(1f, 3))
         tr.addView(stopBtn, ui.w(1f, 3))
         tr.addView(muteAllBtn, ui.w(1.3f, 3))
+        tr.addView(prep.pButton, 0, ui.w(0f, 3))
         content.addView(tr, ui.fullWidth(6))
+        content.addView(prep.view, ui.fullWidth(0))
 
         content.addView(
             ui.text(
@@ -175,7 +178,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     // ---------------- transport ----------------
 
     private fun doPlay() {
-        if (e.playing && e.paused) e.pause() else if (!e.playing) e.play()
+        prep.play()
     }
 
     private fun doPause() {
@@ -458,6 +461,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     override fun onTick() {
+        prep.refresh()
         refreshTransport()
         val s = if (e.playing) e.curStep else -1
         if (s != playStep) {

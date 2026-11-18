@@ -30,6 +30,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
     private lateinit var wave: AmbientWaveView
     private val sliders = ArrayList<Pair<SliderRow, () -> Int>>()
     private var playStep = -2
+    private val prep = PrepareBar(a, true) { Engine.PREP_AMBIENT }
     private val noteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
     init {
@@ -89,6 +90,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
         }
         tr.addView(muteBtn, ui.w(0.8f, 3))
         content.addView(tr, ui.fullWidth(10))
+        content.addView(prep.view, ui.fullWidth(6))
 
         // how it lives
         val p = ui.panel()
@@ -207,6 +209,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
     }
 
     override fun onTick() {
+        prep.refresh()
         wave.invalidate()
         paintSteps(false)
     }

@@ -15,6 +15,7 @@ class StepsScreen(private val a: MainActivity) : Screen {
     private val trackBtns = ArrayList<Button>()
     private lateinit var grid: StepGridView
     private lateinit var info: TextView
+    private val prep = PrepareBar(a, true) { a.sel }
 
     init {
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
@@ -27,6 +28,7 @@ class StepsScreen(private val a: MainActivity) : Screen {
             selRow.addView(b, ui.w(1f, 3))
         }
         content.addView(selRow)
+        content.addView(prep.view, ui.fullWidth(6))
 
         info = ui.text("", 12f, Theme.DIM)
         content.addView(info, ui.fullWidth(6))
@@ -123,6 +125,7 @@ class StepsScreen(private val a: MainActivity) : Screen {
     }
 
     override fun onTick() {
+        prep.refresh()
         val s = if (e.playing) e.curStep else -1
         if (grid.playStep != s) {
             grid.playStep = s

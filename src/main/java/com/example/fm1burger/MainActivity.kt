@@ -468,7 +468,12 @@ class MainActivity : Activity() {
     // ---------------- header actions ----------------
 
     private fun togglePlay() {
-        if (engine.playing) engine.stop() else engine.play()
+        when {
+            // a part plays alone (PREPARE): the big play button switches to the full mix
+            engine.playing && engine.prepare >= 0 -> engine.play()
+            engine.playing -> engine.stop()
+            else -> engine.play()
+        }
     }
 
     /** A cue button: jump to that part (at the next bar while playing). */
@@ -764,7 +769,8 @@ class MainActivity : Activity() {
         }
         val pt = if (engine.playing) "■" else "▶"
         if (playBtn.text.toString() != pt) playBtn.text = pt
-        ui.styleButton(playBtn, engine.playing, Theme.GREEN, 26)
+        val preparing = engine.playing && engine.prepare >= 0
+        ui.styleButton(playBtn, engine.playing, if (preparing) Theme.YELLOW else Theme.GREEN, 26)
         val sb = when (syncState) {
             1 -> "SYNC: LEAD"
             2 -> "SYNC: FOLLOW"
@@ -840,9 +846,15 @@ class MainActivity : Activity() {
             // the patterns changed to another part: redraw the pages that show patterns
             if (cur in intArrayOf(0, 1, 2, 6, 7, 9, TAB_HOME)) screens[cur].onShow()
         }
-        // the dot in front of the status line: red = recording, green = playing, grey = stopped
+        if (preparing && statusText.currentTextColor != Theme.RED) {
+            statusText.setTextColor(Theme.YELLOW)
+            statusText.text = "PREPARE · only ${Engine.prepName(engine.prepare)} plays · step ${engine.curStep + 1} / ${Cfg.STEPS}" +
+                " · not in the master, not recorded. Press ▶ at the top to play everything."
+        }
+        // the dot in front of the status line: red = recording, yellow = preparing, green = playing, grey = stopped
         val dc = when {
             statusText.currentTextColor == Theme.RED -> Theme.RED
+            preparing -> Theme.YELLOW
             engine.playing -> Theme.GREEN
             else -> Theme.FAINT
         }

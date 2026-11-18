@@ -18,6 +18,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
     override val root = ScrollView(a)
     private val content = ui.col()
     private var mode = 0           // 0 rhythm, 1 riff
+    private val prep = PrepareBar(a, true) { if (mode == 0) Engine.PREP_RHYTHM else Engine.PREP_RIFF }
     private var selStep = 0
     private var playStep = -2
     private lateinit var rhythmTab: Button
@@ -52,6 +53,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
         tabs.addView(rhythmTab, ui.w(1f, 3))
         tabs.addView(riffTab, ui.w(1f, 3))
         content.addView(tabs, ui.fullWidth(8))
+        content.addView(prep.view, ui.fullWidth(6))
 
         // presets (filled in by showMode)
         content.addView(ui.text("Ready-made patterns", 13f, Theme.DIM), ui.fullWidth(10))
@@ -267,6 +269,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
     }
 
     override fun onTick() {
+        prep.refresh()
         paintCells(false)
     }
 }

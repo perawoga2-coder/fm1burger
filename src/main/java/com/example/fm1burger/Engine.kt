@@ -22,7 +22,34 @@ class Engine {
 
     companion object {
         const val BLOCK = 256
+
+        // PREPARE mode: what plays alone (0-3 = sample track 1-4)
+        const val PREP_NONE = -1
+        const val PREP_PADS = 10
+        const val PREP_BASS = 11
+        const val PREP_SYNTH = 12
+        const val PREP_RHYTHM = 13
+        const val PREP_RIFF = 14
+        const val PREP_AMBIENT = 15
+
+        fun prepName(p: Int): String = when (p) {
+            in 0 until Cfg.TRACKS -> "Track ${p + 1}"
+            PREP_PADS -> "Drums"
+            PREP_BASS -> "Bassline"
+            PREP_SYNTH -> "Analog synth"
+            PREP_RHYTHM -> "Rhythm guitar"
+            PREP_RIFF -> "Riff guitar"
+            PREP_AMBIENT -> "New Ambient"
+            else -> ""
+        }
     }
+
+    /**
+     * PREPARE: while >= 0 only that part sounds and is stepped. Nothing else is triggered,
+     * no MIDI Start / clock goes out, song parts do not change and nothing is recorded,
+     * so a part can be prepared before it goes into the master. -1 = normal.
+     */
+    @Volatile var prepare = PREP_NONE
 
     val tracks = Array(Cfg.TRACKS) { Track(it) }
     val pads = Array(Cfg.PADS) { PadVoice() }
@@ -108,6 +135,13 @@ class Engine {
     // ---------------- control (called from the UI / MIDI threads) ----------------
 
     fun play() {
+        prepare = PREP_NONE
+        startReq = true
+    }
+
+    /** Plays only this part (PREPARE mode), from the start of the bar. */
+    fun playPrepare(part: Int) {
+        prepare = part
         startReq = true
     }
 
@@ -287,7 +321,7 @@ class Engine {
 
             // FOLLOW: place every clock tick at its own sample, one block late, so the spacing stays exact
             var nTicks = 0
-            if (follow && playing && !paused) {
+            if (follow && playing && !paused && prepare < 0) {
                 val blockNs = BLOCK * 1_000_000_000L / Cfg.SR
                 val base = t0 - blockNs
                 while (tickTail != tickHead) {
@@ -307,7 +341,7 @@ class Engine {
             val spt = Cfg.SR * 60.0 / (bpmNow * 24.0)
 
             // LEAD while stopped or paused: the clock keeps running (no Start), at the current tempo
-            if (!follow && sendClock && clockIdle && (!playing || paused)) {
+            if (!follow && sendClock && clockIdle && (!playing || paused || prepare >= 0)) {
                 idleAcc += BLOCK.toDouble()
                 while (idleAcc >= spt) {
                     idleAcc -= spt
@@ -322,13 +356,22 @@ class Engine {
             val pv = padVol
             var mpk = 0f
 
+            val pr = prepare
+            val gPads = if (pr < 0 || pr == PREP_PADS) 1f else 0f
+            val gBass = if (pr < 0 || pr == PREP_BASS) 1f else 0f
+            val gSynth = if (pr < 0 || pr == PREP_SYNTH) 1f else 0f
+            val gRhythm = if (pr < 0 || pr == PREP_RHYTHM) 1f else 0f
+            val gRiff = if (pr < 0 || pr == PREP_RIFF) 1f else 0f
+            val gAmb = if (pr < 0 || pr == PREP_AMBIENT) 1f else 0f
+            val gRest = if (pr < 0) 1f else 0f          // voice and song recordings: only in the full mix
+
             for (f in 0 until BLOCK) {
                 while (nextTick < nTicks && tickFrames[nextTick] <= f) {
                     onTick(f, t0)
                     nextTick++
                 }
                 if (playing && !paused) {
-                    if (!follow) {
+                    if (!follow || prepare >= 0) {
                         tickAcc += 1.0
                         if (tickAcc >= spt) {
                             tickAcc -= spt
@@ -343,7 +386,7 @@ class Engine {
                     val t = tracks[i]
                     var s = renderTrack(t)
                     s = t.fx.process(s, bpmNow, beatPos)
-                    if (!t.mute) {
+                    if (!t.mute && (pr < 0 || pr == i)) {
                         l += s * tl[i]
                         r += s * tr[i]
                         val ab = abs(s * t.volume)
@@ -354,27 +397,27 @@ class Engine {
                 for (p in pads) {
                     pm += renderPad(p) * (if (p.mute) 0f else p.volume)
                 }
-                pm = drumFx.process(drumHeavy.process(pm * pv), bpmNow, beatPos)
+                pm = drumFx.process(drumHeavy.process(pm * pv), bpmNow, beatPos) * gPads
                 l += pm
                 r += pm
-                val bz = bass.render()
-                val sy = analog.fx.process(analog.render(), bpmNow, beatPos)
+                val bz = bass.render() * gBass
+                val sy = analog.fx.process(analog.render(), bpmNow, beatPos) * gSynth
                 l += bz + sy
                 r += bz + sy
                 vocal.render()
-                l += vocal.outL
+                l += vocal.outL * gRest
                 ambient.render()
-                l += ambient.outL
-                r += ambient.outR
+                l += ambient.outL * gAmb
+                r += ambient.outR * gAmb
                 // the two guitars, a little apart: rhythm left of centre, riff right
-                val gR = rhythmGtr.render()
-                val gF = riffGtr.render()
+                val gR = rhythmGtr.render() * gRhythm
+                val gF = riffGtr.render() * gRiff
                 l += gR * 0.9f + gF * 0.55f
                 r += gR * 0.55f + gF * 0.9f
-                r += vocal.outR
+                r += vocal.outR * gRest
                 bank.renderClip()
-                l += bank.outL
-                r += bank.outR
+                l += bank.outL * gRest
+                r += bank.outR * gRest
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
@@ -390,8 +433,11 @@ class Engine {
                 out[f * 2 + 1] = (r * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             }
 
-            bank.feedRec(out)
-            mixRec.feed(fout)
+            // PREPARE playback stays out of the recordings
+            if (prepare < 0 || !playing) {
+                bank.feedRec(out)
+                mixRec.feed(fout)
+            }
             for (i in 0 until Cfg.TRACKS) tracks[i].peak = tpk[i]
             masterPeak = mpk
     }
@@ -413,8 +459,9 @@ class Engine {
         val off = offsetMs * 1_000_000L
         if (stopReq) {
             stopReq = false
-            if (playing && !follow && sendClock) send(0xFC, t0 + latencyNs + off)
+            if (playing && !follow && sendClock && prepare < 0) send(0xFC, t0 + latencyNs + off)
             playing = false
+            prepare = PREP_NONE
             paused = false
             curStep = -1
             for (t in tracks) t.playing = false
@@ -431,8 +478,11 @@ class Engine {
             beatPos = 0.0
             curStep = -1
             for (t in tracks) t.playing = false
-            if (bank.songOn) bank.songStart() else bank.whileStopped()
-            if (!follow && sendClock) sendPositionThen(0L, 0xFA, t0 + latencyNs + off)
+            if (prepare >= 0) {
+                rhythmGtr.hit(MetalGuitar.OFF, 0)
+                riffGtr.hit(MetalGuitar.OFF, 0)
+            } else if (bank.songOn) bank.songStart() else bank.whileStopped()
+            if (!follow && sendClock && prepare < 0) sendPositionThen(0L, 0xFA, t0 + latencyNs + off)
         }
         if (continueReq) {
             // FOLLOW: Continue, from the Song Position Pointer if one came (16th notes = 6 clocks)
@@ -452,7 +502,7 @@ class Engine {
             pauseReq = false
             if (playing) {
                 paused = !paused
-                if (!follow && sendClock) {
+                if (!follow && sendClock && prepare < 0) {
                     if (paused) send(0xFC, t0 + latencyNs + off)
                     else sendPositionThen(tickCount / 6L, 0xFB, t0 + latencyNs + off)
                 }
@@ -495,7 +545,8 @@ class Engine {
     private fun onTick(frame: Int, t0: Long) {
         if (!playing) return
         beatPos = tickCount / 24.0
-        if (!follow && sendClock) {
+        val prep = prepare >= 0
+        if (!follow && sendClock && !prep) {
             send(
                 0xF8,
                 t0 + frame * 1_000_000_000L / Cfg.SR + latencyNs + offsetMs * 1_000_000L
@@ -503,7 +554,9 @@ class Engine {
         }
         if (tickCount % 6L == 0L) {
             val s = ((tickCount / 6L) % Cfg.STEPS).toInt()
-            if (s == 0) {
+            if (prep) {
+                // PREPARE: the pattern just loops, song parts and cues wait
+            } else if (s == 0) {
                 val first = tickCount == 0L
                 if (!first && !bank.onBar()) {
                     stopHere(t0)
@@ -520,6 +573,11 @@ class Engine {
     }
 
     private fun stepTrigger(s: Int) {
+        val pr = prepare
+        if (pr >= 0) {
+            prepareStep(pr, s)
+            return
+        }
         if (bank.silentNow()) {
             // this part plays its recording only: no new notes, but let held synth notes end
             val en = analogSeq.enabled
@@ -548,6 +606,35 @@ class Engine {
                 val st = t.steps[s]
                 if (st.on) trigger(t, st.pitch, st.level)
             }
+        }
+    }
+
+    /** PREPARE: step only the part being prepared. */
+    private fun prepareStep(pr: Int, s: Int) {
+        when (pr) {
+            in 0 until Cfg.TRACKS -> {
+                val t = tracks[pr]
+                if (t.data != null) {
+                    if (t.loop) {
+                        if (s == 0) trigger(t, 0, 1f)
+                    } else {
+                        val st = t.steps[s]
+                        if (st.on) trigger(t, st.pitch, st.level)
+                    }
+                }
+            }
+            PREP_PADS -> for (p in pads) {
+                if (p.on[s] && p.data != null) {
+                    p.gain = p.lvl[s]
+                    p.pos = 0
+                    p.playing = true
+                }
+            }
+            PREP_BASS -> bass.step(s, bpmF)
+            PREP_SYNTH -> analogSeq.step(s)
+            PREP_RHYTHM -> rhythmGtr.step(s)
+            PREP_RIFF -> riffGtr.step(s)
+            PREP_AMBIENT -> ambient.step(s)
         }
     }
 

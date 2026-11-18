@@ -30,6 +30,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
     private val cells = ArrayList<Button>()
     private val refreshers = ArrayList<() -> Unit>()
     private var mode = 0
+    private val prep = PrepareBar(a, false) { if (mode == 0) Engine.PREP_BASS else Engine.PREP_SYNTH }
     private var selStep = 0
     private var playStep = -1
     private lateinit var editInfo: TextView
@@ -69,7 +70,9 @@ class SynthScreen(private val a: MainActivity) : Screen {
         tr.addView(pauseBtn, ui.w(1f, 3))
         tr.addView(stopBtn, ui.w(1f, 3))
         tr.addView(tMuteBtn, ui.w(1.3f, 3))
+        tr.addView(prep.pButton, 0, ui.w(0f, 3))
         content.addView(tr, ui.fullWidth(4))
+        content.addView(prep.view, ui.fullWidth(0))
         buildBass()
         buildAnalog()
         content.addView(bassBox)
@@ -89,7 +92,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
     // ---------------- transport (Play / Pause / Stop / Mute) ----------------
 
     private fun doPlay() {
-        if (e.playing && e.paused) e.pause() else if (!e.playing) e.play()
+        prep.play()
     }
 
     private fun doPause() {
@@ -490,6 +493,7 @@ class SynthScreen(private val a: MainActivity) : Screen {
     }
 
     override fun onTick() {
+        prep.refresh()
         refreshTransport()
         seqPanel.tick()
         val s = if (e.playing) e.curStep else -1
