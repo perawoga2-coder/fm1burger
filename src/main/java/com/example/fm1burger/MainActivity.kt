@@ -79,6 +79,7 @@ class MainActivity : Activity() {
     private lateinit var statusDot: View
     private lateinit var tabScroll: HorizontalScrollView
     private lateinit var homeFab: Button
+    private var bassTabBtn: Button? = null
     private var dotColor = 0
     private val cueBtns = ArrayList<Button>()
     private var cueKey = ""
@@ -331,6 +332,14 @@ class MainActivity : Activity() {
             if (i == TAB_HOME) tabRow.addView(b, 0, ui.w(0f, 3)) else tabRow.addView(b, ui.w(0f, 3))
         }
         tabBtns = btns
+        // "Bassline" has its own tab: the Synth page opened on the bassline ("Synth" opens the analog synth)
+        val bb = ui.button("Bassline") { openSynth(0) }
+        bb.minHeight = ui.dp(36)
+        bb.minimumHeight = ui.dp(36)
+        bb.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6))
+        bassTabBtn = bb
+        tabRow.addView(bb, tabRow.indexOfChild(btns[TAB_SYNTH]), ui.w(0f, 3))
+        btns[TAB_SYNTH].setOnClickListener { openSynth(1) }
         tabScroll = HorizontalScrollView(this)
         tabScroll.isHorizontalScrollBarEnabled = false
         tabScroll.setBackgroundColor(Theme.BG)
@@ -370,7 +379,7 @@ class MainActivity : Activity() {
         cur = i
         homeFab.visibility = if (i == TAB_HOME) View.GONE else View.VISIBLE
         screens.forEachIndexed { idx, s -> s.root.visibility = if (idx == i) View.VISIBLE else View.GONE }
-        tabBtns.forEachIndexed { idx, b -> styleTab(b, idx == i) }
+        paintTabs()
         // keep the open tab visible in the scrolling tab bar
         val b = tabBtns[i]
         tabScroll.post {
@@ -382,6 +391,19 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             ui.toast("This page had a problem: ${e.message}")
         }
+    }
+
+    /** The Synth page tells us when it switches between bassline and analog synth. */
+    fun onSynthModeChanged() {
+        if (::tabBtns.isInitialized) paintTabs()
+    }
+
+    private fun paintTabs() {
+        val synthMode = if (::synthScreen.isInitialized) synthScreen.currentMode else 1
+        tabBtns.forEachIndexed { idx, b ->
+            styleTab(b, idx == cur && !(idx == TAB_SYNTH && synthMode == 0))
+        }
+        bassTabBtn?.let { styleTab(it, cur == TAB_SYNTH && synthMode == 0) }
     }
 
     private fun styleTab(b: Button, active: Boolean) {
@@ -487,9 +509,20 @@ class MainActivity : Activity() {
         b.cue(i)
     }
 
-    /** Cue slot k (1-6 at the top): plays the part that is placed in that slot. */
+    /**
+     * Cue slot k (1-6 at the top): an on / off switch of its own for the recording of the part in that slot.
+     * Lit = on. Several can be on together; each one starts and stops at the next bar.
+     * (Switching the patterns to another part is on the Song page.)
+     */
     fun cueSlot(k: Int) {
-        cuePart(engine.bank.slot[k].coerceIn(0, PartBank.N - 1))
+        val b = engine.bank
+        val i = b.slot[k].coerceIn(0, PartBank.N - 1)
+        if (!b.toggleLayer(i)) {
+            ui.toast("${PartNames.NAMES[i]} has no recording yet. Record one with ● REC PART and send it to ${PartNames.NAMES[i]}.")
+            return
+        }
+        cueKey = ""
+        if (b.layerOn[i] && !engine.playing) ui.toast("Cue ${k + 1} on: ${PartNames.NAMES[i]} plays when you press ▶")
     }
 
     /** Long press on a cue slot: choose which part goes into it. */
@@ -590,27 +623,25 @@ class MainActivity : Activity() {
     private fun paintCues() {
         val b = engine.bank
         val blink = (System.currentTimeMillis() / 250L) % 2L == 0L
-        val key = "${b.cur}|${b.cueReq}|$blink|${b.songOn}|${b.slot.joinToString()}|${b.version}"
+        val key = "${b.layerOn.joinToString()}|${b.layerVersion}|$blink|${(0 until PartBank.N).map { b.layerPending(it) }}|" +
+            "${b.slot.joinToString()}|${b.version}|${b.parts.map { it.hasClip() }}"
         if (key == cueKey) return
         cueKey = key
         for (k in cueBtns.indices) {
             val btn = cueBtns[k]
             val i = b.slot[k].coerceIn(0, PartBank.N - 1)
             val col = SongScreen.PARTCOL[i]
-            btn.text = "${k + 1} " + PartNames.SHORT[i] + (if (b.parts[i].hasClip()) " ●" else "")
-            when {
-                i == b.cur -> {
-                    btn.background = ui.touchBg(ui.bg(col, 12), 12)
-                    btn.setTextColor(Theme.onColor(col))
-                }
-                i == b.cueReq && blink -> {
-                    btn.background = ui.touchBg(ui.bg(Theme.TEXT, 12), 12)
-                    btn.setTextColor(Theme.onColor(Theme.TEXT))
-                }
-                else -> {
-                    btn.background = ui.touchBg(ui.bg(Theme.alpha(col, 28), 12, Theme.alpha(col, 150), 1), 12)
-                    btn.setTextColor(if (b.parts[i].used) Theme.TEXT else Theme.DIM)
-                }
+            val has = b.parts[i].hasClip()
+            btn.text = "${k + 1} " + PartNames.SHORT[i] + (if (has) " ●" else "")
+            val on = b.layerOn[i]
+            // waiting for the next bar: blink between on and off
+            val lit = if (b.layerPending(i) && engine.playing) blink else on
+            if (lit) {
+                btn.background = ui.touchBg(ui.bg(col, 12), 12)
+                btn.setTextColor(Theme.onColor(col))
+            } else {
+                btn.background = ui.touchBg(ui.bg(Theme.alpha(col, 28), 12, Theme.alpha(col, if (has) 150 else 60), 1), 12)
+                btn.setTextColor(if (has) Theme.TEXT else Theme.FAINT)
             }
         }
     }

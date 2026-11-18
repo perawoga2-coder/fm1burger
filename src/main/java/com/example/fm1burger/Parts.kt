@@ -352,6 +352,33 @@ class PartBank(private val e: Engine) {
     private var recTrim = -1L
     private val recChunks = ConcurrentLinkedQueue<ShortArray>()
 
+    // CUE LAYERS: each cue button switches the recording of its part on or off, on its own.
+    // Several can play together, each looping its own length, in time with the bars.
+    val layerOn = BooleanArray(N)
+    @Volatile var layerVersion = 0
+    private val layerWant = IntArray(N)        // 0 nothing, 1 start at the next bar, 2 stop at the next bar
+    private val layerData = arrayOfNulls<ShortArray>(N)
+    private val layerPos = IntArray(N)
+    private val layerBar = IntArray(N)
+
+    /** UI thread: switch the recording of part i on or off (it starts / stops at the next bar). */
+    fun toggleLayer(i: Int): Boolean {
+        if (i !in 0 until N) return false
+        if (layerOn[i]) {
+            layerOn[i] = false
+            layerWant[i] = 2
+        } else {
+            if (!parts[i].hasClip()) return false
+            layerOn[i] = true
+            layerWant[i] = 1
+        }
+        layerVersion++
+        return true
+    }
+
+    /** True while the cue of part i waits for the next bar to start or stop. */
+    fun layerPending(i: Int): Boolean = i in 0 until N && layerWant[i] != 0
+
     @Volatile var cur = 0
     @Volatile var cueReq = -1          // part waiting to start at the next bar
     @Volatile var jumpNow = false      // true = switch on the next step instead of the next bar
@@ -395,6 +422,35 @@ class PartBank(private val e: Engine) {
 
     /** Audio thread, at the first step of every bar (also the very first bar). [f] = frame in this block. */
     fun barStart(f: Int, first: Boolean) {
+        // the cue layers: start / stop on the bar, restart each loop when its length is over
+        for (i in 0 until N) {
+            when (layerWant[i]) {
+                1 -> {
+                    layerWant[i] = 0
+                    layerBar[i] = 0
+                    layerData[i] = parts[i].clip
+                    layerPos[i] = 0
+                }
+                2 -> {
+                    layerWant[i] = 0
+                    layerData[i] = null
+                }
+                else -> if (layerOn[i] && !first) {
+                    val bars = parts[i].clipBars
+                    layerBar[i]++
+                    if (bars > 0 && layerBar[i] % bars == 0) {
+                        layerData[i] = parts[i].clip
+                        layerPos[i] = 0
+                    }
+                }
+            }
+            if (first && layerOn[i]) {
+                layerData[i] = parts[i].clip
+                layerPos[i] = 0
+                layerBar[i] = 0
+                layerWant[i] = 0
+            }
+        }
         if (first || partChanged) barInPart = 0 else barInPart++
         partChanged = false
         val p = parts[cur]
@@ -454,6 +510,24 @@ class PartBank(private val e: Engine) {
         clipPos++
     }
 
+    /** Audio thread, every frame: all the cue layers that are on, added to outL / outR. */
+    fun renderLayers() {
+        val g = if (clipMute) 0f else clipVol / 32768f
+        for (k in 0 until N) {
+            val d = layerData[k] ?: continue
+            // the part already plays its own recording: do not play it twice
+            if (k == cur && clipData === d) continue
+            val i = layerPos[k] * 2
+            if (i + 1 >= d.size) {
+                layerData[k] = null
+                continue
+            }
+            outL += d[i] * g
+            outR += d[i + 1] * g
+            layerPos[k]++
+        }
+    }
+
     /** Audio thread, after every block: keeps the recorded part of the block. */
     fun feedRec(out: ShortArray) {
         if (recState != 2) return
@@ -475,6 +549,11 @@ class PartBank(private val e: Engine) {
     /** Audio thread: the transport stopped. */
     fun onTransportStop(bpm: Double) {
         clipData = null
+        for (i in 0 until N) {
+            layerData[i] = null
+            if (layerWant[i] == 2) layerWant[i] = 0
+            if (layerOn[i]) layerWant[i] = 1      // start again from the top at the next Play
+        }
         if (recState == 1) {
             recState = 0
         } else if (recState == 2) {

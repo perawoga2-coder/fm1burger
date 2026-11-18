@@ -327,7 +327,15 @@ class HomeScreen(private val a: MainActivity) : Screen {
         refresh()
     }
 
+    private var muteKey = ""
+
     override fun onTick() {
+        // a mute changed on another page (Mixer, Synth, Pads...): show it here too
+        val mk = (0 until LaneSetup.N).joinToString("") { if (isMuted(it)) "1" else "0" }
+        if (mk != muteKey) {
+            muteKey = mk
+            refresh()
+        }
         val step = if (e.playing) e.curStep else -1
         val stepChanged = step != lastStep
         lastStep = step

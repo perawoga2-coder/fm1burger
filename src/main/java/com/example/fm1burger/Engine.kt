@@ -416,6 +416,7 @@ class Engine {
                 r += gR * 0.55f + gF * 0.9f
                 r += vocal.outR * gRest
                 bank.renderClip()
+                bank.renderLayers()
                 l += bank.outL * gRest
                 r += bank.outR * gRest
                 val pr = renderPad(preview) * 0.8f

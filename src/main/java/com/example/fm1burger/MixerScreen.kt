@@ -36,6 +36,13 @@ class MixerScreen(private val a: MainActivity) : Screen {
     private lateinit var mixRecBtn: Button
     private lateinit var mixInfo: TextView
     private lateinit var masterFader: FaderView
+    private lateinit var rhythmFader: FaderView
+    private lateinit var riffFader: FaderView
+    private lateinit var ambFader: FaderView
+    private lateinit var rhythmMuteBtn: Button
+    private lateinit var riffMuteBtn: Button
+    private lateinit var ambMuteBtn: Button
+    private var muteKey = ""
     private lateinit var outSpinner: Spinner
     private var outDevs: List<AudioDeviceInfo> = emptyList()
     private var lastOut = 0
@@ -176,6 +183,34 @@ class MixerScreen(private val a: MainActivity) : Screen {
         gcol.addView(songMuteBtn, ui.fullWidth(4))
         row.addView(gcol, colLp())
 
+        // the newer instruments, so every lane on Home has its strip here
+        fun strip(name: String, col: Int, sub: String, vol: () -> Float, setVol: (Float) -> Unit, toggle: () -> Unit): Pair<FaderView, Button> {
+            val c = ui.panel()
+            c.addView(ui.text(name, 13f, col, true))
+            val f = FaderView(a)
+            f.color = col
+            f.value = vol()
+            f.onChange = { v -> setVol(v) }
+            c.addView(f, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
+            c.addView(ui.text(sub, 11f, Theme.DIM))
+            val m = ui.button("Mute") {
+                toggle()
+                refreshMutes()
+            }
+            c.addView(m, ui.fullWidth(4))
+            row.addView(c, colLp())
+            return Pair(f, m)
+        }
+        strip("Rhythm gtr", Theme.STEEL, "Power chords (Guitars page)", { e.rhythmGtr.volume }, { e.rhythmGtr.volume = it }) {
+            e.rhythmGtr.mute = !e.rhythmGtr.mute
+        }.also { rhythmFader = it.first; rhythmMuteBtn = it.second }
+        strip("Riff gtr", Theme.LIME, "Single notes (Guitars page)", { e.riffGtr.volume }, { e.riffGtr.volume = it }) {
+            e.riffGtr.mute = !e.riffGtr.mute
+        }.also { riffFader = it.first; riffMuteBtn = it.second }
+        strip("New Ambient", Theme.TEAL, "Creatures (New Ambient page)", { e.ambient.volume }, { e.ambient.volume = it }) {
+            e.ambient.mute = !e.ambient.mute
+        }.also { ambFader = it.first; ambMuteBtn = it.second }
+
         val mcol = ui.panel()
         mcol.addView(ui.text("Master", 13f, Theme.TEXT, true))
         masterFader = FaderView(a)
@@ -237,7 +272,16 @@ class MixerScreen(private val a: MainActivity) : Screen {
         ui.styleButton(synthMuteBtn, e.analog.mute, Theme.RED)
         ui.styleButton(voiceMuteBtn, e.vocal.mute, Theme.RED)
         ui.styleButton(songMuteBtn, e.bank.clipMute, Theme.RED)
+        ui.styleButton(rhythmMuteBtn, e.rhythmGtr.mute, Theme.RED)
+        ui.styleButton(riffMuteBtn, e.riffGtr.mute, Theme.RED)
+        ui.styleButton(ambMuteBtn, e.ambient.mute, Theme.RED)
+        muteKey = currentMuteKey()
     }
+
+    /** All mute states in one string: when it changes anywhere (Home, Synth, Pads...), the buttons here follow. */
+    private fun currentMuteKey(): String =
+        e.tracks.joinToString("") { if (it.mute) "1" else "0" } + e.pads.joinToString("") { if (it.mute) "1" else "0" } +
+            "${e.bass.mute}${e.analog.mute}${e.vocal.mute}${e.bank.clipMute}${e.rhythmGtr.mute}${e.riffGtr.mute}${e.ambient.mute}"
 
     override fun onShow() {
         for (i in 0 until Cfg.TRACKS) {
@@ -249,11 +293,15 @@ class MixerScreen(private val a: MainActivity) : Screen {
         synthFader.value = e.analog.volume
         voiceFader.value = e.vocal.volume
         songFader.value = e.bank.clipVol
+        rhythmFader.value = e.rhythmGtr.volume
+        riffFader.value = e.riffGtr.volume
+        ambFader.value = e.ambient.volume
         masterFader.value = e.masterVol
         refreshMutes()
     }
 
     override fun onTick() {
+        if (currentMuteKey() != muteKey) refreshMutes()
         for (i in 0 until Cfg.TRACKS) faders[i].meter = e.tracks[i].peak
         masterFader.meter = e.masterPeak
         val mr = e.mixRec

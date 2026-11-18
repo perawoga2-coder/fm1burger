@@ -80,8 +80,12 @@ class SynthScreen(private val a: MainActivity) : Screen {
         showMode(0)
     }
 
+    /** 0 = Bassline, 1 = Analog synth (the tab bar shows which one is open). */
+    val currentMode: Int get() = mode
+
     fun showMode(m: Int) {
         mode = m
+        a.onSynthModeChanged()
         bassBox.visibility = if (m == 0) View.VISIBLE else View.GONE
         anaBox.visibility = if (m == 1) View.VISIBLE else View.GONE
         ui.styleButton(bassTab, m == 0)
