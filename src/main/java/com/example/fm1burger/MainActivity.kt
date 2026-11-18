@@ -36,6 +36,7 @@ class MainActivity : Activity() {
         const val TAB_VOICE = 8
         const val TAB_SONG = 9
         const val TAB_HOME = 10
+        const val TAB_AMBIENT = 11
     }
 
     lateinit var ui: Ui
@@ -102,6 +103,7 @@ class MainActivity : Activity() {
         project.load()
         SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
         VocalSave.load(File(filesDir, "vocal.json"), engine.vocal)
+        AmbientSave.load(File(filesDir, "ambient.json"), engine.ambient)
         engine.bank.load(File(filesDir, "parts.json"))
         engine.bank.loadClips(filesDir)
         lastPartVersion = engine.bank.version
@@ -144,6 +146,7 @@ class MainActivity : Activity() {
         try { project.save() } catch (e: Exception) { }
         try { SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog) } catch (e: Exception) { }
         try { VocalSave.save(File(filesDir, "vocal.json"), engine.vocal) } catch (e: Exception) { }
+        try { AmbientSave.save(File(filesDir, "ambient.json"), engine.ambient) } catch (e: Exception) { }
         try { engine.bank.save(File(filesDir, "parts.json")) } catch (e: Exception) { }
     }
 
@@ -300,12 +303,13 @@ class MainActivity : Activity() {
         val voice = VoiceScreen(this)
         val song = SongScreen(this)
         homeScreen = HomeScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen)
+        val ambient = AmbientScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient)
 
         // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
         tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
-        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song", "⌂ Home")
+        val names = listOf("Tracks", "Steps", "Mixer", "Library", "Edit", "FX", "Pads", "Synth", "Voice", "Song", "⌂ Home", "New Ambient")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }

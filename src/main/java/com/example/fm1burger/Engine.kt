@@ -31,6 +31,7 @@ class Engine {
     val analog = AnalogSynth()
     val analogSeq = AnalogSeq(analog)
     val vocal = VocalChannel()
+    val ambient = NewAmbient()
     val mixRec = MixRecorder()
     val bank = PartBank(this)
     private val preview = PadVoice()
@@ -304,6 +305,9 @@ class Engine {
                 r += bz + sy
                 vocal.render()
                 l += vocal.outL
+                ambient.render()
+                l += ambient.outL
+                r += ambient.outR
                 r += vocal.outR
                 bank.renderClip()
                 l += bank.outL
@@ -433,6 +437,7 @@ class Engine {
             return
         }
         bass.step(s, bpmF)
+        ambient.step(s)
         analogSeq.step(s)
         for (p in pads) {
             if (p.on[s] && p.data != null) {

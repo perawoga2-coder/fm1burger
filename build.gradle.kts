@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.burgerstudio"
         minSdk = 23
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "2.1"
     }
 
     // Same signing key for every build, so a new APK can be installed over the old one

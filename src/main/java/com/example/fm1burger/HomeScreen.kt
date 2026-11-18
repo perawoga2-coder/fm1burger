@@ -27,9 +27,10 @@ object Inst {
     const val SYNTH = 4
     const val VOICE = 5
     const val SONG = 6
-    const val COUNT = 7
+    const val AMBIENT = 7
+    const val COUNT = 8
 
-    val NAMES = arrayOf("Empty", "Sample", "Drum", "Bass", "Synth", "Voice", "Song rec")
+    val NAMES = arrayOf("Empty", "Sample", "Drum", "Bass", "Synth", "Voice", "Song rec", "New Ambient")
 
     fun color(t: Int): Int = when (t) {
         SAMPLE -> Theme.ACCENT
@@ -38,6 +39,7 @@ object Inst {
         SYNTH -> Theme.PURPLE
         VOICE -> Theme.PINK
         SONG -> Theme.GREEN
+        AMBIENT -> Theme.TEAL
         else -> Theme.FAINT
     }
 
@@ -50,10 +52,10 @@ object Inst {
     }
 }
 
-/** What each of the 16 lanes on the Home page shows. Saved with the project. */
+/** What each of the 17 lanes on the Home page shows. Saved with the project. */
 class LaneSetup {
     companion object {
-        const val N = 16
+        const val N = 17
     }
 
     val type = IntArray(N)
@@ -63,12 +65,12 @@ class LaneSetup {
         reset()
     }
 
-    /** Default: sample 1-4, drum pads 1-8, bass, synth, voice, song recording = 16 lanes. */
+    /** Default: sample 1-4, drum pads 1-8, bass, synth, voice, song recording, New Ambient = 17 lanes. */
     fun reset() {
         var k = 0
         for (i in 0 until Cfg.TRACKS) { type[k] = Inst.SAMPLE; idx[k] = i; k++ }
         for (i in 0 until Cfg.PADS) { type[k] = Inst.DRUM; idx[k] = i; k++ }
-        for (t in intArrayOf(Inst.BASS, Inst.SYNTH, Inst.VOICE, Inst.SONG)) {
+        for (t in intArrayOf(Inst.BASS, Inst.SYNTH, Inst.VOICE, Inst.SONG, Inst.AMBIENT)) {
             if (k < N) { type[k] = t; idx[k] = 0; k++ }
         }
         while (k < N) { type[k] = Inst.EMPTY; idx[k] = 0; k++ }
@@ -123,7 +125,7 @@ class LaneSetup {
 }
 
 /**
- * Home: one page with all 16 lanes.
+ * Home: one page with all 17 lanes.
  * Left: the lane number (tap again and again to choose the instrument; the color follows it),
  * then the instrument icon (tap it to open that instrument's own page),
  * then a picture of what the lane holds (waveform or pattern), and a mute button.
@@ -230,6 +232,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
             Inst.SYNTH -> a.openSynth(1)
             Inst.VOICE -> a.showTab(MainActivity.TAB_VOICE)
             Inst.SONG -> a.showTab(MainActivity.TAB_SONG)
+            Inst.AMBIENT -> a.showTab(MainActivity.TAB_AMBIENT)
             else -> ui.toast("This lane is empty. Tap the number ${i + 1} to choose an instrument.")
         }
     }
@@ -246,6 +249,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
                 if (e.pads[k].data == null) ui.toast("Drum pad ${k + 1} has no sound. Tap the icon to choose one.")
                 else e.padHit(k, 1f)
             }
+            Inst.AMBIENT -> e.ambient.callReq = true
             Inst.EMPTY -> ui.toast("Tap the number ${i + 1} to choose an instrument")
             else -> openLane(i)
         }
@@ -260,6 +264,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
             Inst.SYNTH -> e.analog.mute
             Inst.VOICE -> e.vocal.mute
             Inst.SONG -> e.bank.clipMute
+            Inst.AMBIENT -> e.ambient.mute
             else -> false
         }
     }
@@ -274,6 +279,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
             Inst.SYNTH -> e.analog.mute = m
             Inst.VOICE -> e.vocal.mute = m
             Inst.SONG -> e.bank.clipMute = m
+            Inst.AMBIENT -> e.ambient.mute = m
             else -> return
         }
         // several lanes can show the same instrument: repaint them all
@@ -320,6 +326,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
                 Inst.SAMPLE -> e.tracks[lanes.idx[i]].playing
                 Inst.VOICE -> e.vocal.on
                 Inst.SONG -> e.playing
+                Inst.AMBIENT -> e.ambient.active()
                 else -> false
             }
             if (stepChanged || live) v.invalidate()
@@ -438,6 +445,26 @@ class InstIconView(ctx: Context) : View(ctx) {
                 path.lineTo(cx + s * 0.4f, cy + s * 0.38f)
                 path.lineTo(cx + s * 0.55f, cy + s * 0.65f)
                 c.drawPath(path, p)
+            }
+            Inst.AMBIENT -> {
+                // a little sky whale: body, tail, eye, and a sparkle
+                p.style = Paint.Style.FILL
+                r.set(cx - s * 0.95f, cy - s * 0.45f, cx + s * 0.45f, cy + s * 0.5f)
+                c.drawOval(r, p)
+                path.reset()
+                path.moveTo(cx + s * 0.3f, cy)
+                path.lineTo(cx + s, cy - s * 0.45f)
+                path.lineTo(cx + s * 0.85f, cy + s * 0.05f)
+                path.lineTo(cx + s, cy + s * 0.45f)
+                path.close()
+                c.drawPath(path, p)
+                p.color = Theme.PANEL
+                c.drawCircle(cx - s * 0.5f, cy - s * 0.08f, s * 0.1f, p)
+                p.color = col
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 1.6f * d
+                c.drawLine(cx - s * 0.2f, cy - s * 0.95f, cx - s * 0.2f, cy - s * 0.6f, p)
+                c.drawLine(cx - s * 0.37f, cy - s * 0.78f, cx - s * 0.03f, cy - s * 0.78f, p)
             }
             else -> {
                 // empty: a dashed plus
@@ -668,6 +695,25 @@ class LaneView(
                 } else {
                     name += " · nothing recorded in " + PartNames.NAMES[e.bank.cur]
                 }
+            }
+            Inst.AMBIENT -> {
+                val am = e.ambient
+                val n = NewAmbient.WF
+                val cw = w / n
+                val mid = h / 2f
+                p.color = col
+                val pos = am.wfPos
+                for (i in 0 until n) {
+                    val idx = (pos + i) % n
+                    val top = mid - (am.wfMax[idx] * 1.6f).coerceIn(-1f, 1f) * mid * 0.85f
+                    val bot = mid - (am.wfMin[idx] * 1.6f).coerceIn(-1f, 1f) * mid * 0.85f
+                    c.drawRect(i * cw, top, i * cw + cw + 0.5f, max(bot, top + 1f), p)
+                }
+                // its steps along the bottom
+                for (s in 0 until Cfg.STEPS) {
+                    if (am.steps[s]) c.drawRect(s * w / 16f + 2 * d, h - 4 * d, (s + 1) * w / 16f - 2 * d, h - 1.5f * d, p)
+                }
+                name += " · " + NewAmbient.NAMES[am.kind.coerceIn(0, NewAmbient.N_KIND - 1)] + (if (am.free) " · free" else "")
             }
             else -> {
                 p.style = Paint.Style.STROKE
