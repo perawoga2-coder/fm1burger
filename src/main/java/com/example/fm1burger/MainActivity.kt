@@ -127,6 +127,12 @@ class MainActivity : Activity() {
 
         buildUi()
         if (savedInstanceState == null) showSplash()
+        try {
+            val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+            am.getProperty(android.media.AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()?.let { engine.nativeRate = it }
+            am.getProperty(android.media.AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull()?.let { engine.burst = it }
+        } catch (ex: Exception) {
+        }
         engine.start()
         project.load()
         SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
@@ -751,16 +757,20 @@ class MainActivity : Activity() {
             else -> AlertDialog.Builder(this)
                 .setTitle("Record")
                 .setItems(arrayOf(
-                    "The whole mix (${MixRecorder.label(engine.mixRec.bits)}, no time limit)",
+                    "The whole mix (${MixRecorder.label(engine.mixRec.bits)}, no time limit)" + (if (engine.stemsOn) " + stems" else ""),
                     "A part, from bar 1 (send it to a cue)",
+                    "Stems with the mix: " + (if (engine.stemsOn) "ON (tap to turn off)" else "off (tap to turn on)"),
                     "Mix format…",
-                    "Last mix…"
+                    "Last mix…",
+                    "Export MIDI (patterns / song)…"
                 )) { _, w ->
                     when (w) {
                         0 -> toggleMixRec()
                         1 -> toggleRecPart()
-                        2 -> mixFormatDialog()
-                        else -> mixDialog()
+                        2 -> toggleStems()
+                        3 -> mixFormatDialog()
+                        4 -> mixDialog()
+                        else -> exportMidiDialog()
                     }
                 }
                 .show()
@@ -770,6 +780,55 @@ class MainActivity : Activity() {
     fun openSyncMenu() = toggleSync()
 
     fun muteAllTracks() = muteAll()
+
+    /** Pattern length for every sequencer: 1, 2 or 4 bars. A longer pattern starts as copies of the bars it has. */
+    fun patternLengthDialog() {
+        val items = arrayOf("1 bar (16 steps)", "2 bars (32 steps)", "4 bars (64 steps)")
+        AlertDialog.Builder(this)
+            .setTitle("Pattern length (now ${Pat.bars()} bar${if (Pat.bars() > 1) "s" else ""})")
+            .setItems(items) { _, w -> setPatternLength(Pat.LENGTHS[w]) }
+            .show()
+    }
+
+    fun setPatternLength(n: Int) {
+        val old = Pat.len
+        if (n == old || n !in Pat.LENGTHS) return
+        if (n > old) {
+            val e = engine
+            fun <T> rep(get: (Int) -> T, set: (Int, T) -> Unit) {
+                for (k in old until n) set(k, get(k % old))
+            }
+            for (t in e.tracks) rep({ t.steps[it] }, { k, st ->
+                t.steps[k].on = st.on
+                t.steps[k].pitch = st.pitch
+                t.steps[k].level = st.level
+            })
+            for (p in e.pads) {
+                rep({ p.on[it] }, { k, v -> p.on[k] = v })
+                rep({ p.lvl[it] }, { k, v -> p.lvl[k] = v })
+            }
+            val b = e.bass
+            rep({ b.on[it] }, { k, v -> b.on[k] = v })
+            rep({ b.note[it] }, { k, v -> b.note[k] = v })
+            rep({ b.accent[it] }, { k, v -> b.accent[k] = v })
+            rep({ b.slide[it] }, { k, v -> b.slide[k] = v })
+            val q = e.analogSeq
+            rep({ q.on[it] }, { k, v -> q.on[k] = v })
+            rep({ q.note[it] }, { k, v -> q.note[k] = v })
+            rep({ q.len[it] }, { k, v -> q.len[k] = v })
+            for (g in arrayOf(e.rhythmGtr, e.riffGtr)) {
+                rep({ g.art[it] }, { k, v -> g.art[k] = v })
+                rep({ g.fret[it] }, { k, v -> g.fret[k] = v })
+            }
+            rep({ e.ambient.steps[it] }, { k, v -> e.ambient.steps[k] = v })
+            for (ps in e.bank.parts) ps.extend(old, n)
+        }
+        Pat.len = n
+        if (Pat.view >= Pat.bars()) Pat.view = 0
+        ui.toast(if (n > old) "Pattern: ${n / Pat.BAR} bars. The new bars start as copies; change them with the bar buttons."
+                 else "Pattern: ${n / Pat.BAR} bar${if (n > Pat.BAR) "s" else ""}. The steps after it are kept, not played.")
+        refreshCurrent()
+    }
 
     fun syncSummary(): String {
         val s = syncLine()
@@ -953,7 +1012,7 @@ class MainActivity : Activity() {
             statusText.setTextColor(Theme.DIM)
             val sl = syncLine()
             statusText.text = if (engine.playing && engine.curStep >= 0) {
-                "Playing ${PartNames.NAMES[engine.bank.cur]} · step ${engine.curStep + 1} / ${Cfg.STEPS}" +
+                "Playing ${PartNames.NAMES[engine.bank.cur]} · step ${engine.curStep + 1} / ${Pat.len}" +
                     (if (engine.bank.songOn) " · song ${engine.bank.songIdx + 1}/${engine.bank.songLen}" else "") +
                     (if (sl.isNotEmpty()) " · $sl" else "")
             } else {
@@ -1013,7 +1072,7 @@ class MainActivity : Activity() {
         }
         if (preparing && statusText.currentTextColor != Theme.RED) {
             statusText.setTextColor(Theme.YELLOW)
-            statusText.text = "PREPARE · only ${Engine.prepName(engine.prepare)} plays · step ${engine.curStep + 1} / ${Cfg.STEPS}" +
+            statusText.text = "PREPARE · only ${Engine.prepName(engine.prepare)} plays · step ${engine.curStep + 1} / ${Pat.len}" +
                 " · not in the master, not recorded. Press ▶ at the top to play everything."
         }
         // the dot in front of the status line: red = recording, yellow = preparing, green = playing, grey = stopped
@@ -1037,19 +1096,138 @@ class MainActivity : Activity() {
 
     // ---------------- record the whole mix ----------------
 
+    private var stemDir: File? = null
+
     fun toggleMixRec() {
         val m = engine.mixRec
         if (m.recording) {
+            engine.recGate = 0
             lastMix = m.stop()
-            if (lastMix != null) mixDialog()
+            val sd = stemDir
+            stemDir = null
+            if (sd != null) {
+                for (r in engine.stemRecs) r.stop()
+                engine.recGate = 1
+                packStems(sd)
+            } else {
+                engine.recGate = 1
+                if (lastMix != null) mixDialog()
+            }
         } else {
+            val withStems = engine.stemsOn
+            if (withStems) engine.recGate = 0
             val f = m.start(File(filesDir, "mixes"))
             if (f == null) {
+                engine.recGate = 1
                 ui.toast("Cannot start the mix recording (not enough free storage?)")
-            } else {
-                ui.toast("Recording the whole mix in ${MixRecorder.label(m.recBits)}. Press ■ REC to stop. Long press REC MIX to change the format.")
+                return
             }
+            if (withStems) {
+                val sd = File(filesDir, "stems/" + f.nameWithoutExtension.replace("Mix_", "Stems_"))
+                sd.mkdirs()
+                java.util.Arrays.fill(engine.stemPeak, 0f)
+                var ok = true
+                for ((k, r) in engine.stemRecs.withIndex()) {
+                    r.bits = m.recBits
+                    if (r.start(sd, String.format(Locale.US, "%02d_%s", k + 1, Engine.STEM_NAMES[k])) == null) ok = false
+                }
+                if (ok) {
+                    stemDir = sd
+                    engine.recGate = 3
+                } else {
+                    for (r in engine.stemRecs) r.stop()
+                    sd.deleteRecursively()
+                    engine.recGate = 1
+                    ui.toast("Stems could not start (storage?). Recording the mix only.")
+                }
+            }
+            ui.toast("Recording the whole mix" + (if (stemDir != null) " + ${Engine.STEM_NAMES.size} stems" else "") +
+                " in ${MixRecorder.label(m.recBits)}. Press ■ REC to stop.")
         }
+    }
+
+    /** After a recording with stems: drop the silent ones, pack the rest (and the mix) into one .zip to save. */
+    private fun packStems(sd: File) {
+        ui.toast("Packing the stems…")
+        val mix = lastMix
+        Thread {
+            var zip: File? = null
+            var n = 0
+            try {
+                val files = sd.listFiles()?.sortedBy { it.name } ?: emptyList()
+                for (f in files) {
+                    val k = (f.name.take(2).toIntOrNull() ?: 0) - 1
+                    if (k in engine.stemPeak.indices && engine.stemPeak[k] < 0.00002f) f.delete()
+                }
+                val keep = sd.listFiles()?.sortedBy { it.name } ?: emptyList()
+                val z = File(sd.parentFile, sd.name + ".zip")
+                java.util.zip.ZipOutputStream(java.io.BufferedOutputStream(java.io.FileOutputStream(z), 1 shl 16)).use { zo ->
+                    zo.setLevel(java.util.zip.Deflater.BEST_SPEED)
+                    val all = ArrayList<File>(keep)
+                    if (mix != null && mix.exists()) all.add(0, mix)
+                    val buf = ByteArray(1 shl 16)
+                    for (f in all) {
+                        zo.putNextEntry(java.util.zip.ZipEntry(sd.name + "/" + f.name))
+                        java.io.FileInputStream(f).use { inp ->
+                            while (true) {
+                                val r = inp.read(buf)
+                                if (r <= 0) break
+                                zo.write(buf, 0, r)
+                            }
+                        }
+                        zo.closeEntry()
+                        n++
+                    }
+                }
+                sd.deleteRecursively()
+                zip = z
+            } catch (ex: Exception) {
+                zip = null
+            }
+            runOnUiThread {
+                val z = zip
+                if (z == null) {
+                    ui.toast("Could not pack the stems")
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("Stems ready")
+                        .setMessage("${n - (if (mix != null) 1 else 0)} stems + the mix in ${z.name} " +
+                            String.format(Locale.US, "(%.1f MB). ", z.length() / 1048576.0) +
+                            "Every file starts at the same moment, so they line up in any DAW. Silent parts were left out.")
+                        .setPositiveButton("Save to device…") { _, _ -> saveFile(z, "application/zip") }
+                        .setNeutralButton("The mix…") { _, _ -> mixDialog() }
+                        .setNegativeButton("Later", null)
+                        .show()
+                }
+            }
+        }.start()
+    }
+
+    fun toggleStems() {
+        engine.stemsOn = !engine.stemsOn
+        ui.toast(if (engine.stemsOn) "Stems on: the next mix recording also writes every part to its own file (.zip)"
+                 else "Stems off: the next recording is the mix only")
+        refreshCurrent()
+    }
+
+    /** Export the patterns (or the song) as a MIDI file for a DAW. */
+    fun exportMidiDialog() {
+        val b = engine.bank
+        val items = ArrayList<String>()
+        items.add("This pattern (${Pat.bars()} bar${if (Pat.bars() > 1) "s" else ""})")
+        if (b.songLen > 0) items.add("The whole song (${b.songLen} parts in the list)")
+        AlertDialog.Builder(this)
+            .setTitle("Export MIDI")
+            .setItems(items.toTypedArray()) { _, w ->
+                val bytes = try { MidiExport.build(engine, w == 1) } catch (ex: Exception) { null }
+                if (bytes == null) {
+                    ui.toast("Nothing to export: no notes in the patterns")
+                } else {
+                    val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(java.util.Date())
+                    saveBytes("BurgerStudio_${if (w == 1) "song" else "pattern"}_$stamp.mid", bytes, "audio/midi")
+                }
+            }
+            .show()
     }
 
     /** Long press on REC MIX: the format of the next mix recording. */
@@ -1123,11 +1301,11 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    fun saveFile(f: File) {
+    fun saveFile(f: File, mime: String = "audio/wav") {
         pendingFile = f
         val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
         i.addCategory(Intent.CATEGORY_OPENABLE)
-        i.type = "audio/wav"
+        i.type = mime
         i.putExtra(Intent.EXTRA_TITLE, f.name)
         startActivityForResult(i, REQ_EXPORT_FILE)
     }
@@ -1359,7 +1537,7 @@ class MainActivity : Activity() {
                     contentResolver.openOutputStream(uri)?.use { out ->
                         src.inputStream().use { it.copyTo(out, 65536) }
                     }
-                    runOnUiThread { ui.toast("Mix saved") }
+                    runOnUiThread { ui.toast("Saved ${src.name}") }
                 } catch (ex: Exception) {
                     runOnUiThread { ui.toast("Save failed: ${ex.message}") }
                 }

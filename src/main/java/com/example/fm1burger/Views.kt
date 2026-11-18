@@ -163,14 +163,15 @@ class StepGridView(ctx: Context) : View(ctx) {
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
         val t = track
-        val cw = w / Cfg.STEPS
+        val base = Pat.base()
+        val cw = w / Pat.BAR
         val gh = gridH()
         val rh = gh / ROWS
         paint.style = Paint.Style.FILL
         paint.color = Theme.BG
         c.drawRect(0f, 0f, w, h, paint)
         for (r in 0 until ROWS) {
-            for (s in 0 until Cfg.STEPS) {
+            for (s in 0 until Pat.BAR) {
                 paint.color = when {
                     r == ROWS / 2 -> Theme.PANEL3
                     (s / 4) % 2 == 0 -> Theme.PANEL2
@@ -182,8 +183,8 @@ class StepGridView(ctx: Context) : View(ctx) {
         val strip = stripTop()
         val sh = h - strip
         if (t != null) {
-            for (s in 0 until Cfg.STEPS) {
-                val st = t.steps[s]
+            for (s in 0 until Pat.BAR) {
+                val st = t.steps[base + s]
                 if (st.on) {
                     val row = (ROWS / 2 - st.pitch).coerceIn(0, ROWS - 1)
                     paint.color = Theme.ACCENT
@@ -194,16 +195,17 @@ class StepGridView(ctx: Context) : View(ctx) {
                 c.drawRect(s * cw + 3f, h - bh, (s + 1) * cw - 3f, h, paint)
             }
         }
-        if (playStep in 0 until Cfg.STEPS) {
+        val ps = playStep - base
+        if (playStep >= 0 && ps in 0 until Pat.BAR) {
             paint.color = Color.argb(60, 255, 255, 255)
-            c.drawRect(playStep * cw, 0f, (playStep + 1) * cw, h, paint)
+            c.drawRect(ps * cw, 0f, (ps + 1) * cw, h, paint)
         }
     }
 
     private fun apply(x: Float, y: Float, first: Boolean) {
         val t = track ?: return
-        val cw = width.toFloat() / Cfg.STEPS
-        val s = (x / cw).toInt().coerceIn(0, Cfg.STEPS - 1)
+        val cw = width.toFloat() / Pat.BAR
+        val s = Pat.base() + (x / cw).toInt().coerceIn(0, Pat.BAR - 1)
         val gh = gridH()
         if (y < gh) {
             val row = (y / (gh / ROWS)).toInt().coerceIn(0, ROWS - 1)

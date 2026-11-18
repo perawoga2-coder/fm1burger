@@ -33,6 +33,12 @@ class Engine {
         const val PREP_RIFF = 14
         const val PREP_AMBIENT = 15
 
+        /** The stem files (in this order) when STEMS is on. */
+        val STEM_NAMES = arrayOf(
+            "Sampler1", "Sampler2", "Sampler3", "Sampler4", "Drums", "Bassline", "AnalogSynth",
+            "RhythmGuitar", "RiffGuitar", "NewAmbient", "Voice", "SongRecordings"
+        )
+
         fun prepName(p: Int): String = when (p) {
             in 0 until Cfg.TRACKS -> "Track ${p + 1}"
             PREP_PADS -> "Drums"
@@ -64,6 +70,13 @@ class Engine {
     val riffGtr = MetalGuitar(true)
     val drumHeavy = DrumHeavy()
     val mixRec = MixRecorder()
+    /** STEMS: with the mix recording, every part into its own file (same format, same length). */
+    @Volatile var stemsOn = false
+    /** Which recorders the audio thread feeds: bit 0 = the mix, bit 1 = the stems (one read per block keeps them aligned). */
+    @Volatile var recGate = 1
+    val stemRecs = Array(STEM_NAMES.size) { MixRecorder() }
+    val stemPeak = FloatArray(STEM_NAMES.size)
+    private val stemBuf = Array(STEM_NAMES.size) { FloatArray(BLOCK * 2) }
     val bank = PartBank(this)
     private val preview = PadVoice()
 
@@ -101,6 +114,9 @@ class Engine {
     @Volatile private var tickTail = 0
     private val tickFrames = IntArray(64)
     private var idleAcc = 0.0
+    /** 16th notes since the pattern started (the pattern step is this modulo Pat.len). */
+    private var patCount = 0L
+    private var patVersion = 0
 
     /** The final mix of the last block as floats (before 16 bit), for the 24 bit / float recorder. */
     private val fout = FloatArray(BLOCK * 2)
@@ -133,6 +149,32 @@ class Engine {
     private var tickAcc = 0.0
     private var beatPos = 0.0
     private var latencyNs = 0L
+
+    // ---- audio output (low latency) ----
+    /** 0 = low latency, 1 = normal, 2 = safe (big buffer, like before). Takes effect at once. */
+    @Volatile var latencyMode = 1
+        set(v) {
+            field = v.coerceIn(0, 2)
+            restartOut = true
+        }
+    /** The device's own output rate and burst size (set by the activity from AudioManager). */
+    @Volatile var nativeRate = Cfg.SR
+    @Volatile var burst = 192
+    /** What the output really got (for the Setup page). */
+    @Volatile var outRate = Cfg.SR
+        private set
+    @Volatile var outFrames = 0
+        private set
+    @Volatile var outFast = false
+        private set
+    @Volatile var underruns = 0
+        private set
+    private var outCapacity = 0
+    private var lastUnderrun = 0
+    private val rs = OutResampler()
+
+    /** Output latency of the buffer in milliseconds. */
+    fun latencyMs(): Double = if (outRate > 0) outFrames * 1000.0 / outRate else 0.0
 
     // ---------------- control (called from the UI / MIDI threads) ----------------
 
@@ -213,11 +255,13 @@ class Engine {
     // ---------------- audio thread ----------------
 
     private fun makeOut(): AudioTrack? {
+        val mode = latencyMode
+        // low / normal: the device's own rate, so Android can use its fast (low latency) mixer path;
+        // the engine still runs at 44.1 kHz and a small resampler sits at the very end
+        val rate = if (mode < 2 && nativeRate in 8000..192000) nativeRate else Cfg.SR
         return try {
-            val minBuf = AudioTrack.getMinBufferSize(
-                Cfg.SR, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT
-            )
-            val bytes = max(minBuf, BLOCK * 4 * 6)
+            val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+            val bytes = if (mode == 2) max(minBuf, BLOCK * 4 * 6) else max(minBuf, burst.coerceIn(64, 2048) * 4 * 8)
             val b = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -227,24 +271,55 @@ class Engine {
                 )
                 .setAudioFormat(
                     AudioFormat.Builder()
-                        .setSampleRate(Cfg.SR)
+                        .setSampleRate(rate)
                         .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .build()
                 )
                 .setBufferSizeInBytes(bytes)
                 .setTransferMode(AudioTrack.MODE_STREAM)
-            if (Build.VERSION.SDK_INT >= 26) {
+            if (Build.VERSION.SDK_INT >= 26 && mode < 2) {
                 b.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             }
             val t = b.build()
             val d = outDevice
             if (d != null) t.setPreferredDevice(d)
+            outCapacity = if (Build.VERSION.SDK_INT >= 24) t.bufferCapacityInFrames else t.bufferSizeInFrames
+            if (Build.VERSION.SDK_INT >= 24 && mode < 2) {
+                // start small (2 bursts low, 4 normal; at least one engine block) and grow on glitches
+                val bu = burst.coerceIn(64, 2048)
+                val low = max(bu * 2, BLOCK * rate / Cfg.SR + bu)
+                val want = if (mode == 0) low else low + bu * 2
+                t.setBufferSizeInFrames(want.coerceAtMost(outCapacity))
+                lastUnderrun = t.underrunCount
+            }
+            outFast = Build.VERSION.SDK_INT >= 26 && t.performanceMode == AudioTrack.PERFORMANCE_MODE_LOW_LATENCY
+            outRate = rate
+            outFrames = t.bufferSizeInFrames
+            rs.reset(Cfg.SR.toDouble() / rate)
             t.play()
-            latencyNs = t.bufferSizeInFrames.toLong() * 1_000_000_000L / Cfg.SR
+            latencyNs = outFrames.toLong() * 1_000_000_000L / rate
             t
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /** Low / normal latency: a glitch (underrun) makes the buffer one burst bigger, like Oboe's latency tuner. */
+    private fun tune(t: AudioTrack) {
+        if (Build.VERSION.SDK_INT < 24 || latencyMode == 2) return
+        val u = t.underrunCount
+        if (u > lastUnderrun) {
+            underruns += u - lastUnderrun
+            lastUnderrun = u
+            val cur = t.bufferSizeInFrames
+            if (cur < outCapacity) {
+                val got = t.setBufferSizeInFrames((cur + burst.coerceIn(64, 2048)).coerceAtMost(outCapacity))
+                if (got > 0) {
+                    outFrames = got
+                    latencyNs = got.toLong() * 1_000_000_000L / outRate
+                }
+            }
         }
     }
 
@@ -254,6 +329,7 @@ class Engine {
         } catch (e: Exception) {
         }
         val out = ShortArray(BLOCK * 2)
+        val rsOut = ShortArray(BLOCK * 2 * 8 + 16)
         val tl = FloatArray(Cfg.TRACKS)
         val tr = FloatArray(Cfg.TRACKS)
         val tpk = FloatArray(Cfg.TRACKS)
@@ -285,14 +361,21 @@ class Engine {
                 // never let one bad block kill the audio thread: play silence and carry on
                 errors++
                 java.util.Arrays.fill(out, 0.toShort())
+                java.util.Arrays.fill(fout, 0f)
                 for (t in tracks) t.playing = false
             }
 
             val w = try {
-                a.write(out, 0, out.size)
+                if (outRate == Cfg.SR) {
+                    a.write(out, 0, out.size)
+                } else {
+                    val n = rs.process(fout, BLOCK, rsOut)
+                    a.write(rsOut, 0, n * 2)
+                }
             } catch (ex: Exception) {
                 -1
             }
+            tune(a)
             if (w < 0) {
                 outDevice = null
                 restartOut = true
@@ -370,6 +453,8 @@ class Engine {
             val gRiff = if (pr < 0 || pr == PREP_RIFF) 1f else 0f
             val gAmb = if (pr < 0 || pr == PREP_AMBIENT) 1f else 0f
             val gRest = if (pr < 0) 1f else 0f          // voice and song recordings: only in the full mix
+            val gate = recGate
+            val stemOn = gate and 2 != 0
 
             for (f in 0 until BLOCK) {
                 while (nextTick < nTicks && tickFrames[nextTick] <= f) {
@@ -388,10 +473,16 @@ class Engine {
                 }
                 var l = 0f
                 var r = 0f
+                val f2 = f * 2
                 for (i in 0 until Cfg.TRACKS) {
                     val t = tracks[i]
                     var s = renderTrack(t) * tb[i]
                     s = t.fx.process(s, bpmNow, beatPos)
+                    if (stemOn) {
+                        val on = !t.mute && (pr < 0 || pr == i)
+                        stemBuf[i][f2] = if (on) s * tl[i] * mv else 0f
+                        stemBuf[i][f2 + 1] = if (on) s * tr[i] * mv else 0f
+                    }
                     if (!t.mute && (pr < 0 || pr == i)) {
                         l += s * tl[i]
                         r += s * tr[i]
@@ -425,6 +516,16 @@ class Engine {
                 bank.renderLayers()
                 l += bank.outL * gRest
                 r += bank.outR * gRest
+                if (stemOn) {
+                    stemBuf[4][f2] = pm * mv; stemBuf[4][f2 + 1] = pm * mv
+                    stemBuf[5][f2] = bz * mv; stemBuf[5][f2 + 1] = bz * mv
+                    stemBuf[6][f2] = sy * mv; stemBuf[6][f2 + 1] = sy * mv
+                    stemBuf[7][f2] = gR * 0.9f * mv; stemBuf[7][f2 + 1] = gR * 0.55f * mv
+                    stemBuf[8][f2] = gF * 0.55f * mv; stemBuf[8][f2 + 1] = gF * 0.9f * mv
+                    stemBuf[9][f2] = ambient.outL * gAmb * mv; stemBuf[9][f2 + 1] = ambient.outR * gAmb * mv
+                    stemBuf[10][f2] = vocal.outL * gRest * mv; stemBuf[10][f2 + 1] = vocal.outR * gRest * mv
+                    stemBuf[11][f2] = bank.outL * gRest * mv; stemBuf[11][f2 + 1] = bank.outR * gRest * mv
+                }
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
@@ -443,7 +544,19 @@ class Engine {
             // PREPARE playback stays out of the recordings
             if (prepare < 0 || !playing) {
                 bank.feedRec(out)
-                mixRec.feed(fout)
+                if (gate and 1 != 0) mixRec.feed(fout)
+                if (stemOn) {
+                    for (k in stemBuf.indices) {
+                        val b = stemBuf[k]
+                        var pk = stemPeak[k]
+                        for (x in b) {
+                            val ax = abs(x)
+                            if (ax > pk) pk = ax
+                        }
+                        stemPeak[k] = pk
+                        stemRecs[k].feed(b)
+                    }
+                }
             }
             for (i in 0 until Cfg.TRACKS) tracks[i].peak = tpk[i]
             masterPeak = mpk
@@ -500,6 +613,8 @@ class Engine {
                 if (spp >= 0) {
                     tickCount = spp * 6L
                     beatPos = tickCount / 24.0
+                    patCount = spp.toLong()
+                    patVersion = bank.version
                 }
                 playing = true
                 paused = false
@@ -560,10 +675,13 @@ class Engine {
             )
         }
         if (tickCount % 6L == 0L) {
-            val s = ((tickCount / 6L) % Cfg.STEPS).toInt()
+            // b = step inside the bar (parts, cues and songs work in bars),
+            // s = step inside the pattern, which can be 1, 2 or 4 bars long
+            val b = ((tickCount / 6L) % Pat.BAR).toInt()
+            if (tickCount == 0L) patCount = 0L
             if (prep) {
                 // PREPARE: the pattern just loops, song parts and cues wait
-            } else if (s == 0) {
+            } else if (b == 0) {
                 val first = tickCount == 0L
                 if (!first && !bank.onBar()) {
                     stopHere(t0)
@@ -571,8 +689,17 @@ class Engine {
                 }
                 bank.barStart(frame, first)
             } else {
-                bank.onStep(s, bpmF)
+                bank.onStep(b, bpmF)
             }
+            // a new part starts its pattern from the top (at the same place in the bar)
+            val v = bank.version
+            if (v != patVersion) {
+                patVersion = v
+                patCount = b.toLong()
+            }
+            val len = Pat.len.coerceIn(Pat.BAR, Cfg.STEPS)
+            val s = (patCount % len).toInt()
+            patCount++
             curStep = s
             stepTrigger(s)
         }
@@ -650,13 +777,13 @@ class Engine {
         var rev = t.reverse
         // slices: this step plays one equal part of start..end
         if (!t.loop && t.slices > 0 && step >= 0) {
-            val k = (if (t.sliceOf[step] >= 0) t.sliceOf[step] else step) % t.slices
+            val k = (if (t.sliceOf[step % Pat.BAR] >= 0) t.sliceOf[step % Pat.BAR] else step) % t.slices
             val len = (e - a).toDouble() / t.slices
             val sa = a + (k * len).toInt()
             val se = (a + ((k + 1) * len).toInt()).coerceAtMost(e)
             a = sa
             e = se.coerceAtLeast(a + 1)
-            if (t.sliceRev[step]) rev = !rev
+            if (t.sliceRev[step % Pat.BAR]) rev = !rev
         }
         t.vStart = a.toDouble()
         t.vEnd = e.toDouble()
@@ -793,5 +920,53 @@ class Engine {
         if (a < 0.8f) return x
         val y = 0.8f + 0.2f * tanh((a - 0.8f) / 0.2f)
         return if (x < 0f) -y else y
+    }
+}
+
+/**
+ * Streaming 4-point (Hermite) resampler for the output: 44.1 kHz engine blocks to the device rate.
+ * Two frames of delay; the last three input frames are kept between blocks.
+ */
+class OutResampler {
+    private var step = 1.0          // input frames per output frame
+    private var pos = 0.0           // next output position, in input frames from the block start
+    private val hist = FloatArray(6)
+
+    fun reset(st: Double) {
+        step = st.coerceIn(0.1, 8.0)
+        pos = 0.0
+        java.util.Arrays.fill(hist, 0f)
+    }
+
+    private fun x(inp: FloatArray, j: Int, ch: Int): Float =
+        if (j >= 0) inp[j * 2 + ch] else hist[(j + 3) * 2 + ch]
+
+    /** Resamples n stereo frames of [inp]; returns the frames written to [out]. */
+    fun process(inp: FloatArray, n: Int, out: ShortArray): Int {
+        var k = 0
+        val maxK = out.size / 2
+        while (pos < n - 2 && k < maxK) {
+            val i = Math.floor(pos).toInt()
+            val t = (pos - i).toFloat()
+            for (ch in 0..1) {
+                val xm1 = x(inp, i - 1, ch)
+                val x0 = x(inp, i, ch)
+                val x1 = x(inp, i + 1, ch)
+                val x2 = x(inp, i + 2, ch)
+                val c1 = 0.5f * (x1 - xm1)
+                val c2 = xm1 - 2.5f * x0 + 2f * x1 - 0.5f * x2
+                val c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1)
+                val y = ((c3 * t + c2) * t + c1) * t + x0
+                out[k * 2 + ch] = (y * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+            }
+            k++
+            pos += step
+        }
+        pos -= n
+        for (q in 0 until 3) {
+            hist[q * 2] = inp[(n - 3 + q) * 2]
+            hist[q * 2 + 1] = inp[(n - 3 + q) * 2 + 1]
+        }
+        return k
     }
 }

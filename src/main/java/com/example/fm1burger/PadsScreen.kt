@@ -23,7 +23,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private val labels = ArrayList<Button>()
     private val muteBtns = ArrayList<Button>()
     private val volBars = ArrayList<SeekBar>()
-    private val cells = Array(Cfg.PADS) { arrayOfNulls<View>(Cfg.STEPS) }
+    private val cells = Array(Cfg.PADS) { arrayOfNulls<View>(Pat.BAR) }
     private var playStep = -1
     private var lastState = -1
 
@@ -88,6 +88,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
         tr.addView(stopBtn, ui.w(1f, 3))
         tr.addView(muteAllBtn, ui.w(1.3f, 3))
         tr.addView(prep.pButton, 0, ui.w(0f, 3))
+        prep.onPage = { repaintAll() }
         content.addView(tr, ui.fullWidth(6))
         content.addView(prep.view, ui.fullWidth(0))
 
@@ -219,11 +220,11 @@ class PadsScreen(private val a: MainActivity) : Screen {
         labels.add(lb)
         row.addView(lb, LinearLayout.LayoutParams(ui.dp(96), ui.dp(34)))
 
-        for (s in 0 until Cfg.STEPS) {
+        for (s in 0 until Pat.BAR) {
             val v = View(a)
-            v.setOnClickListener { cycle(r, s) }
+            v.setOnClickListener { cycle(r, Pat.base() + s) }
             val lp = LinearLayout.LayoutParams(0, ui.dp(34), 1f)
-            val gap = if (s % 4 == 3 && s < Cfg.STEPS - 1) ui.dp(6) else ui.dp(1)
+            val gap = if (s % 4 == 3 && s < Pat.BAR - 1) ui.dp(6) else ui.dp(1)
             lp.setMargins(ui.dp(1), ui.dp(2), gap, ui.dp(2))
             row.addView(v, lp)
             cells[r][s] = v
@@ -280,7 +281,10 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private fun alphaColor(color: Int, alpha: Int): Int =
         (color and 0x00FFFFFF) or (alpha.coerceIn(0, 255) shl 24)
 
-    private fun paint(r: Int, s: Int) {
+    /** [c] = column 0..15 of the bar shown. */
+    private fun paint(r: Int, c: Int) {
+        if (c !in 0 until Pat.BAR) return
+        val s = Pat.base() + c
         val p = e.pads[r]
         val base = if (p.on[s]) {
             alphaColor(Theme.ACCENT, (70 + 185 * p.lvl[s]).toInt())
@@ -290,7 +294,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
             Theme.PANEL
         }
         val here = s == playStep
-        cells[r][s]?.background = ui.bg(base, 6, if (here) Theme.TEXT else 0, if (here) 2 else 0)
+        cells[r][c]?.background = ui.bg(base, 6, if (here) Theme.TEXT else 0, if (here) 2 else 0)
     }
 
     private fun cycle(r: Int, s: Int) {
@@ -307,12 +311,12 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 p.lvl[s] = levels[idx + 1]
             }
         }
-        paint(r, s)
+        paint(r, s - Pat.base())
         if (p.on[s]) e.padHit(r, p.lvl[s])
     }
 
     private fun repaintAll() {
-        for (r in 0 until Cfg.PADS) for (s in 0 until Cfg.STEPS) paint(r, s)
+        for (r in 0 until Cfg.PADS) for (c in 0 until Pat.BAR) paint(r, c)
     }
 
     private fun clearAll() {
@@ -440,6 +444,11 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 setRow(4, intArrayOf(12), 0.65f)
             }
         }
+        // the same beat in every bar of a longer pattern
+        for (p in e.pads) for (s in Pat.BAR until Cfg.STEPS) {
+            p.on[s] = p.on[s % Pat.BAR]
+            p.lvl[s] = p.lvl[s % Pat.BAR]
+        }
         repaintAll()
         val missing = e.pads.take(5).any { it.data == null }
         if (missing) ui.toast("Tip: press \"Drum kit → pads\" first so the rows have drum sounds.")
@@ -468,8 +477,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
             val old = playStep
             playStep = s
             for (r in 0 until Cfg.PADS) {
-                if (old >= 0) paint(r, old)
-                if (s >= 0) paint(r, s)
+                if (old >= 0) paint(r, old - Pat.base())
+                if (s >= 0) paint(r, s - Pat.base())
             }
         }
     }

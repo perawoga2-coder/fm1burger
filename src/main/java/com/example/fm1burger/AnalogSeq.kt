@@ -9,13 +9,14 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 16 step sequencer for the analog synth. Each step has a note and a length (1 to 4 steps).
+ * Step sequencer for the analog synth (1, 2 or 4 bars). Each step has a note and a length (1 to 16 steps).
  * A chord type is applied to every step. It is triggered by the engine step clock, so it
  * stays in sync with the drums and the bassline.
  */
 class AnalogSeq(private val syn: AnalogSynth) {
 
     companion object {
+        const val MAX_LEN = 16
         val CHORD_NAMES = arrayOf("Single", "Major", "Minor", "Power", "Octave")
         private val CHORDS = arrayOf(
             intArrayOf(0),
@@ -26,9 +27,10 @@ class AnalogSeq(private val syn: AnalogSynth) {
         )
     }
 
-    val on = BooleanArray(16)
-    val note = IntArray(16) { 60 }
-    val len = IntArray(16) { 1 }
+    val on = BooleanArray(Cfg.STEPS)
+    val note = IntArray(Cfg.STEPS) { 60 }
+    /** How many steps the note holds (1 .. 16). */
+    val len = IntArray(Cfg.STEPS) { 1 }
     @Volatile var enabled = true
     @Volatile var chord = 0
     @Volatile var resetReq = false
@@ -39,7 +41,7 @@ class AnalogSeq(private val syn: AnalogSynth) {
     private var heldCount = 0
 
     fun clear() {
-        for (i in 0 until 16) {
+        for (i in 0 until Cfg.STEPS) {
             on[i] = false
             note[i] = 60
             len[i] = 1
@@ -71,7 +73,7 @@ class AnalogSeq(private val syn: AnalogSynth) {
                 syn.noteOn(n)
                 if (heldCount < 64) {
                     heldN[heldCount] = n
-                    heldL[heldCount] = len[s].coerceIn(1, 4)
+                    heldL[heldCount] = len[s].coerceIn(1, MAX_LEN)
                     heldCount++
                 }
             }
@@ -84,7 +86,7 @@ class AnalogSeq(private val syn: AnalogSynth) {
         val a1 = JSONArray()
         val a2 = JSONArray()
         val a3 = JSONArray()
-        for (i in 0 until 16) {
+        for (i in 0 until Cfg.STEPS) {
             a1.put(on[i])
             a2.put(note[i])
             a3.put(len[i])
@@ -103,10 +105,10 @@ class AnalogSeq(private val syn: AnalogSynth) {
             val a1 = o.optJSONArray("on")
             val a2 = o.optJSONArray("note")
             val a3 = o.optJSONArray("len")
-            for (i in 0 until 16) {
+            for (i in 0 until Cfg.STEPS) {
                 if (a1 != null && i < a1.length()) on[i] = a1.optBoolean(i, false)
                 if (a2 != null && i < a2.length()) note[i] = a2.optInt(i, 60).coerceIn(0, 127)
-                if (a3 != null && i < a3.length()) len[i] = a3.optInt(i, 1).coerceIn(1, 4)
+                if (a3 != null && i < a3.length()) len[i] = a3.optInt(i, 1).coerceIn(1, MAX_LEN)
             }
             enabled = o.optBoolean("enabled", true)
             chord = o.optInt("chord", 0).coerceIn(0, CHORDS.size - 1)
@@ -175,7 +177,7 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
                 b.minWidth = 0
                 b.minimumWidth = 0
                 b.setPadding(0, 0, 0, 0)
-                b.setOnClickListener { tapCell(i) }
+                b.setOnClickListener { tapCell(Pat.base() + i) }
                 val lp = LinearLayout.LayoutParams(0, ui.dp(54), 1f)
                 lp.setMargins(ui.dp(2), ui.dp(2), ui.dp(2), ui.dp(2))
                 r.addView(b, lp)
@@ -195,7 +197,9 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
 
         val lr = ui.row()
         lenBtn = ui.button("Length: 1") {
-            seq.len[sel] = seq.len[sel] % 4 + 1
+            val opts = intArrayOf(1, 2, 3, 4, 6, 8, 12, 16)
+            val k = opts.indexOfFirst { it > seq.len[sel] }
+            seq.len[sel] = if (k < 0) 1 else opts[k]
             changed()
         }
         lr.addView(lenBtn, ui.w(1f, 3))
@@ -254,7 +258,7 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
             1 -> {
                 seq.chord = 0
                 val ns = intArrayOf(60, 64, 67, 72)
-                for (i in 0 until 16) {
+                for (i in 0 until Pat.BAR) {
                     seq.on[i] = true
                     seq.note[i] = ns[i % 4]
                 }
@@ -267,8 +271,25 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
                 }
             }
         }
+        // the same bar in every bar of a longer pattern
+        for (i in Pat.BAR until Cfg.STEPS) {
+            seq.on[i] = seq.on[i % Pat.BAR]
+            seq.note[i] = seq.note[i % Pat.BAR]
+            seq.len[i] = seq.len[i % Pat.BAR]
+        }
         changed()
     }
+
+    /** Something else changed the pattern (the piano roll, the bar shown): redraw and save. */
+    fun changedOutside() = changed()
+
+    /** The step picked for the note buttons (absolute step). */
+    var selected: Int
+        get() = sel
+        set(v) {
+            sel = v.coerceIn(0, Cfg.STEPS - 1)
+            refresh()
+        }
 
     private fun changed() {
         refresh()
@@ -278,8 +299,10 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         }
     }
 
-    private fun paint(i: Int) {
-        val b = cells[i]
+    private fun paint(c: Int) {
+        if (c !in 0 until Pat.BAR) return
+        val b = cells[c]
+        val i = Pat.base() + c
         val base = if (seq.on[i]) {
             Theme.ACCENT
         } else if ((i / 4) % 2 == 0) {
@@ -301,7 +324,7 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         onBtn.text = if (seq.enabled) "Sequencer: ON" else "Sequencer: OFF"
         ui.styleButton(onBtn, seq.enabled, Theme.GREEN)
         for (i in chordBtns.indices) ui.styleButton(chordBtns[i], seq.chord == i)
-        for (i in 0 until 16) paint(i)
+        for (i in 0 until Pat.BAR) paint(i)
         info.text = if (seq.on[sel]) {
             "Step ${sel + 1}: ${noteName(seq.note[sel])}, length ${seq.len[sel]}"
         } else {
@@ -316,8 +339,8 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         if (s != playStep) {
             val old = playStep
             playStep = s
-            if (old >= 0) paint(old)
-            if (s >= 0) paint(s)
+            if (old >= 0) paint(old - Pat.base())
+            if (s >= 0) paint(s - Pat.base())
         }
         if ((!e.playing || e.paused) && seq.sounding) {
             seq.sounding = false

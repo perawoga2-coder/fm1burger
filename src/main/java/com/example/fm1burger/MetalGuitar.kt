@@ -226,8 +226,8 @@ class MetalGuitar(val riff: Boolean) {
             }
         }
         for (s in 0 until Cfg.STEPS) {
-            fret[s] = p[s][0]
-            art[s] = p[s][1]
+            fret[s] = p[s % p.size][0]
+            art[s] = p[s % p.size][1]
         }
     }
 

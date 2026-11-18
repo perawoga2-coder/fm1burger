@@ -18,6 +18,7 @@ class StepsScreen(private val a: MainActivity) : Screen {
     private val prep = PrepareBar(a, true) { a.sel }
 
     init {
+        prep.onPage = { if (::grid.isInitialized) grid.invalidate() }
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
         root.addView(content)
 
@@ -43,7 +44,7 @@ class StepsScreen(private val a: MainActivity) : Screen {
         )
         content.addView(
             ui.text(
-                "Top grid: tap a cell to set the pitch of a step (middle row = original pitch, " +
+                "The grid shows one bar (pick it with the bar buttons above). Top grid: tap a cell to set the pitch of a step (middle row = original pitch, " +
                     "each row = 1 semitone). Tap the same cell again to clear it. " +
                     "Bottom bars: drag to set the level (hit strength) of each step.",
                 12f, Theme.DIM
@@ -90,11 +91,12 @@ class StepsScreen(private val a: MainActivity) : Screen {
 
     private fun shift(dir: Int) {
         val t = sel()
-        val on = BooleanArray(Cfg.STEPS) { t.steps[it].on }
-        val pi = IntArray(Cfg.STEPS) { t.steps[it].pitch }
-        val lv = FloatArray(Cfg.STEPS) { t.steps[it].level }
-        for (i in 0 until Cfg.STEPS) {
-            val j = (i + dir + Cfg.STEPS) % Cfg.STEPS
+        val n = Pat.len
+        val on = BooleanArray(n) { t.steps[it].on }
+        val pi = IntArray(n) { t.steps[it].pitch }
+        val lv = FloatArray(n) { t.steps[it].level }
+        for (i in 0 until n) {
+            val j = (i + dir + n) % n
             t.steps[j].on = on[i]
             t.steps[j].pitch = pi[i]
             t.steps[j].level = lv[i]

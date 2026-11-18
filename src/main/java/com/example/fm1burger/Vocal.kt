@@ -184,14 +184,14 @@ class MixRecorder {
     @Volatile private var writing = false
 
     /** Starts a new recording in [dir]. Returns the file, or null if it could not start. */
-    fun start(dir: File): File? {
+    fun start(dir: File, name: String? = null): File? {
         if (recording) return file
         try {
             dir.mkdirs()
             if (dir.usableSpace < 50L * 1024 * 1024) return null
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             recBits = bits
-            val f = File(dir, "Mix_${stamp}_${if (recBits == FLOAT_32) "32f" else recBits.toString() + "bit"}.wav")
+            val f = File(dir, (name ?: "Mix_${stamp}_${if (recBits == FLOAT_32) "32f" else recBits.toString() + "bit"}") + ".wav")
             q.clear()
             frames = 0L
             dropped = 0

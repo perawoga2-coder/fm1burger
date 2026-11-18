@@ -232,7 +232,7 @@ class RecordFlow(private val a: MainActivity) {
         var last = a.engine.curStep
         return {
             val c = a.engine.curStep
-            val hit = c == 0 && last != 0
+            val hit = c >= 0 && c % Pat.BAR == 0 && c != last
             last = c
             hit
         }

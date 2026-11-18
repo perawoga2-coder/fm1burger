@@ -235,7 +235,7 @@ class TrackPage(private val a: MainActivity, private val ti: Int, startTab: Int)
         }
         val n = t.slices
         val rnd = java.util.Random()
-        for (s in 0 until Cfg.STEPS) {
+        for (s in 0 until Pat.BAR) {
             t.steps[s].on = true
             t.steps[s].pitch = 0
             t.steps[s].level = 1f
@@ -247,6 +247,12 @@ class TrackPage(private val a: MainActivity, private val ti: Int, startTab: Int)
             }
             if (kind == 2) t.sliceRev[s] = rnd.nextInt(4) == 0
             if (kind == 3 && s >= 12) t.steps[s].level = 0.7f + 0.1f * (s - 12)
+        }
+        for (s in Pat.BAR until Cfg.STEPS) {
+            val st = t.steps[s % Pat.BAR]
+            t.steps[s].on = st.on
+            t.steps[s].pitch = st.pitch
+            t.steps[s].level = st.level
         }
         refreshLoop()
     }
@@ -263,7 +269,7 @@ class TrackPage(private val a: MainActivity, private val ti: Int, startTab: Int)
         for ((s, get) in sliders) s.set(get())
         sliceMap.text = if (t.slices == 0) "Slices off" else
             "Step:  " + (1..16).joinToString(" ") { String.format("%2d", it) } + "\nSlice: " +
-                (0 until Cfg.STEPS).joinToString(" ") { s ->
+                (0 until Pat.BAR).joinToString(" ") { s ->
                     val k = (if (t.sliceOf[s] >= 0) t.sliceOf[s] else s) % t.slices
                     String.format("%2d", k + 1).let { if (t.sliceRev[s]) it.trim() + "r" else it }
                 }

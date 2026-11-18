@@ -3,9 +3,29 @@ package com.example.fm1burger
 object Cfg {
     const val SR = 44100
     const val TRACKS = 4
-    const val STEPS = 16
+    /** Room for the longest pattern (4 bars of 16th notes). The pattern plays [Pat.len] of them. */
+    const val STEPS = 64
     const val PADS = 8
     const val FM1_BUDGET = 496 * 1024
+}
+
+/**
+ * Pattern length and the bar the step editors show. One length for every sequencer, so all
+ * parts stay in step: 1, 2 or 4 bars (16 / 32 / 64 steps). Editors show one bar (16 steps) at a time.
+ */
+object Pat {
+    const val BAR = 16
+    val LENGTHS = intArrayOf(16, 32, 64)
+    @Volatile var len = 16
+    /** The bar shown in the step editors (0 based). */
+    @Volatile var view = 0
+    /** The editors jump to the bar that is playing. */
+    @Volatile var follow = true
+
+    fun bars(): Int = len / BAR
+    fun viewBar(): Int = view.coerceIn(0, bars() - 1)
+    /** The first step of the bar shown. */
+    fun base(): Int = viewBar() * BAR
 }
 
 class Step {
@@ -38,8 +58,8 @@ class Track(val index: Int) {
 
     // ---- slices (STEP mode) ----
     @Volatile var slices = 0              // 0 off, 4 / 8 / 16 equal slices of start..end
-    val sliceOf = IntArray(Cfg.STEPS) { -1 }      // which slice each step plays (-1 = slice number of the step)
-    val sliceRev = BooleanArray(Cfg.STEPS)        // play that slice backwards
+    val sliceOf = IntArray(Pat.BAR) { -1 }        // which slice each step of a bar plays (-1 = slice number of the step)
+    val sliceRev = BooleanArray(Pat.BAR)          // play that slice backwards
 
     // time stretch state (audio thread)
     var tl = 0.0

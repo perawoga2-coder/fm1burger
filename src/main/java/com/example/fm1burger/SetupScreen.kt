@@ -14,6 +14,9 @@ class SetupScreen(private val a: MainActivity) : Screen {
     private val content = ui.col()
     private lateinit var syncInfo: TextView
     private lateinit var recInfo: TextView
+    private lateinit var latInfo: TextView
+    private lateinit var stemBtn: android.widget.Button
+    private val latBtns = ArrayList<android.widget.Button>()
 
     init {
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(32))
@@ -27,6 +30,26 @@ class SetupScreen(private val a: MainActivity) : Screen {
         mp.addView(ui.button("MIDI sync: follow / lead / devices / thru…") { a.openSyncMenu() }, ui.fullWidth(6))
         content.addView(mp, ui.fullWidth(10))
 
+        val lp = ui.panel()
+        lp.addView(ui.text("Audio latency", 14f, Theme.ACCENT, true))
+        lp.addView(ui.text("How quickly a tap is heard. Low uses the tablet's fast audio path at its own sample rate " +
+            "and makes the buffer a little bigger by itself if the sound breaks up. Safe is the old big buffer, for slow tablets.",
+            12f, Theme.DIM), ui.fullWidth(4))
+        val lr = ui.row()
+        for ((k, n) in listOf("Low", "Normal", "Safe").withIndex()) {
+            val b = ui.button(n) {
+                a.engine.latencyMode = k
+                refreshButtons()
+                ui.toast("Audio latency: $n")
+            }
+            latBtns.add(b)
+            lr.addView(b, ui.w(1f, 3))
+        }
+        lp.addView(lr, ui.fullWidth(4))
+        latInfo = ui.text("", 12f, Theme.TEXT)
+        lp.addView(latInfo, ui.fullWidth(4))
+        content.addView(lp, ui.fullWidth(10))
+
         val rp = ui.panel()
         rp.addView(ui.text("Record the mix", 14f, Theme.ACCENT, true))
         recInfo = ui.text("", 12f, Theme.DIM)
@@ -36,6 +59,17 @@ class SetupScreen(private val a: MainActivity) : Screen {
         rr.addView(ui.button("Format…") { a.mixFormatDialog() }, ui.w(1f, 3))
         rr.addView(ui.button("Last mix…") { a.mixDialog() }, ui.w(1f, 3))
         rp.addView(rr, ui.fullWidth(4))
+        val sr = ui.row()
+        stemBtn = ui.button("Stems: off") {
+            a.toggleStems()
+            refreshButtons()
+        }
+        sr.addView(stemBtn, ui.w(1f, 3))
+        sr.addView(ui.button("Export MIDI…") { a.exportMidiDialog() }, ui.w(1f, 3))
+        rp.addView(sr, ui.fullWidth(4))
+        rp.addView(ui.text("Stems: with the mix, every part (sampler 1-4, drums, bassline, synth, guitars, New Ambient, voice, " +
+            "song recordings) goes into its own file, all the same length, packed in one .zip for a DAW. " +
+            "Export MIDI writes the notes of the pattern or of the whole song.", 11f, Theme.DIM), ui.fullWidth(4))
         content.addView(rp, ui.fullWidth(10))
 
         val op = ui.panel()
@@ -88,7 +122,15 @@ class SetupScreen(private val a: MainActivity) : Screen {
         content.addView(ab, ui.fullWidth(10))
     }
 
+    private fun refreshButtons() {
+        val e = a.engine
+        for (k in latBtns.indices) ui.styleButton(latBtns[k], e.latencyMode == k)
+        stemBtn.text = if (e.stemsOn) "Stems: ON" else "Stems: off"
+        ui.styleButton(stemBtn, e.stemsOn, Theme.GREEN)
+    }
+
     override fun onShow() {
+        refreshButtons()
         onTick()
     }
 
@@ -98,5 +140,10 @@ class SetupScreen(private val a: MainActivity) : Screen {
         val m = a.engine.mixRec
         val r = if (m.recording) "Recording now in ${MixRecorder.label(m.recBits)}" else "Next recording: ${MixRecorder.label(m.bits)}"
         if (recInfo.text.toString() != r) recInfo.text = r
+        val e = a.engine
+        val li = String.format(java.util.Locale.US, "Now: %d Hz · buffer %d frames = %.1f ms · fast path: %s · glitches: %d",
+            e.outRate, e.outFrames, e.latencyMs(), if (e.outFast) "yes" else "no", e.underruns) +
+            (if (e.outRate != Cfg.SR) " · engine 44.1 kHz, resampled" else "")
+        if (latInfo.text.toString() != li) latInfo.text = li
     }
 }

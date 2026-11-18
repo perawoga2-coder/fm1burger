@@ -52,11 +52,27 @@ class PartSnap {
     val bSlide = BooleanArray(Cfg.STEPS)
     var bMute = false
 
-    val aOn = BooleanArray(16)
-    val aNote = IntArray(16) { 60 }
-    val aLen = IntArray(16) { 1 }
+    val aOn = BooleanArray(Cfg.STEPS)
+    val aNote = IntArray(Cfg.STEPS) { 60 }
+    val aLen = IntArray(Cfg.STEPS) { 1 }
     var aEnabled = true
     var aMute = false
+
+    /** The pattern got longer: the new steps start as copies of the old ones (old until n). */
+    fun extend(old: Int, n: Int) {
+        if (old <= 0) return
+        for (k in old until n) {
+            val j = k % old
+            for (i in 0 until Cfg.TRACKS) {
+                tOn[i][k] = tOn[i][j]; tPitch[i][k] = tPitch[i][j]; tLvl[i][k] = tLvl[i][j]
+            }
+            for (i in 0 until Cfg.PADS) {
+                pOn[i][k] = pOn[i][j]; pLvl[i][k] = pLvl[i][j]
+            }
+            bOn[k] = bOn[j]; bNote[k] = bNote[j]; bAcc[k] = bAcc[j]; bSlide[k] = bSlide[j]
+            aOn[k] = aOn[j]; aNote[k] = aNote[j]; aLen[k] = aLen[j]
+        }
+    }
 
     /** Copy the live patterns of the engine into this part. */
     fun capture(e: Engine) {
@@ -86,7 +102,7 @@ class PartSnap {
         }
         bMute = b.mute
         val s = e.analogSeq
-        for (k in 0 until 16) {
+        for (k in 0 until Cfg.STEPS) {
             aOn[k] = s.on[k]
             aNote[k] = s.note[k]
             aLen[k] = s.len[k]
@@ -124,7 +140,7 @@ class PartSnap {
         }
         b.mute = bMute
         val s = e.analogSeq
-        for (k in 0 until 16) {
+        for (k in 0 until Cfg.STEPS) {
             s.on[k] = aOn[k]
             s.note[k] = aNote[k]
             s.len[k] = aLen[k]
@@ -485,7 +501,7 @@ class PartBank(private val e: Engine) {
         val c = p.clip
         if (songOn && c != null && p.clipBars > 0 && p.mode != 0) {
             clipData = c
-            clipPos = (s * barFrames(bpm) / Cfg.STEPS).toInt()
+            clipPos = (s * barFrames(bpm) / Pat.BAR).toInt()
         } else {
             clipData = null
         }

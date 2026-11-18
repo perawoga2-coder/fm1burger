@@ -54,6 +54,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
         tabs.addView(riffTab, ui.w(1f, 3))
         content.addView(tabs, ui.fullWidth(8))
         content.addView(prep.view, ui.fullWidth(6))
+        prep.onPage = { if (cells.size == Pat.BAR) paintCells(true) }
 
         // presets (filled in by showMode)
         content.addView(ui.text("Ready-made patterns", 13f, Theme.DIM), ui.fullWidth(10))
@@ -66,7 +67,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
             val r = ui.row()
             for (c in 0 until 8) {
                 val s = half * 8 + c
-                val b = ui.button("") { tapStep(s) }
+                val b = ui.button("") { tapStep(Pat.base() + s) }
                 b.textSize = 11f
                 b.setPadding(0, 0, 0, 0)
                 b.maxLines = 2
@@ -218,8 +219,9 @@ class GuitarScreen(private val a: MainActivity) : Screen {
         val gg = g()
         val aa = gg.art.copyOf()
         val ff = gg.fret.copyOf()
-        for (s in 0 until Cfg.STEPS) {
-            val j = (s + d + Cfg.STEPS) % Cfg.STEPS
+        val n = Pat.len
+        for (s in 0 until n) {
+            val j = (s + d + n) % n
             gg.art[j] = aa[s]
             gg.fret[j] = ff[s]
         }
@@ -232,8 +234,10 @@ class GuitarScreen(private val a: MainActivity) : Screen {
         playStep = ps
         val gg = g()
         val col = Inst.color(if (mode == 0) Inst.RHYTHM else Inst.RIFF)
-        for (s in 0 until Cfg.STEPS) {
-            val b = cells[s]
+        val base = Pat.base()
+        for (c in 0 until Pat.BAR) {
+            val s = base + c
+            val b = cells[c]
             val art = gg.art[s]
             b.text = MetalGuitar.ART_NAMES[art] + (if (art == MetalGuitar.CHUG || art == MetalGuitar.OPEN) "\n${gg.fret[s]}" else "")
             when {

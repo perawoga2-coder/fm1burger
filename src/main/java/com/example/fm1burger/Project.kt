@@ -41,7 +41,7 @@ class Project(private val a: MainActivity) {
                 j.put("slices", t.slices)
                 val slo = JSONArray()
                 val slr = JSONArray()
-                for (k in 0 until Cfg.STEPS) {
+                for (k in 0 until Pat.BAR) {
                     slo.put(t.sliceOf[k])
                     slr.put(t.sliceRev[k])
                 }
@@ -116,6 +116,9 @@ class Project(private val a: MainActivity) {
             o.put("lanes", a.lanes.toJson())
             o.put("mixBits", e.mixRec.bits)
             o.put("clockIdle", e.clockIdle)
+            o.put("patLen", Pat.len)
+            o.put("latencyMode", e.latencyMode)
+            o.put("stemsOn", e.stemsOn)
             SafeIo.writeText(file, o.toString())
         } catch (ex: Exception) {
         }
@@ -130,6 +133,11 @@ class Project(private val a: MainActivity) {
             val mb = o.optInt("mixBits", MixRecorder.BITS_24)
             e.mixRec.bits = if (mb == 16 || mb == 24 || mb == 32) mb else MixRecorder.BITS_24
             e.clockIdle = o.optBoolean("clockIdle", true)
+            Pat.len = o.optInt("patLen", Pat.BAR).let { if (it in Pat.LENGTHS) it else Pat.BAR }
+            Pat.view = 0
+            val lm = o.optInt("latencyMode", 1).coerceIn(0, 2)
+            if (lm != e.latencyMode) e.latencyMode = lm
+            e.stemsOn = o.optBoolean("stemsOn", false)
             e.bpm = o.optInt("bpm", 120)
             e.masterVol = o.optDouble("master", 0.9).toFloat()
             e.padVol = o.optDouble("padVol", 0.8).toFloat()
@@ -156,7 +164,7 @@ class Project(private val a: MainActivity) {
                     t.slices = j.optInt("slices", 0).let { if (it in intArrayOf(0, 4, 8, 16)) it else 0 }
                     val slo = j.optJSONArray("sliceOf")
                     val slr = j.optJSONArray("sliceRev")
-                    for (k in 0 until Cfg.STEPS) {
+                    for (k in 0 until Pat.BAR) {
                         t.sliceOf[k] = slo?.optInt(k, -1)?.coerceIn(-1, 15) ?: -1
                         t.sliceRev[k] = slr?.optBoolean(k, false) ?: false
                     }

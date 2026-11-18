@@ -24,6 +24,8 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
     private val bs = e.bass
     private val an = e.analog
     private lateinit var seqPanel: AnalogSeqPanel
+    private lateinit var bassRoll: PianoRollPanel
+    private lateinit var synthRoll: PianoRollPanel
     override val root = ScrollView(a)
     private val content = ui.col()
     private val bassBox = ui.col()
@@ -86,6 +88,11 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         content.addView(bassBox)
         content.addView(anaBox)
         showMode(if (fixed >= 0) fixed else 0)
+        prep.onPage = {
+            refreshBass()
+            seqPanel.refresh()
+            synthRoll.refresh()
+        }
     }
 
     /** 0 = Bassline, 1 = Analog synth (the tab bar shows which one is open). */
@@ -199,7 +206,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
                 b.minHeight = 0
                 b.minWidth = 0
                 b.setPadding(0, 0, 0, 0)
-                b.setOnClickListener { tapStep(i) }
+                b.setOnClickListener { tapStep(Pat.base() + i) }
                 cells.add(b)
                 val lp = LinearLayout.LayoutParams(0, ui.dp(56), 1f)
                 lp.setMargins(ui.dp(2), ui.dp(2), ui.dp(2), ui.dp(2))
@@ -244,6 +251,41 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         pr.addView(ui.button("Walking") { preset(2) }, ui.w(1f, 3))
         pr.addView(ui.button("Clear all") { preset(3) }, ui.w(1f, 3))
         bassBox.addView(pr, ui.fullWidth(4))
+
+        val bassModel = object : RollModel {
+            override fun isOn(s: Int) = bs.on[s]
+            override fun note(s: Int) = bs.rootMidi() + bs.note[s]
+            override fun length(s: Int) = 1
+            override fun put(s: Int, n: Int) {
+                bs.on[s] = true
+                bs.note[s] = (n - bs.rootMidi()).coerceIn(0, 24)
+            }
+            override fun off(s: Int) {
+                bs.on[s] = false
+                bs.accent[s] = false
+                bs.slide[s] = false
+            }
+            override val canLength = false
+            override fun setLength(s: Int, l: Int) {}
+            override fun flags(s: Int) = (if (bs.accent[s]) 1 else 0) or (if (bs.slide[s]) 2 else 0)
+            override val hasFlags = true
+            override fun cycleFlags(s: Int) {
+                val f = (flags(s) + 1) % 4
+                bs.accent[s] = f and 1 != 0
+                bs.slide[s] = f and 2 != 0
+            }
+            override val lowest: Int get() = bs.rootMidi()
+            override val highest: Int get() = bs.rootMidi() + 24
+            override fun audition(n: Int) {
+                bs.previewReq = (n - bs.rootMidi()).coerceIn(0, 24)
+            }
+            override fun changed() = refreshBass()
+        }
+        bassRoll = PianoRollPanel(a, "Piano roll", bassModel,
+            "Tap a cell for a note, tap the note again to remove it. Hold a note: accent (yellow) → slide (teal line) → both → none. " +
+                "It shows the bar picked with the bar buttons at the top.", false)
+        bassRoll.roll.onSelect = { st -> selStep = st }
+        bassBox.addView(bassRoll.view, ui.fullWidth(10))
 
         val panel = ui.panel()
         panel.addView(ui.text("Bass sound", 14f, Theme.ACCENT, true))
@@ -336,11 +378,20 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
                 st(14, 0, true)
             }
         }
+        for (i in Pat.BAR until Cfg.STEPS) {
+            val j = i % Pat.BAR
+            bs.on[i] = bs.on[j]
+            bs.note[i] = bs.note[j]
+            bs.accent[i] = bs.accent[j]
+            bs.slide[i] = bs.slide[j]
+        }
         refreshBass()
     }
 
-    private fun paint(i: Int) {
-        val b = cells[i]
+    private fun paint(c: Int) {
+        if (c !in 0 until Pat.BAR) return
+        val b = cells[c]
+        val i = Pat.base() + c
         val base = if (bs.on[i]) {
             Theme.ACCENT
         } else if ((i / 4) % 2 == 0) {
@@ -363,7 +414,12 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         ui.styleButton(sawBtn, bs.saw)
         ui.styleButton(sqBtn, !bs.saw)
         ui.styleButton(bMuteBtn, bs.mute, Theme.RED)
-        for (i in 0 until Cfg.STEPS) paint(i)
+        for (i in 0 until Pat.BAR) paint(i)
+        if (::bassRoll.isInitialized) {
+            bassRoll.roll.low = bs.rootMidi()
+            bassRoll.roll.selStep = selStep
+            bassRoll.refresh()
+        }
         val s = selStep
         editInfo.text = if (bs.on[s]) {
             "Step ${s + 1}: ${noteName(bs.note[s])} (${bs.note[s]} semitones above the key note)"
@@ -443,6 +499,42 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         anaBox.addView(kb, ui.fullWidth(4))
         seqPanel = AnalogSeqPanel(a, e.analogSeq)
         anaBox.addView(seqPanel.view, ui.fullWidth(8))
+        val sq = e.analogSeq
+        val synthModel = object : RollModel {
+            override fun isOn(s: Int) = sq.on[s]
+            override fun note(s: Int) = sq.note[s]
+            override fun length(s: Int) = sq.len[s]
+            override fun put(s: Int, n: Int) {
+                sq.on[s] = true
+                sq.note[s] = n.coerceIn(24, 96)
+            }
+            override fun off(s: Int) {
+                sq.on[s] = false
+            }
+            override val canLength = true
+            override fun setLength(s: Int, l: Int) {
+                sq.len[s] = l.coerceIn(1, AnalogSeq.MAX_LEN)
+            }
+            override fun flags(s: Int) = 0
+            override val hasFlags = false
+            override fun cycleFlags(s: Int) {}
+            override val lowest = 24
+            override val highest = 96
+            override fun audition(n: Int) {
+                an.noteOn(n)
+                root.postDelayed({ an.noteOff(n) }, 250)
+            }
+            override fun changed() {
+                seqPanel.changedOutside()
+                synthRoll.refresh()
+            }
+        }
+        synthRoll = PianoRollPanel(a, "Piano roll", synthModel,
+            "Tap a cell for a note, tap it again to remove it. Drag a note sideways to make it longer. " +
+                "The chord above is added to every note. It shows the bar picked with the bar buttons at the top.")
+        synthRoll.roll.onSelect = { st -> seqPanel.selected = st }
+        synthRoll.fitTo(48)
+        anaBox.addView(synthRoll.view, ui.fullWidth(8))
 
         val panel = ui.panel()
         panel.addView(ui.text("Synth sound", 14f, Theme.ACCENT, true))
@@ -584,6 +676,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         refreshBass()
         refreshAnalog()
         seqPanel.refresh()
+        synthRoll.refresh()
         lastState = -1
         refreshTransport()
         showMode(mode)
@@ -597,8 +690,10 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         if (s != playStep) {
             val old = playStep
             playStep = s
-            if (old >= 0) paint(old)
-            if (s >= 0) paint(s)
+            if (old >= 0) paint(old - Pat.base())
+            if (s >= 0) paint(s - Pat.base())
+            bassRoll.roll.playStep = s
+            synthRoll.roll.playStep = s
         }
     }
 }

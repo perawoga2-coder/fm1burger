@@ -625,9 +625,9 @@ class LaneView(
 
     /** 16 step blocks: height = note (or level), for bass, synth and drums. */
     private fun drawSteps(c: Canvas, w: Float, h: Float, col: Int, on: (Int) -> Boolean, height: (Int) -> Float) {
-        val cw = w / Cfg.STEPS
+        val cw = w / Pat.len
         p.style = Paint.Style.FILL
-        for (s in 0 until Cfg.STEPS) {
+        for (s in 0 until Pat.len) {
             if (!on(s)) continue
             val hh = (h - 10 * d) * height(s).coerceIn(0.15f, 1f)
             p.color = col
@@ -656,13 +656,17 @@ class LaneView(
 
         // beat grid: a faint line every 4 steps
         p.color = Theme.PANEL2
-        for (b in 1 until 4) c.drawRect(w * b / 4f - 0.5f, 0f, w * b / 4f + 0.5f, h, p)
+        val nb = 4 * Pat.bars()
+        for (b in 1 until nb) {
+            p.color = if (b % 4 == 0) Theme.PANEL3 else Theme.PANEL2
+            c.drawRect(w * b / nb - 0.5f, 0f, w * b / nb + 0.5f, h, p)
+        }
 
         // the step that is playing
         val step = if (e.playing) e.curStep else -1
         if (step >= 0 && t != Inst.EMPTY) {
             p.color = Theme.alpha(Theme.TEXT, 22)
-            c.drawRect(step * w / Cfg.STEPS, 0f, (step + 1) * w / Cfg.STEPS, h, p)
+            c.drawRect(step * w / Pat.len, 0f, (step + 1) * w / Pat.len, h, p)
         }
 
         val wi = w.toInt()
@@ -677,8 +681,8 @@ class LaneView(
                     // the steps that trigger it, as small marks along the bottom
                     if (!tr.loop) {
                         p.color = col
-                        for (s in 0 until Cfg.STEPS) {
-                            if (tr.steps[s].on) c.drawRect(s * w / 16f + 2 * d, h - 4 * d, (s + 1) * w / 16f - 2 * d, h - 1.5f * d, p)
+                        for (s in 0 until Pat.len) {
+                            if (tr.steps[s].on) c.drawRect(s * w / Pat.len.toFloat() + 2 * d, h - 4 * d, (s + 1) * w / Pat.len.toFloat() - 2 * d, h - 1.5f * d, p)
                         }
                     }
                     val f = tr.playFraction()
@@ -711,7 +715,7 @@ class LaneView(
                 val sq = e.analogSeq
                 var lo = 127
                 var hi = 0
-                for (s in 0 until 16) if (sq.on[s]) { lo = min(lo, sq.note[s]); hi = max(hi, sq.note[s]) }
+                for (s in 0 until Pat.len) if (sq.on[s]) { lo = min(lo, sq.note[s]); hi = max(hi, sq.note[s]) }
                 val span = max(12, hi - lo)
                 drawSteps(c, w, h, col, { sq.on[it] }, { 0.25f + 0.75f * (sq.note[it] - lo) / span.toFloat() })
                 if (!sq.enabled) name += " · keyboard only"
@@ -773,8 +777,8 @@ class LaneView(
                     c.drawRect(i * cw, top, i * cw + cw + 0.5f, max(bot, top + 1f), p)
                 }
                 // its steps along the bottom
-                for (s in 0 until Cfg.STEPS) {
-                    if (am.steps[s]) c.drawRect(s * w / 16f + 2 * d, h - 4 * d, (s + 1) * w / 16f - 2 * d, h - 1.5f * d, p)
+                for (s in 0 until Pat.len) {
+                    if (am.steps[s]) c.drawRect(s * w / Pat.len.toFloat() + 2 * d, h - 4 * d, (s + 1) * w / Pat.len.toFloat() - 2 * d, h - 1.5f * d, p)
                 }
                 name += " · " + NewAmbient.NAMES[am.kind.coerceIn(0, NewAmbient.N_KIND - 1)] + (if (am.free) " · free" else "")
             }

@@ -91,6 +91,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
         tr.addView(muteBtn, ui.w(0.8f, 3))
         content.addView(tr, ui.fullWidth(10))
         content.addView(prep.view, ui.fullWidth(6))
+        prep.onPage = { if (stepBtns.size == Pat.BAR) paintSteps(true) }
 
         // how it lives
         val p = ui.panel()
@@ -138,7 +139,8 @@ class AmbientScreen(private val a: MainActivity) : Screen {
             for (c in 0 until 8) {
                 val s = half * 8 + c
                 val b = ui.button("${s + 1}") {
-                    amb.steps[s] = !amb.steps[s]
+                    val st = Pat.base() + s
+                    amb.steps[st] = !amb.steps[st]
                     paintSteps(true)
                 }
                 b.textSize = 11f
@@ -156,7 +158,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
             paintSteps(true)
         }, ui.w(1f, 3))
         sr.addView(ui.button("Every bar") {
-            for (i in 0 until Cfg.STEPS) amb.steps[i] = i == 0
+            for (i in 0 until Cfg.STEPS) amb.steps[i] = i % Pat.BAR == 0
             paintSteps(true)
         }, ui.w(1f, 3))
         sr.addView(ui.button("Every beat") {
@@ -181,8 +183,11 @@ class AmbientScreen(private val a: MainActivity) : Screen {
         if (!force && ps == playStep) return
         playStep = ps
         val col = Inst.color(Inst.AMBIENT)
-        for (s in 0 until Cfg.STEPS) {
-            val b = stepBtns[s]
+        val base = Pat.base()
+        for (c in 0 until Pat.BAR) {
+            val s = base + c
+            val b = stepBtns[c]
+            b.text = "${s + 1}"
             when {
                 s == ps -> ui.styleButton(b, true, Theme.TEXT, 8)
                 amb.steps[s] -> ui.styleButton(b, true, col, 8)

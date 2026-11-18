@@ -28,6 +28,14 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
         private set
     private var lastKey = ""
 
+    // pattern length and the bar shown (one setting for every sequencer page)
+    private val lenBtn: Button
+    private val barBtns = ArrayList<Button>()
+    private val followBtn: Button
+    private var pageKey = ""
+    /** Called when the bar shown or the pattern length changed: the page redraws its steps. */
+    var onPage: (() -> Unit)? = null
+
     init {
         pButton = ui.button("P") { toggle() }
         pButton.textSize = 15f
@@ -43,9 +51,31 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
             r.addView(sb, ui.w(1f, 3))
             view.addView(r)
         }
+        val pr = ui.row()
+        lenBtn = ui.button("1 bar") { a.patternLengthDialog() }
+        lenBtn.textSize = 12f
+        pr.addView(lenBtn, ui.w(1.2f, 2))
+        for (k in 0 until 4) {
+            val b = ui.button("${k + 1}") {
+                Pat.view = k
+                Pat.follow = false
+                refreshPage()
+            }
+            b.textSize = 12f
+            barBtns.add(b)
+            pr.addView(b, ui.w(0.7f, 2))
+        }
+        followBtn = ui.button("Follow") {
+            Pat.follow = !Pat.follow
+            refreshPage()
+        }
+        followBtn.textSize = 12f
+        pr.addView(followBtn, ui.w(1.1f, 2))
+        view.addView(pr, ui.fullWidth(4))
         hint = ui.text("", 11f, Theme.YELLOW)
         hint.visibility = View.GONE
         view.addView(hint, ui.fullWidth(2))
+        pageKey = "-"
         refresh()
     }
 
@@ -71,7 +101,30 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
         }
     }
 
+    /** Bar buttons, length and Follow. While playing with Follow on, the page shows the bar that plays. */
+    fun refreshPage() {
+        if (Pat.follow && e.playing && !e.paused && e.curStep >= 0) {
+            val vb = e.curStep / Pat.BAR
+            if (vb != Pat.view) Pat.view = vb
+        }
+        val bars = Pat.bars()
+        val vb = Pat.viewBar()
+        val key = "${Pat.len}|$vb|${Pat.follow}"
+        if (key == pageKey) return
+        pageKey = key
+        lenBtn.text = if (bars == 1) "1 bar" else "$bars bars"
+        ui.styleButton(lenBtn, bars > 1, Theme.TEAL)
+        for (k in barBtns.indices) {
+            barBtns[k].visibility = if (k < bars) View.VISIBLE else View.INVISIBLE
+            ui.styleButton(barBtns[k], k == vb && bars > 1, Theme.TEAL)
+        }
+        followBtn.visibility = if (bars > 1) View.VISIBLE else View.INVISIBLE
+        ui.styleButton(followBtn, Pat.follow, Theme.TEAL)
+        onPage?.invoke()
+    }
+
     fun refresh() {
+        refreshPage()
         val p = part()
         val alone = e.playing && e.prepare == p
         val key = "$on|$alone|${e.playing}|$p"

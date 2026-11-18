@@ -114,7 +114,7 @@ class Bassline {
             freq = f
             fenv = if (acc) 1.0 + accentAmt * 0.8 else 1.0
         }
-        val next = (s + 1) % Cfg.STEPS
+        val next = (s + 1) % Pat.len.coerceIn(Pat.BAR, Cfg.STEPS)
         val hold = on[next] && slide[next]
         gateLeft = (stepLen * (if (hold) 1.1 else 0.6)).toInt()
     }
