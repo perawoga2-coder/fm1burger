@@ -136,9 +136,11 @@ class MainActivity : Activity() {
     private fun showSplash() {
         try {
             val host = findViewById<FrameLayout>(android.R.id.content)
-            val sp = SplashView(this) { }
+            // when the intro ends (or is skipped) the jingle stops with it
+            val sp = SplashView(this) { engine.previewStop() }
             host.addView(sp, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             sp.start()
+            engine.previewPlay(SplashView.jingle())
         } catch (e: Exception) {
         }
     }
