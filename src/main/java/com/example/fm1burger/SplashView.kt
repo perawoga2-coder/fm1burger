@@ -30,7 +30,7 @@ import kotlin.random.Random
  * 0.0 - 0.7 s  stars appear, a cursor blinks
  * 0.7 - 1.8 s  the burger drops in, layer by layer, with a blip for each one
  * 1.8 - 3.0 s  BURGER STUDIO types itself in
- * 3.0 - 4.3 s  fanfare: the title cycles through colors, the equalizer jumps
+ * 3.0 - 4.3 s  fanfare: the title cycles through colors, GROOVEBOX blinks, the equalizer jumps
  * 4.3 - 5.0 s  the picture breaks into blocks and dissolves into the app
  *
  * Tap to skip.
@@ -40,7 +40,7 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
     companion object {
         const val LINE1 = "BURGER"
         const val LINE2 = "STUDIO"
-        const val TAGLINE = "FM-1 GROOVEBOX"
+        const val TAGLINE = "GROOVEBOX"
         const val TOTAL_MS = 5000L
         private const val FRAME_MS = 66   // 15 frames per second, on purpose
 
