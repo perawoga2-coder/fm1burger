@@ -21,13 +21,13 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * The retro 8-bit intro: first the company logo "MAKER HIT" (3 s), then "BURGER STUDIO" (5 s).
+ * The retro 8-bit intro: first the company logo "MAKER HIP" (3 s), then "BURGER STUDIO" (5 s).
  *
  * Everything is drawn on a tiny low-resolution picture (about 128 pixels wide) and
  * blown up without smoothing, so every pixel shows as a crisp block like an old console.
  * It also runs at a choppy 15 frames per second on purpose, and plays a short chiptune.
  *
- * MAKER HIT: a hammer winds up and hits a gold block (flash, sparks, clunk),
+ * MAKER HIP: a hammer winds up and hits a gold block (flash, sparks, clunk),
  * the letters pop up, PRESENTS blinks in, then a 4 step fade to dark.
  *
  * BURGER STUDIO (times from the start of this scene):
@@ -45,7 +45,7 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         const val LINE1 = "BURGER"
         const val LINE2 = "STUDIO"
         const val TAGLINE = "GROOVEBOX"
-        const val COMPANY = "MAKER HIT"
+        const val COMPANY = "MAKER HIP"
         const val PRESENTS = "PRESENTS"
         const val CO_MS = 3000L            // length of the company logo scene
         const val TOTAL_MS = CO_MS + 5000L
@@ -155,7 +155,7 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
                     out[k] += wave * env * vol
                 }
             }
-            // ---- MAKER HIT: wind-up, the hammer hit, the letters, PRESENTS ----
+            // ---- MAKER HIP: wind-up, the hammer hit, the letters, PRESENTS ----
             note(300, 45, 450, 0.05f, 0.5f, 14f)
             noise(900, 140, 0.35f)
             note(900, 40, 160, 0.40f, 0f, -12f, true)
@@ -330,7 +330,7 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         box(cx - 17, y + 4, 34, 1, C_BUN_LO)
     }
 
-    // ---------------- MAKER HIT: the company logo scene ----------------
+    // ---------------- MAKER HIP: the company logo scene ----------------
 
     private fun partAt(time: Float, start: Float, len: Float): Float = ((time - start) / len).coerceIn(0f, 1f)
 
@@ -415,7 +415,7 @@ class SplashView(ctx: Context, private val onDone: () -> Unit) : View(ctx) {
         }
         hammer(cx + 22, by - 5 + sink, ang)
 
-        // MAKER HIT: the letters pop up one after another
+        // MAKER HIP: the letters pop up one after another
         val ty = by + 28
         val x0 = cx - textWidth(COMPANY, 2) / 2
         for (i in COMPANY.indices) {
