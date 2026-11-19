@@ -32,6 +32,10 @@ class DeviceHub(private val a: MainActivity) {
     private val am = a.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val asking = HashSet<Int>()
 
+    /** The device the app set to follow its clock (CLK USB), or null. */
+    @Volatile var synced: String? = null
+        private set
+
     /** The connected device that takes samples into its own slots (answers the sample protocol), or null. */
     @Volatile var slotDevice: String? = null
         private set
@@ -143,6 +147,7 @@ class DeviceHub(private val a: MainActivity) {
         if (!a.midi.isOpen(info.id)) return
         a.midi.closeId(info.id)
         if (slotDevice == name) slotDevice = null
+        if (synced == name) synced = null
         if (!a.midi.connected) a.setSyncMode(SYNC_OFF)
         a.ui.toast("$name disconnected")
         a.refreshCurrent()
@@ -171,9 +176,14 @@ class DeviceHub(private val a: MainActivity) {
             .setTitle("New device: $name")
             .setView(box)
             .setItems(items) { _, w ->
-                a.setSyncMode(modes[w])
+                var m = modes[w]
+                if (m == SYNC_FOLLOW && slotDevice == name) {   // (Felucca-based firmware sends no clock: the app leads)
+                    m = SYNC_LEAD
+                    a.ui.toast("$name sends no clock of its own: the app leads, $name follows")
+                }
+                a.setSyncMode(m)
                 if (out.isChecked) usbOutFor(name)?.let { a.engine.setOutput(it) }
-                if (keep.isChecked) remember(name, modes[w], out.isChecked)
+                if (keep.isChecked) remember(name, m, out.isChecked)
                 a.refreshCurrent()
             }
             .setNegativeButton("Later", null)
@@ -197,7 +207,17 @@ class DeviceHub(private val a: MainActivity) {
             if (ok) {
                 slotDevice = name
                 a.sampleLink().hello()                   // (newer firmware: its REC can ask the app for a take)
-                main.post { a.ui.toast("$name takes samples: Library > Devices… > send into its slots") }
+                // tempo: this firmware sends no clock, so the app leads and the device is set to follow it (CLK USB)
+                val clk = a.sampleLink().followAppClock()
+                main.post {
+                    a.setSyncMode(SYNC_LEAD)
+                    if (remembered(name)?.optInt("sync", SYNC_LEAD) != SYNC_LEAD || remembered(name) == null)
+                        remember(name, SYNC_LEAD, remembered(name)?.optBoolean("out", false) ?: false)
+                    synced = if (clk) name else null
+                    a.ui.toast(if (clk) "$name: in sync (it follows the app's tempo) · takes samples"
+                               else "$name takes samples. Set its CLK to USB to follow the app's tempo")
+                    a.refreshCurrent()
+                }
             }
         }.start()
     }

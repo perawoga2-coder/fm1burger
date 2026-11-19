@@ -226,6 +226,7 @@ class SetupScreen(private val a: MainActivity) : Screen {
         val names = a.hub.rememberedNames()
         val dl = "Connected now: " + (if (a.midi.connected) a.midi.deviceName else "none") +
             (a.hub.slotDevice?.let { " · $it takes samples" } ?: "") +
+            (a.hub.synced?.let { " · $it follows the app's tempo" } ?: "") +
             "\nRemembered: " + (if (names.isEmpty()) "none yet" else names.joinToString(", "))
         if (devList.text.toString() != dl) devList.text = dl
         val own = Features.owner

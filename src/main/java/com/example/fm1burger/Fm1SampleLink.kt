@@ -311,6 +311,7 @@ class Fm1SampleLink(private val midi: MidiLink) {
     // ---------------- setting up a track on the device (editor protocol: INFO, DESC, SET, TRACK) ----------------
 
     private var gEng = -1                 // the global id of "ENG" (the engine of the selected track)
+    private var gClk = -1                 // the global id of "CLK" (where its tempo comes from: INT, USB, TRS)
     private var pE0 = -1                  // P_E0: SRC / SET of the sample engines
     private var engNames: List<String> = emptyList()
 
@@ -341,10 +342,13 @@ class Fm1SampleLink(private val midi: MidiLink) {
         engNames = names
         for (id in 0 until gCount) {
             val r = req(5, byteArrayOf(1, id.toByte()))
-            if (r.size > 9 && readStr(r, 9).first == "ENG") {
-                gEng = id
-                break
+            if (r.size > 9) {
+                when (readStr(r, 9).first) {
+                    "ENG" -> gEng = id
+                    "CLK" -> gClk = id
+                }
             }
+            if (gEng >= 0 && gClk >= 0) break
         }
         if (gEng < 0) throw IllegalStateException("The device does not say how to change its engine")
     }
@@ -398,6 +402,21 @@ class Fm1SampleLink(private val midi: MidiLink) {
             3 -> throw IllegalStateException("The device cannot play the slot with that engine")
             else -> false
         }
+    }
+
+    /**
+     * The device follows the app's MIDI clock over USB (its CLK: USB). Felucca-based firmware sends no clock of its
+     * own, so the app leads; out of the box the device's CLK is INT and it ignores any clock. true: done.
+     */
+    fun followAppClock(): Boolean = try {
+        learn()
+        if (gClk < 0) false
+        else {
+            val r = req(3, byteArrayOf(1, gClk.toByte()) + v14(1))
+            r.size >= 4 && ((r[2].toInt() and 0x7F) or ((r[3].toInt() and 0x7F) shl 7)) - 8192 == 1
+        }
+    } catch (ex: Exception) {
+        false
     }
 
     fun close() {
