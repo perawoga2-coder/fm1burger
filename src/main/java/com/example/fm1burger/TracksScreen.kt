@@ -48,6 +48,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
     private lateinit var voiceMicBtn: Button
     private lateinit var voiceMuteBtn: Button
     private lateinit var voiceVol: SliderRow
+    private val quick = QuickSamplePanel(a)      // (before init: it is added to the page there)
 
     init {
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
@@ -326,8 +327,6 @@ class TracksScreen(private val a: MainActivity) : Screen {
             "STEP: the sample is played by the steps on the Steps tab."
         }
     }
-
-    private val quick by lazy { QuickSamplePanel(a) }
 
     override fun onTick() {
         quick.tick()
