@@ -61,6 +61,7 @@ class TracksScreen(private val a: MainActivity) : Screen {
                 11f, Theme.DIM
             ), ui.fullWidth(2)
         )
+        content.addView(quick.view, ui.fullWidth(8))   // only while a device that takes samples is connected
         editBox.addView(ui.text("1 · Sample · edit · send", 14f, Theme.ACCENT, true))
         content.addView(editBox, ui.fullWidth(8))
         for (i in 0 until Cfg.TRACKS) buildCard(i)
@@ -326,7 +327,10 @@ class TracksScreen(private val a: MainActivity) : Screen {
         }
     }
 
+    private val quick by lazy { QuickSamplePanel(a) }
+
     override fun onTick() {
+        quick.tick()
         voiceWave.invalidate()
         for (i in 0 until Cfg.TRACKS) {
             waves[i].playhead = e.tracks[i].playFraction()

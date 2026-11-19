@@ -232,6 +232,78 @@ class Fm1SampleLink(private val midi: MidiLink) {
         return String.format(java.util.Locale.US, "%.1f s", s.size / SLOT_RATE.toDouble())
     }
 
+    // ---------------- setting up a track on the device (editor protocol: INFO, DESC, SET, TRACK) ----------------
+
+    private var gEng = -1                 // the global id of "ENG" (the engine of the selected track)
+    private var pE0 = -1                  // P_E0: SRC / SET of the sample engines
+    private var engNames: List<String> = emptyList()
+
+    private fun v14(v: Int): ByteArray {
+        val x = (v + 8192).coerceIn(0, 16383)
+        return byteArrayOf((x and 0x7F).toByte(), ((x shr 7) and 0x7F).toByte())
+    }
+
+    private fun readStr(d: ByteArray, from: Int): Pair<String, Int> {
+        var j = from
+        while (j < d.size && d[j].toInt() != 0) j++
+        return Pair(String(d, from, j - from, Charsets.US_ASCII), j + 1)
+    }
+
+    /** INFO: the engine names, P_E0, and (once) the global id of ENG. */
+    private fun learn() {
+        if (gEng >= 0 && pE0 >= 0 && engNames.isNotEmpty()) return
+        val d = req(1, ByteArray(0))
+        var (_, i) = readStr(d, 0)
+        val nEng = d[i].toInt(); val gCount = d[i + 2].toInt(); pE0 = d[i + 4].toInt()
+        i += 5
+        val names = ArrayList<String>()
+        for (k in 0 until nEng) {
+            val (n, j) = readStr(d, i)
+            names.add(n)
+            i = j
+        }
+        engNames = names
+        for (id in 0 until gCount) {
+            val r = req(5, byteArrayOf(1, id.toByte()))
+            if (r.size > 9 && readStr(r, 9).first == "ENG") {
+                gEng = id
+                break
+            }
+        }
+        if (gEng < 0) throw IllegalStateException("The device does not say how to change its engine")
+    }
+
+    /** The enum names of parameter [id] (scope 0: the selected track). */
+    private fun names(id: Int): List<String> {
+        val r = req(5, byteArrayOf(0, id.toByte()))
+        var (_, i) = readStr(r, 9)                   // the label
+        i = readStr(r, i).second                     // the unit
+        val out = ArrayList<String>()
+        while (i < r.size) {
+            val (n, j) = readStr(r, i)
+            out.add(n)
+            i = j
+        }
+        return out
+    }
+
+    /**
+     * Track [track] (0..3) of the device plays slot [slot] with [engine] ("SLICE": chopped, trimmed on its SLICES page;
+     * "SAMPLE": on the keys). Its engine changes only when it is another one (a change loads that engine's first sound).
+     */
+    fun prepareTrack(track: Int, engine: String, slot: Int) {
+        learn()
+        req(27, byteArrayOf(track.coerceIn(0, 3).toByte()))
+        val want = engNames.indexOf(engine)
+        if (want < 0) throw IllegalStateException("The device has no $engine engine")
+        val cur = req(2, byteArrayOf(1, gEng.toByte()))
+        val now = if (cur.size >= 4) ((cur[2].toInt() and 0x7F) or ((cur[3].toInt() and 0x7F) shl 7)) - 8192 else -1
+        if (now != want) req(3, byteArrayOf(1, gEng.toByte()) + v14(want))
+        val idx = names(pE0).indexOf("USR${slot + 1}")
+        if (idx < 0) throw IllegalStateException("The device's $engine has no USR${slot + 1}")
+        req(3, byteArrayOf(0, pE0.toByte()) + v14(idx))
+    }
+
     fun close() {
         midi.sysexListener = null
     }
