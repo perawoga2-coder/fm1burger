@@ -836,50 +836,90 @@ class MainActivity : Activity() {
                     return@runOnUiThread
                 }
                 val secs = data.size / Cfg.SR.toDouble()
-                val items = Array(Fm1SampleLink.SLOTS) { k -> slots.getOrNull(k) ?: "USR${k + 1}" }
-                // 3.17: how loud it goes in (a short hit comes up a lot with Loud / Louder)
                 val lp = getSharedPreferences("fm1", MODE_PRIVATE)
                 Fm1SampleLink.loud = lp.getInt("loud", 1).coerceIn(0, 2)
+                var q = lp.getInt("quality", 0).coerceIn(0, 2)
+                var spanSel = 0                                   // 0 = as long as it needs, else 1..3 slots
+                val join = fm1Link.joinOk
                 val lbox = ui.col()
                 lbox.setPadding(ui.dp(20), ui.dp(6), ui.dp(20), 0)
-                lbox.addView(ui.text("Loudness", 13f, Theme.DIM))
-                val lrow = ui.row()
-                val lbtns = ArrayList<android.widget.Button>()
-                for (k in 0 until 3) {
-                    val b = ui.button(Fm1SampleLink.LOUD_NAMES[k]) {
-                        Fm1SampleLink.loud = k
-                        lp.edit().putInt("loud", k).apply()
-                        for (j in lbtns.indices) ui.styleButton(lbtns[j], j == k)
-                    }
-                    lbtns.add(b)
-                    lrow.addView(b, ui.w(1f, 3))
+                val info = ui.text("", 13f, Theme.TEXT)
+                val slotBtns = ArrayList<android.widget.Button>()
+                fun spanOf(slot: Int): Int {
+                    val need = Fm1SampleLink.spanFor(secs, q, slot).let { if (it == 0) Fm1SampleLink.SLOTS - slot else it }
+                    val sp = if (spanSel == 0) need else spanSel
+                    return if (join) sp.coerceIn(1, Fm1SampleLink.SLOTS - slot) else 1
                 }
-                for (j in lbtns.indices) ui.styleButton(lbtns[j], j == Fm1SampleLink.loud)
-                lbox.addView(lrow, ui.fullWidth(4))
-                lbox.addView(ui.text("Then tap the slot:", 13f, Theme.DIM), ui.fullWidth(8))
-                AlertDialog.Builder(this)
-                    .setView(lbox)
-                    .setTitle(String.format(Locale.US, "Send %s (%.1f s%s) to", name, secs,
-                        if (secs > Fm1SampleLink.MAX_SECONDS) String.format(Locale.US, ", cut to %.1f s", Fm1SampleLink.MAX_SECONDS) else ""))
-                    .setItems(items) { _, w -> uploadToFm1(w, name, data) }
+                fun refresh() {
+                    val sp0 = spanOf(0)
+                    val cap = Fm1SampleLink.capSeconds(q, sp0)
+                    info.text = String.format(Locale.US, "%.1f s · %s · %d slot%s hold %.1f s%s", secs, Fm1SampleLink.QUALITY_NAMES[q],
+                        sp0, if (sp0 > 1) "s" else "", cap, if (secs > cap) String.format(Locale.US, " (cut to %.1f s)", cap) else " ✓")
+                    for ((k, b) in slotBtns.withIndex()) {
+                        val sp = spanOf(k)
+                        val okLen = Fm1SampleLink.capSeconds(q, sp) >= secs
+                        b.text = (if (sp > 1) "USR${k + 1}-${k + sp}" else "USR${k + 1}") + "   " + (slots.getOrNull(k)?.substringAfter(": ") ?: "") +
+                            if (okLen) "" else "  (cut)"
+                    }
+                }
+                fun chooser(label: String, names: Array<String>, sel: Int, act: (Int) -> Unit) {
+                    lbox.addView(ui.text(label, 13f, Theme.DIM), ui.fullWidth(6))
+                    val row = ui.row()
+                    val bs = ArrayList<android.widget.Button>()
+                    for ((k, n) in names.withIndex()) {
+                        val b = ui.button(n) {
+                            act(k)
+                            for (j in bs.indices) ui.styleButton(bs[j], j == k)
+                            refresh()
+                        }
+                        bs.add(b)
+                        row.addView(b, ui.w(1f, 3))
+                    }
+                    for (j in bs.indices) ui.styleButton(bs[j], j == sel)
+                    lbox.addView(row, ui.fullWidth(2))
+                }
+                chooser("Quality (length per slot: HI ${String.format(Locale.US, "%.0f", Fm1SampleLink.capSeconds(0, 1))} s, " +
+                    "LONG ${String.format(Locale.US, "%.0f", Fm1SampleLink.capSeconds(1, 1))} s, LO-FI ${String.format(Locale.US, "%.0f", Fm1SampleLink.capSeconds(2, 1))} s)",
+                    Fm1SampleLink.QUALITY_NAMES, q) { q = it; lp.edit().putInt("quality", it).apply() }
+                if (join) chooser("Slots", arrayOf("As it needs", "1", "2", "3"), 0) { spanSel = it }
+                else lbox.addView(ui.text("Joining slots for longer sounds needs the Burger Studio firmware bs10.", 12f, Theme.DIM), ui.fullWidth(6))
+                chooser("Loudness", Fm1SampleLink.LOUD_NAMES, Fm1SampleLink.loud) { Fm1SampleLink.loud = it; lp.edit().putInt("loud", it).apply() }
+                lbox.addView(info, ui.fullWidth(10))
+                lbox.addView(ui.text("Then tap where it goes:", 13f, Theme.DIM), ui.fullWidth(8))
+                var dlg: AlertDialog? = null
+                for (k in 0 until Fm1SampleLink.SLOTS) {
+                    val b = ui.button("USR${k + 1}") {
+                        dlg?.dismiss()
+                        uploadToFm1(k, name, data, q, spanOf(k))
+                    }
+                    b.isAllCaps = false
+                    b.gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+                    b.setPadding(ui.dp(14), 0, ui.dp(10), 0)
+                    slotBtns.add(b)
+                    lbox.addView(b, ui.fullWidth(4))
+                }
+                refresh()
+                dlg = AlertDialog.Builder(this)
+                    .setTitle("Send $name to ${hub.slotDevice ?: "the device"}")
+                    .setView(android.widget.ScrollView(this).also { it.addView(lbox) })
                     .setNegativeButton("Cancel", null)
                     .show()
             }
         }.start()
     }
 
-    private fun uploadToFm1(slot: Int, name: String, data: FloatArray) {
+    private fun uploadToFm1(slot: Int, name: String, data: FloatArray, q: Int = 0, span: Int = 1) {
         val bar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         bar.max = 1000
         val box = ui.col()
         box.setPadding(ui.dp(20), ui.dp(12), ui.dp(20), ui.dp(4))
-        box.addView(ui.text("Writing into USR${slot + 1}. Keep the cable in.", 13f, Theme.DIM))
+        box.addView(ui.text("Writing into " + (if (span > 1) "USR${slot + 1}-${slot + span}" else "USR${slot + 1}") + ". Keep the cable in.", 13f, Theme.DIM))
         box.addView(bar, ui.fullWidth(8))
         val dlg = AlertDialog.Builder(this).setTitle("Send to ${hub.slotDevice ?: "device"}").setView(box).setCancelable(false).show()
         val nm = name.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9 _-]"), "").ifEmpty { "BURGER" }
         Thread {
             val res = try {
-                Result.success(fm1Link.upload(slot, nm, data) { f -> runOnUiThread { bar.progress = (f * 1000).toInt() } })
+                Result.success(fm1Link.upload(slot, nm, data, q, span) { f -> runOnUiThread { bar.progress = (f * 1000).toInt() } })
             } catch (ex: Exception) {
                 Result.failure(ex)
             }

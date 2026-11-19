@@ -38,42 +38,59 @@ class Fm1SampleLink(private val midi: MidiLink) {
         )
         private val IMA_IDX = intArrayOf(-1, -1, -1, -1, 2, 4, 6, 8)
 
-        /** 44.1 kHz floats -> 22050 Hz int16, peak at 30000 (as Felucca's uploader), cut to the slot with a short fade. */
-        fun toSlot(src: FloatArray): ShortArray {
-            val n = src.size / 2
-            val maxN = MAX_DATA * 2
+        /** 3.18: what goes into a slot: HI 22.05 kHz, LONG 11.025 kHz, LO-FI 5.5 kHz (the device plays each at its rate). */
+        val QUALITY_NAMES = arrayOf("HI", "LONG", "LO-FI")
+        private val QUALITY_DIV = intArrayOf(2, 4, 8)
+        fun qualityRate(q: Int): Double = 44100.0 / QUALITY_DIV[q.coerceIn(0, 2)]
+        /** ADPCM bytes for a sample over [span] slots in a row (firmware bs10 for 2 and 3), the last 4 KiB left for SLICE's slices. */
+        fun capBytes(span: Int): Int = (span.coerceIn(1, 3) - 1) * 0x14000 + MAX_DATA
+        fun capSeconds(q: Int, span: Int): Double = capBytes(span) * 2.0 / qualityRate(q)
+        /** The shortest way to hold [secs] at quality [q] from slot [slot] on: span 1..3, or 0 when even all the slots are too short. */
+        fun spanFor(secs: Double, q: Int, slot: Int): Int {
+            for (sp in 1..(SLOTS - slot)) if (capSeconds(q, sp) >= secs) return sp
+            return 0
+        }
+
+        /** 44.1 kHz floats -> int16 at quality [q] ([div] 2 / 4 / 8 to one, averaged), peak at 30000, cut to [span] slots with a short fade. */
+        fun toSlot(src: FloatArray, q: Int = 0, span: Int = 1): ShortArray {
+            val div = QUALITY_DIV[q.coerceIn(0, 2)]
+            val rate = (44100 / div)
+            val n = src.size / div
+            val maxN = capBytes(span) * 2
             val len = min(n, maxN)
             val f = FloatArray(len)
             var pk = 0f
             for (i in 0 until len) {
-                // two to one, averaged (a gentle anti-alias)
-                val a = src[2 * i]
-                val b = if (2 * i + 1 < src.size) src[2 * i + 1] else a
-                val v = (a + b) * 0.5f
+                var v = 0f                                // div to one, averaged (a gentle anti-alias; LO-FI keeps some grit)
+                for (j in 0 until div) v += src[min(src.size - 1, div * i + j)]
+                v /= div
                 f[i] = v
                 if (abs(v) > pk) pk = abs(v)
             }
             if (n > maxN) {
-                val fade = min(len, SLOT_RATE / 50)
+                val fade = min(len, rate / 50)
                 for (k in 0 until fade) f[len - fade + k] *= 1f - k.toFloat() / fade
             }
             if (pk > 1e-6f && loud > 0) {
-                // 3.17 LOUDNESS: a short hit has one loud peak and a quiet body, so peak normalising alone leaves it quiet.
-                // Driven +9 dB (LOUD) or +13 dB (LOUDER) into a fast limiter (1 ms attack, 25 ms release) and a soft knee:
-                // the body comes up (a spoon hit: about +6.5 / +8.5 dB RMS at the same peak), the hit keeps its snap.
-                val drive = (if (loud >= 2) 4.5f else 2.8f) / pk
-                val att = 1f - kotlin.math.exp(-1f / (0.001f * SLOT_RATE))
-                val rel = 1f - kotlin.math.exp(-1f / (0.025f * SLOT_RATE))
-                val thr = 0.9f
+                // 3.18 LOUDNESS, in two layers: the sound itself (its head, the hit, untouched) with a squeezed copy under it
+                // (+12 dB into a fast limiter and a soft knee: the body). About +5 dB (LOUD) / +6 dB (LOUDER) on a spoon hit,
+                // the hit keeps its snap (3.17 squeezed the sound itself, which flattened the head).
+                val w = if (loud >= 2) 2.5f else 1.0f
+                val drive = 4f
+                val att = 1f - kotlin.math.exp(-1f / (0.001f * rate))
+                val rel = 1f - kotlin.math.exp(-1f / (0.025f * rate))
                 var env = 0f
+                val inv = 1f / pk
                 pk = 0f
                 for (i in 0 until len) {
-                    val x = f[i] * drive
+                    val o = f[i] * inv
+                    val x = o * drive
                     val ax = abs(x)
                     env += (ax - env) * (if (ax > env) att else rel)
-                    var y = if (env > thr) x * thr / env else x
-                    val ay = abs(y)
-                    if (ay > 0.8f) y = (if (y < 0f) -1f else 1f) * (0.8f + 0.2f * kotlin.math.tanh((ay - 0.8f) / 0.2f))
+                    var c = if (env > 0.9f) x * 0.9f / env else x
+                    val ac = abs(c)
+                    if (ac > 0.8f) c = (if (c < 0f) -1f else 1f) * (0.8f + 0.2f * kotlin.math.tanh((ac - 0.8f) / 0.2f))
+                    val y = o + w * c
                     f[i] = y
                     if (abs(y) > pk) pk = abs(y)
                 }
@@ -122,13 +139,14 @@ class Fm1SampleLink(private val midi: MidiLink) {
         }
 
         /** The 480-byte slot header: one zone over the whole keyboard, root C4 (Felucca's sampleio.user_slot). */
-        fun header(name: String, samples: Int, data: ByteArray, root: Int = 60): ByteArray {
+        fun header(name: String, samples: Int, data: ByteArray, root: Int = 60, q: Int = 0, span: Int = 1): ByteArray {
             val h = ByteArray(HDR_LEN)
             fun u16(o: Int, v: Int) { h[o] = v.toByte(); h[o + 1] = (v shr 8).toByte() }
             fun u32(o: Int, v: Long) { for (k in 0 until 4) h[o + k] = (v shr (8 * k)).toByte() }
             u32(0, 0x504D5346L)                      // "FSMP"
             u16(4, 1)
             h[6] = 1                                  // one zone
+            h[7] = (if (span >= 2) span else 0).toByte()   // bs10: the slots it takes (joined)
             val nm = name.uppercase().filter { it.code in 0x20..0x7E }.take(8)
             for ((k, c) in nm.withIndex()) h[8 + k] = c.code.toByte()
             val crc = CRC32()
@@ -140,7 +158,7 @@ class Fm1SampleLink(private val midi: MidiLink) {
             u32(z + 4, samples.toLong())              // n
             u32(z + 8, 0)                             // loop start
             u32(z + 12, (samples - 1).toLong())       // loop end
-            u32(z + 16, Math.round(SLOT_RATE / 44100.0 * 65536).toLong())
+            u32(z + 16, Math.round(qualityRate(q) / 44100.0 * 65536).toLong())
             u16(z + 20, root * 16)
             u16(z + 22, 0)                            // predictor at the loop start
             h[z + 24] = 0                             // step index there
@@ -204,6 +222,9 @@ class Fm1SampleLink(private val midi: MidiLink) {
 
     private val replies = ArrayBlockingQueue<ByteArray>(64)
 
+    /** The firmware joins slots (bs10 and later): learnt from SMP_INFO. */
+    @Volatile var joinOk = false
+
     /** The device asked for something (firmware bs5: REC on its SLICES page): kind, slot (127 none), track. */
     @Volatile var onEvent: ((Int, Int, Int) -> Unit)? = null
 
@@ -263,19 +284,28 @@ class Fm1SampleLink(private val midi: MidiLink) {
                 out.add("USR${k + 1}: " + if (nz == 0) "empty" else "$nm (${d[j + 1]} KiB)")
                 i = j + 2
             }
+            joinOk = i + n <= d.size                 // (an older firmware sends nothing after the slots)
+            for (k in 0 until n) {                   // bs10: after the slots, what each one's sample takes / whose it is
+                if (i + k >= d.size) break
+                val v = d[i + k].toInt()
+                if (v and 0x40 != 0) out[k] = "USR${k + 1}: part of USR${(v and 3) + 1}'s sample"
+                else if (v >= 2 && k < out.size) out[k] = out[k] + " · USR${k + 1}-${k + v}"
+            }
         } catch (ex: Exception) {
         }
         return out
     }
 
     /** Uploads [src] (44.1 kHz mono floats) into slot 0..2. [progress] gets 0..1. Runs on a worker thread. */
-    fun upload(slot: Int, name: String, src: FloatArray, progress: (Float) -> Unit): String {
-        val s = toSlot(src)
+    fun upload(slot: Int, name: String, src: FloatArray, q: Int = 0, span: Int = 1, progress: (Float) -> Unit): String {
+        val sp = span.coerceIn(1, SLOTS - slot.coerceIn(0, SLOTS - 1))
+        val s = toSlot(src, q, sp)
         if (s.isEmpty()) throw IllegalStateException("The sample is empty")
         val data = imaEncode(s)
-        val hdr = header(name, s.size, data)
+        val hdr = header(name, s.size, data, 60, q, sp)
         write(slot, hdr, data, progress)
-        return String.format(java.util.Locale.US, "%.1f s", s.size / SLOT_RATE.toDouble())
+        return String.format(java.util.Locale.US, "%.1f s, %s%s", s.size / qualityRate(q), QUALITY_NAMES[q.coerceIn(0, 2)],
+            if (sp > 1) ", USR${slot + 1}-${slot + sp}" else "")
     }
 
     /** Up to 16 hits as a kit in one slot (SAMPLE: one hit per key from C4). Returns "n hits, x s". */
