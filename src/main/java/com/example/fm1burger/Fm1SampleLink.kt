@@ -304,6 +304,26 @@ class Fm1SampleLink(private val midi: MidiLink) {
         req(3, byteArrayOf(0, pE0.toByte()) + v14(idx))
     }
 
+    /**
+     * Firmware 2 (Burger Studio FM-1 bs4 and later): one command puts the slot on a track, opens the trim page (SLICE),
+     * plays it once and starts the music again if the upload stopped it. false: an older firmware (use prepareTrack).
+     */
+    fun show(slot: Int, track: Int, slice: Boolean, play: Boolean = true, resume: Boolean = true): Boolean {
+        val r = try {
+            req(112, byteArrayOf(slot.toByte(), track.coerceIn(0, 3).toByte(), (if (slice) 0 else 1).toByte(),
+                ((if (play) 1 else 0) or (if (resume) 2 else 0)).toByte()), 1500)
+        } catch (ex: IllegalStateException) {
+            return false
+        }
+        if (r.size < 2) return false
+        return when (r[1].toInt()) {
+            0 -> true
+            2 -> throw IllegalStateException("The slot on the device is empty")
+            3 -> throw IllegalStateException("The device cannot play the slot with that engine")
+            else -> false
+        }
+    }
+
     fun close() {
         midi.sysexListener = null
     }

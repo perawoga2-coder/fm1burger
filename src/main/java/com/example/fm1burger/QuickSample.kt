@@ -128,7 +128,7 @@ class QuickSamplePanel(private val a: MainActivity) {
                 val len = a.sampleLink().upload(s, name, d) { f ->
                     a.runOnUiThread { status.text = "Sending to $device USR${s + 1}: ${(f * 100).toInt()} %" }
                 }
-                a.sampleLink().prepareTrack(t, eng, s)
+                if (!a.sampleLink().show(s, t, eng == "SLICE")) a.sampleLink().prepareTrack(t, eng, s)
                 "Ready ($len): $device track ${t + 1} plays USR${s + 1} with $eng." +
                     (if (eng == "SLICE") " Trim it there: EDIT → SLICES." else "") + " REC again for the next one."
             } catch (ex: Exception) {
