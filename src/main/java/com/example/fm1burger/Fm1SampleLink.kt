@@ -57,9 +57,34 @@ class Fm1SampleLink(private val midi: MidiLink) {
                 val fade = min(len, SLOT_RATE / 50)
                 for (k in 0 until fade) f[len - fade + k] *= 1f - k.toFloat() / fade
             }
+            if (pk > 1e-6f && loud > 0) {
+                // 3.17 LOUDNESS: a short hit has one loud peak and a quiet body, so peak normalising alone leaves it quiet.
+                // Driven +9 dB (LOUD) or +13 dB (LOUDER) into a fast limiter (1 ms attack, 25 ms release) and a soft knee:
+                // the body comes up (a spoon hit: about +6.5 / +8.5 dB RMS at the same peak), the hit keeps its snap.
+                val drive = (if (loud >= 2) 4.5f else 2.8f) / pk
+                val att = 1f - kotlin.math.exp(-1f / (0.001f * SLOT_RATE))
+                val rel = 1f - kotlin.math.exp(-1f / (0.025f * SLOT_RATE))
+                val thr = 0.9f
+                var env = 0f
+                pk = 0f
+                for (i in 0 until len) {
+                    val x = f[i] * drive
+                    val ax = abs(x)
+                    env += (ax - env) * (if (ax > env) att else rel)
+                    var y = if (env > thr) x * thr / env else x
+                    val ay = abs(y)
+                    if (ay > 0.8f) y = (if (y < 0f) -1f else 1f) * (0.8f + 0.2f * kotlin.math.tanh((ay - 0.8f) / 0.2f))
+                    f[i] = y
+                    if (abs(y) > pk) pk = abs(y)
+                }
+            }
             val g = if (pk > 1e-6f) 30000f / pk else 0f
             return ShortArray(len) { (f[it] * g).toInt().coerceIn(-32768, 32767).toShort() }
         }
+
+        /** Loudness of what goes into a slot: 0 NORMAL (peak only), 1 LOUD (default), 2 LOUDER. */
+        @Volatile var loud = 1
+        val LOUD_NAMES = arrayOf("Normal", "Loud", "Louder")
 
         fun imaEncode(s: ShortArray): ByteArray {
             var pred = 0

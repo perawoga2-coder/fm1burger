@@ -146,6 +146,7 @@ class MainActivity : Activity() {
         VocalSave.load(File(filesDir, "vocal.json"), engine.vocal)
         AmbientSave.load(File(filesDir, "ambient.json"), engine.ambient)
         GuitarSave.load(File(filesDir, "guitars.json"), engine.rhythmGtr, engine.riffGtr, engine.drumHeavy)
+        Fm1SampleLink.loud = getSharedPreferences("fm1", MODE_PRIVATE).getInt("loud", 1).coerceIn(0, 2)
         engine.bank.load(File(filesDir, "parts.json"))
         engine.bank.loadClips(filesDir)
         lastPartVersion = engine.bank.version
@@ -836,7 +837,28 @@ class MainActivity : Activity() {
                 }
                 val secs = data.size / Cfg.SR.toDouble()
                 val items = Array(Fm1SampleLink.SLOTS) { k -> slots.getOrNull(k) ?: "USR${k + 1}" }
+                // 3.17: how loud it goes in (a short hit comes up a lot with Loud / Louder)
+                val lp = getSharedPreferences("fm1", MODE_PRIVATE)
+                Fm1SampleLink.loud = lp.getInt("loud", 1).coerceIn(0, 2)
+                val lbox = ui.col()
+                lbox.setPadding(ui.dp(20), ui.dp(6), ui.dp(20), 0)
+                lbox.addView(ui.text("Loudness", 13f, Theme.DIM))
+                val lrow = ui.row()
+                val lbtns = ArrayList<android.widget.Button>()
+                for (k in 0 until 3) {
+                    val b = ui.button(Fm1SampleLink.LOUD_NAMES[k]) {
+                        Fm1SampleLink.loud = k
+                        lp.edit().putInt("loud", k).apply()
+                        for (j in lbtns.indices) ui.styleButton(lbtns[j], j == k)
+                    }
+                    lbtns.add(b)
+                    lrow.addView(b, ui.w(1f, 3))
+                }
+                for (j in lbtns.indices) ui.styleButton(lbtns[j], j == Fm1SampleLink.loud)
+                lbox.addView(lrow, ui.fullWidth(4))
+                lbox.addView(ui.text("Then tap the slot:", 13f, Theme.DIM), ui.fullWidth(8))
                 AlertDialog.Builder(this)
+                    .setView(lbox)
                     .setTitle(String.format(Locale.US, "Send %s (%.1f s%s) to", name, secs,
                         if (secs > Fm1SampleLink.MAX_SECONDS) String.format(Locale.US, ", cut to %.1f s", Fm1SampleLink.MAX_SECONDS) else ""))
                     .setItems(items) { _, w -> uploadToFm1(w, name, data) }
@@ -867,7 +889,7 @@ class MainActivity : Activity() {
                 AlertDialog.Builder(this)
                     .setTitle(if (ok != null) "On ${hub.slotDevice ?: "the device"} now" else "Sending failed")
                     .setMessage(if (ok != null)
-                        "${nm.uppercase().take(8)} ($ok) is in USR${slot + 1}.\n\nOn the device: a track with the SAMPLE engine, SET = USR${slot + 1}, " +
+                        "${nm.uppercase().take(8)} ($ok) is in USR${slot + 1} (loudness: ${Fm1SampleLink.LOUD_NAMES[Fm1SampleLink.loud]}).\n\nOn the device: a track with the SAMPLE engine, SET = USR${slot + 1}, " +
                             "plays it on the keys; the SLICE engine, SRC = USR${slot + 1}, chops it on its hits (DIV AUTO)."
                     else (res.exceptionOrNull()?.message ?: "?"))
                     .setPositiveButton("OK", null)
