@@ -108,7 +108,9 @@ class GuitarScreen(private val a: MainActivity) : Screen {
                 gg.art[s] = MetalGuitar.OFF
                 gg.fret[s] = 0
             }
+            gg.audition(MetalGuitar.OFF, 0)                 // and what still rings stops now
             refresh()
+            ui.toast("${if (mode == 0) "Rhythm" else "Riff"} guitar cleared")
         }, ui.w(1f, 3))
         cr.addView(ui.button("All chug") {
             val gg = g()
@@ -195,8 +197,9 @@ class GuitarScreen(private val a: MainActivity) : Screen {
     private fun tapStep(s: Int) {
         val gg = g()
         selStep = s
-        if (gg.art[s] == MetalGuitar.CHUG || gg.art[s] == MetalGuitar.OPEN) {
+        if (gg.art[s] != MetalGuitar.OFF) {             // a chug, an open or a hold (—): one tap removes it
             gg.art[s] = MetalGuitar.OFF
+            if (!e.playing) gg.audition(MetalGuitar.OFF, 0)
         } else {
             gg.art[s] = MetalGuitar.CHUG
             gg.audition(gg.art[s], gg.fret[s])
@@ -255,6 +258,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
                 s == selStep -> ui.styleButton(b, true, Theme.YELLOW, 8)
                 art == MetalGuitar.CHUG -> ui.styleButton(b, true, Theme.alpha(col, 150), 8)
                 art == MetalGuitar.OPEN -> ui.styleButton(b, true, col, 8)
+                art == MetalGuitar.HOLD -> ui.styleButton(b, true, Theme.alpha(col, 70), 8)    // a hold shows, so it is clear it is there
                 else -> ui.styleButton(b, false, col, 8)
             }
         }

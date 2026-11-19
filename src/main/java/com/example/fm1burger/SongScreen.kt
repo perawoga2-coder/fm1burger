@@ -243,10 +243,22 @@ class SongScreen(private val a: MainActivity) : Screen {
 
     private fun clearDialog() {
         val c = bank.cur
+        val gtr = android.widget.CheckBox(a)
+        gtr.text = "The guitars too (they are shared by every part)"
+        gtr.isChecked = true
+        val box = ui.col()
+        box.setPadding(ui.dp(20), ui.dp(4), ui.dp(20), 0)
+        box.addView(gtr)
         AlertDialog.Builder(a)
             .setTitle("Clear ${PartNames.NAMES[c]}?")
             .setMessage("All steps of this part are turned off (tracks, drums, bassline, synth). Samples and sounds stay.")
+            .setView(box)
             .setPositiveButton("Clear") { _, _ ->
+                if (gtr.isChecked) for (g in arrayOf(e.rhythmGtr, e.riffGtr)) {
+                    g.art.fill(MetalGuitar.OFF)
+                    g.fret.fill(0)
+                    g.audition(MetalGuitar.OFF, 0)
+                }
                 bank.parts[c].blank()
                 bank.parts[c].apply(e)
                 bank.version++
