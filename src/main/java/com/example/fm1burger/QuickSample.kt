@@ -26,7 +26,11 @@ class QuickSamplePanel(private val a: MainActivity) {
     private val modeBtns = ArrayList<Button>()
     private var slot = 0
     private var track = 0
-    private var slice = true
+    /** 0 SLICE (chop and trim), 1 SAMPLE (on the keys), 2 KIT (every take one more key: a kit in one slot) */
+    private var mode = 0
+    private val slice: Boolean get() = mode == 0
+    private val kit = ArrayList<FloatArray>()
+    private lateinit var kitInfo: TextView
     private var busy = false
     private var takes = 0
     private var loops = 0
@@ -71,13 +75,22 @@ class QuickSamplePanel(private val a: MainActivity) {
         }
         view.addView(r, ui.fullWidth(6))
         val m = ui.row()
-        for ((k, n) in listOf("SLICE: chop and trim", "SAMPLE: play on the keys").withIndex()) {
-            val b = ui.button(n) { slice = k == 0; paint() }
+        for ((k, n) in listOf("SLICE: chop and trim", "SAMPLE: on the keys", "KIT: a hit per key").withIndex()) {
+            val b = ui.button(n) { mode = k; paint() }
             b.textSize = 12f
             modeBtns.add(b)
             m.addView(b, ui.w(1f, 2))
         }
         view.addView(m, ui.fullWidth(4))
+        val kr = ui.row()
+        kitInfo = ui.text("", 12f, Theme.DIM)
+        kr.addView(kitInfo, ui.w(1f, 3))
+        kr.addView(ui.button("New kit") {
+            kit.clear()
+            paint()
+            ui.toast("New kit: the next take is the first key (C4)")
+        }, ui.w(0f, 3))
+        view.addView(kr, ui.fullWidth(2))
 
         view.addView(ui.text("⟲ Resampling loop", 13f, Theme.ACCENT, true), ui.fullWidth(12))
         view.addView(ui.text("Shape the sound on the device (SLICER, delay, reverb, its keys), then record it back here over USB: " +
@@ -110,7 +123,7 @@ class QuickSamplePanel(private val a: MainActivity) {
                 if (kind == 1 && Features.labs()) {
                     if (s in 0 until Fm1SampleLink.SLOTS) slot = s
                     if (t in 0 until 4) track = t
-                    slice = true
+                    if (mode == 1) mode = 0
                     paint()
                     rec()
                 }
@@ -121,8 +134,12 @@ class QuickSamplePanel(private val a: MainActivity) {
     private fun paint() {
         for (k in slotBtns.indices) ui.styleButton(slotBtns[k], k == slot)
         for (k in trackBtns.indices) ui.styleButton(trackBtns[k], k == track)
-        ui.styleButton(modeBtns[0], slice)
-        ui.styleButton(modeBtns[1], !slice)
+        for (k in modeBtns.indices) ui.styleButton(modeBtns[k], k == mode)
+        if (::kitInfo.isInitialized) {
+            kitInfo.visibility = if (mode == 2) View.VISIBLE else View.GONE
+            kitInfo.text = if (kit.isEmpty()) "KIT: each take adds a key (C4, C#4, D4 …), up to 16 hits, 7 s in all"
+            else "KIT: ${kit.size} hit${if (kit.size > 1) "s" else ""} on C4 … " + PianoRollView.noteName(59 + kit.size)
+        }
     }
 
     private fun rec() {
@@ -156,7 +173,54 @@ class QuickSamplePanel(private val a: MainActivity) {
             return
         }
         takes++
+        if (mode == 2) {
+            if (kit.size >= 16) {
+                status.text = "The kit has 16 hits: press New kit for another one"
+                return
+            }
+            kit.add(d)
+            paint()
+            sendKit()
+            return
+        }
         send(d, "Hit_" + String.format(java.util.Locale.US, "%02d", takes), slot, false)
+    }
+
+    /** The whole kit into the slot again (a slot is written in one go), SAMPLE on the track: a hit per key. */
+    private fun sendKit() {
+        busy = true
+        recBtn.isEnabled = false
+        resBtn.isEnabled = false
+        val s = slot
+        val t = track
+        val hits = ArrayList(kit)
+        val device = a.hub.slotDevice ?: "the device"
+        status.text = "Sending the kit (${hits.size} hits) to $device USR${s + 1}…"
+        Thread {
+            val msg = try {
+                try {
+                    a.store.saveNew("Kit_hit_" + String.format(java.util.Locale.US, "%02d", hits.size), hits.last(), Cfg.SR)
+                } catch (ex: Exception) {
+                }
+                val len = a.sampleLink().uploadKit(s, "KIT", hits) { f ->
+                    a.runOnUiThread { status.text = "Sending the kit to $device USR${s + 1}: ${(f * 100).toInt()} %" }
+                }
+                if (!a.sampleLink().show(s, t, false)) a.sampleLink().prepareTrack(t, "SAMPLE", s)
+                "Kit ready ($len): $device track ${t + 1}, keys C4 … " + PianoRollView.noteName(59 + hits.size) +
+                    ". REC again: the next key."
+            } catch (ex: Exception) {
+                "Not sent: " + (ex.message ?: "?")
+            }
+            a.runOnUiThread {
+                if (msg.startsWith("Not sent") && kit.isNotEmpty()) kit.removeAt(kit.size - 1)   // (not on the device)
+                busy = false
+                recBtn.isEnabled = true
+                resBtn.isEnabled = true
+                status.text = msg
+                paint()
+                a.libraryScreen.refresh()
+            }
+        }.start()
     }
 
     /** Into slot [s], on the chosen track; [next]: the slot becomes the current one (the loop moves on). */

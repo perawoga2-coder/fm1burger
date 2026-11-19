@@ -125,6 +125,42 @@ class Fm1SampleLink(private val midi: MidiLink) {
             return h
         }
 
+        /**
+         * A kit: zone k (one hit) on key 60 + k only (C4, C#4, D4 ...), the keys between them silent; each zone is
+         * encoded on its own from predictor 0 / index 0, as the device starts every note. [offs] byte offsets, [ns] samples.
+         */
+        fun kitHeader(name: String, offs: IntArray, ns: IntArray, data: ByteArray): ByteArray {
+            val h = ByteArray(HDR_LEN)
+            fun u16(o: Int, v: Int) { h[o] = v.toByte(); h[o + 1] = (v shr 8).toByte() }
+            fun u32(o: Int, v: Long) { for (k in 0 until 4) h[o + k] = (v shr (8 * k)).toByte() }
+            val n = min(offs.size, ZONES)
+            u32(0, 0x504D5346L)
+            u16(4, 1)
+            h[6] = n.toByte()
+            val nm = name.uppercase().filter { it.code in 0x20..0x7E }.take(8)
+            for ((k, c) in nm.withIndex()) h[8 + k] = c.code.toByte()
+            val crc = CRC32()
+            crc.update(data)
+            u32(16, data.size.toLong())
+            u32(20, crc.value)
+            for (k in 0 until n) {
+                val z = 32 + k * 28
+                val root = 60 + k
+                u32(z, offs[k].toLong())
+                u32(z + 4, ns[k].toLong())
+                u32(z + 8, 0)
+                u32(z + 12, (ns[k] - 1).toLong())
+                u32(z + 16, Math.round(SLOT_RATE / 44100.0 * 65536).toLong())
+                u16(z + 20, root * 16)
+                u16(z + 22, 0)
+                h[z + 24] = 0
+                h[z + 25] = root.toByte()             // lo = hi = its own key
+                h[z + 26] = root.toByte()
+                h[z + 27] = 0
+            }
+            return h
+        }
+
         /** Felucca's pack7: groups of up to 7 bytes, each group led by their top bits. */
         fun pack7(b: ByteArray, from: Int = 0, to: Int = b.size): ByteArray {
             val out = java.io.ByteArrayOutputStream()
@@ -213,6 +249,34 @@ class Fm1SampleLink(private val midi: MidiLink) {
         if (s.isEmpty()) throw IllegalStateException("The sample is empty")
         val data = imaEncode(s)
         val hdr = header(name, s.size, data)
+        write(slot, hdr, data, progress)
+        return String.format(java.util.Locale.US, "%.1f s", s.size / SLOT_RATE.toDouble())
+    }
+
+    /** Up to 16 hits as a kit in one slot (SAMPLE: one hit per key from C4). Returns "n hits, x s". */
+    fun uploadKit(slot: Int, name: String, hits: List<FloatArray>, progress: (Float) -> Unit): String {
+        val list = hits.take(ZONES)
+        if (list.isEmpty()) throw IllegalStateException("The kit is empty")
+        val out = java.io.ByteArrayOutputStream()
+        val offs = IntArray(list.size)
+        val ns = IntArray(list.size)
+        var total = 0
+        for ((k, h) in list.withIndex()) {
+            val sm = toSlot(h)
+            val enc = imaEncode(sm)
+            offs[k] = out.size()
+            ns[k] = sm.size
+            out.write(enc)
+            total += sm.size
+        }
+        val data = out.toByteArray()
+        if (data.size > MAX_DATA) throw IllegalStateException(String.format(java.util.Locale.US,
+            "The kit is %.1f s long; a slot holds %.1f s: start a new kit", total / SLOT_RATE.toDouble(), MAX_SECONDS))
+        write(slot, kitHeader(name, offs, ns, data), data, progress)
+        return String.format(java.util.Locale.US, "%d hits, %.1f s", list.size, total / SLOT_RATE.toDouble())
+    }
+
+    private fun write(slot: Int, hdr: ByteArray, data: ByteArray, progress: (Float) -> Unit) {
         info()
         val sl = slot.coerceIn(0, SLOTS - 1).toByte()
         val b = req(11, byteArrayOf(sl))
@@ -242,7 +306,6 @@ class Fm1SampleLink(private val midi: MidiLink) {
             val why = when (r.getOrNull(1)?.toInt()) { 1 -> "size"; 2 -> "header"; 3 -> "data check"; 4 -> "flash"; 5 -> "zones"; else -> "?" }
             throw IllegalStateException("The FM-1 did not accept the sample ($why)")
         }
-        return String.format(java.util.Locale.US, "%.1f s", s.size / SLOT_RATE.toDouble())
     }
 
     // ---------------- setting up a track on the device (editor protocol: INFO, DESC, SET, TRACK) ----------------
