@@ -29,6 +29,15 @@ class QuickSamplePanel(private val a: MainActivity) {
     private var slice = true
     private var busy = false
     private var takes = 0
+    private var loops = 0
+
+    // the resampling loop: the device's sound (its effects on) back into the app, and back again
+    private val resBtn: Button
+    private val trigBox = android.widget.CheckBox(a)
+    private val backBox = android.widget.CheckBox(a)
+    private var resampling = false
+    private var lastLoop: FloatArray? = null
+    private val againBtn: Button
 
     init {
         title = ui.text("", 14f, Theme.ACCENT, true)
@@ -69,6 +78,30 @@ class QuickSamplePanel(private val a: MainActivity) {
             m.addView(b, ui.w(1f, 2))
         }
         view.addView(m, ui.fullWidth(4))
+
+        view.addView(ui.text("⟲ Resampling loop", 13f, Theme.ACCENT, true), ui.fullWidth(12))
+        view.addView(ui.text("Shape the sound on the device (SLICER, delay, reverb, its keys), then record it back here over USB: " +
+            "it comes back with the effects in it. Send it back again, shape it again, as many rounds as you like.",
+            11f, Theme.DIM), ui.fullWidth(2))
+        resBtn = ui.button("⟲ RESAMPLE from the device") { resample() }
+        resBtn.textSize = 16f
+        view.addView(resBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(60)).also {
+            it.topMargin = ui.dp(6)
+        })
+        trigBox.text = "Play it on the device while resampling (a MIDI note to its track)"
+        trigBox.setTextColor(Theme.TEXT)
+        trigBox.isChecked = true
+        view.addView(trigBox)
+        backBox.text = "Send the result straight back (into the next slot, so the one before stays)"
+        backBox.setTextColor(Theme.TEXT)
+        backBox.isChecked = true
+        view.addView(backBox)
+        againBtn = ui.button("Send the last resample back") {
+            val d = lastLoop
+            if (d != null && !busy) send(d, "Loop_" + String.format(java.util.Locale.US, "%02d", loops), (slot + 1) % Fm1SampleLink.SLOTS, true)
+        }
+        againBtn.visibility = View.GONE
+        view.addView(againBtn, ui.fullWidth(4))
         view.visibility = View.GONE
         paint()
     }
@@ -81,7 +114,7 @@ class QuickSamplePanel(private val a: MainActivity) {
     }
 
     private fun rec() {
-        if (busy) return
+        if (busy || resampling) return
         val r = a.recorder
         if (r.running) {
             r.stop()
@@ -110,14 +143,22 @@ class QuickSamplePanel(private val a: MainActivity) {
             status.text = "Only silence: hit a little closer to the mic"
             return
         }
-        busy = true
         takes++
-        val name = "Hit_" + String.format(java.util.Locale.US, "%02d", takes)
+        send(d, "Hit_" + String.format(java.util.Locale.US, "%02d", takes), slot, false)
+    }
+
+    /** Into slot [s], on the chosen track; [next]: the slot becomes the current one (the loop moves on). */
+    private fun send(d: FloatArray, name: String, s: Int, next: Boolean) {
+        busy = true
         val device = a.hub.slotDevice ?: "the device"
-        status.text = String.format(java.util.Locale.US, "Sending %.2f s to %s USR%d…", d.size / Cfg.SR.toDouble(), device, slot + 1)
+        status.text = String.format(java.util.Locale.US, "Sending %.2f s to %s USR%d…", d.size / Cfg.SR.toDouble(), device, s + 1)
         recBtn.isEnabled = false
-        val s = slot
+        resBtn.isEnabled = false
         val t = track
+        if (next) {
+            slot = s
+            paint()
+        }
         val eng = if (slice) "SLICE" else "SAMPLE"
         Thread {
             val msg = try {
@@ -137,10 +178,68 @@ class QuickSamplePanel(private val a: MainActivity) {
             a.runOnUiThread {
                 busy = false
                 recBtn.isEnabled = true
+                resBtn.isEnabled = true
                 status.text = msg
                 a.libraryScreen.refresh()
             }
         }.start()
+    }
+
+    /** ⟲: record the device's USB audio (its effects in it); stop: keep it, and (checked) send it back. */
+    private fun resample() {
+        if (busy) return
+        val r = a.recorder
+        if (r.running) {
+            if (resampling) {
+                r.stop()
+                if (trigBox.isChecked) a.midi.noteOff(60)
+            }
+            return
+        }
+        val dev = r.fm1Input()
+        if (dev == null) {
+            status.text = "No sound from the device over USB. Its USB audio has to be on (plugged in by USB)."
+            return
+        }
+        val err = r.start(dev, 30.0, null) { res -> a.runOnUiThread { resampled(res) } }
+        if (err != null) {
+            ui.toast(err)
+            return
+        }
+        resampling = true
+        if (trigBox.isChecked) a.midi.noteOn(60, 110)
+        resBtn.text = "■ STOP resampling"
+        ui.styleButton(resBtn, true, Theme.RED)
+    }
+
+    private fun resampled(res: RecResult?) {
+        resampling = false
+        resBtn.text = "⟲ RESAMPLE from the device"
+        ui.styleButton(resBtn, false)
+        if (res == null || res.data.isEmpty()) {
+            status.text = "Nothing came back"
+            return
+        }
+        val d0 = if (res.rate == Cfg.SR) res.data else Wav.resample(res.data, res.rate, Cfg.SR)
+        val d = trimmed(d0)
+        if (d == null) {
+            status.text = "Only silence came back: play the device while resampling (or check its volume)"
+            return
+        }
+        loops++
+        lastLoop = d
+        againBtn.visibility = View.VISIBLE
+        val name = "Loop_" + String.format(java.util.Locale.US, "%02d", loops)
+        if (backBox.isChecked) {
+            send(d, name, (slot + 1) % Fm1SampleLink.SLOTS, true)
+        } else {
+            try {
+                a.store.saveNew(name, d, Cfg.SR)
+                a.libraryScreen.refresh()
+            } catch (ex: Exception) {
+            }
+            status.text = String.format(java.util.Locale.US, "%s (%.1f s) is in the Library: edit it, or send it back.", name, d.size / Cfg.SR.toDouble())
+        }
     }
 
     /** Cut the quiet head and tail (keeping 10 ms before the first hit), fade 3 ms, normalise; null if all quiet. */
