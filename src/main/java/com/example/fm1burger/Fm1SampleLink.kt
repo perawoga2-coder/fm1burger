@@ -143,10 +143,23 @@ class Fm1SampleLink(private val midi: MidiLink) {
 
     private val replies = ArrayBlockingQueue<ByteArray>(64)
 
+    /** The device asked for something (firmware bs5: REC on its SLICES page): kind, slot (127 none), track. */
+    @Volatile var onEvent: ((Int, Int, Int) -> Unit)? = null
+
     init {
         midi.sysexListener = { data ->
-            if (data.size >= 4 && data[0] == HDR[0] && data[1] == HDR[1] && data[2] == HDR[2]) replies.offer(data)
+            if (data.size >= 4 && data[0] == HDR[0] && data[1] == HDR[1] && data[2] == HDR[2]) {
+                if (data[3].toInt() == 113 && data.size >= 7) onEvent?.invoke(data[4].toInt(), data[5].toInt(), data[6].toInt())
+                else replies.offer(data)
+            }
         }
+    }
+
+    /** Firmware bs5 and later: link the app (REC on the device's SLICES page then asks the app for a take). */
+    fun hello(): Boolean = try {
+        req(114, ByteArray(0), 1200).isNotEmpty()
+    } catch (ex: IllegalStateException) {
+        false
     }
 
     private fun req(cmd: Int, args: ByteArray, timeoutMs: Long = 3000): ByteArray {

@@ -104,6 +104,18 @@ class QuickSamplePanel(private val a: MainActivity) {
         view.addView(againBtn, ui.fullWidth(4))
         view.visibility = View.GONE
         paint()
+        // the device's REC (on its SLICES page) records a take here: into the slot its track plays
+        a.sampleLink().onEvent = { kind, s, t ->
+            a.runOnUiThread {
+                if (kind == 1 && Features.labs()) {
+                    if (s in 0 until Fm1SampleLink.SLOTS) slot = s
+                    if (t in 0 until 4) track = t
+                    slice = true
+                    paint()
+                    rec()
+                }
+            }
+        }
     }
 
     private fun paint() {

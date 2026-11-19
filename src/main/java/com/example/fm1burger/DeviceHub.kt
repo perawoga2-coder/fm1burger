@@ -196,6 +196,7 @@ class DeviceHub(private val a: MainActivity) {
             }
             if (ok) {
                 slotDevice = name
+                a.sampleLink().hello()                   // (newer firmware: its REC can ask the app for a take)
                 main.post { a.ui.toast("$name takes samples: Library > Devices… > send into its slots") }
             }
         }.start()
