@@ -251,6 +251,26 @@ class LibraryScreen(private val a: MainActivity) : Screen {
             .show()
     }
 
+    /** Things for connected gear (the FM-1 for now), kept out of the way of the main buttons. */
+    private fun deviceMenu(f: File) {
+        AlertDialog.Builder(a)
+            .setTitle(f.name)
+            .setItems(arrayOf(
+                "Send into the sample slots of " + (a.hub.slotDevice ?: "a connected device") + " (USB)",
+                "Export a WAV that fits a 496 KB sample memory (M-VAVE FM-1)"
+            )) { _, w ->
+                if (w == 0) {
+                    Thread {
+                        val d = store.loadEngine(f.name)
+                        a.runOnUiThread { if (d == null) ui.toast("Cannot read this file") else a.sendToFm1(f.name, d) }
+                    }.start()
+                } else {
+                    fm1Dialog(f)
+                }
+            }
+            .show()
+    }
+
     private fun preview(f: File) {
         Thread {
             val d = store.loadEngine(f.name)
