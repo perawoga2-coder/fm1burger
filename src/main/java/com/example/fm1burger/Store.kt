@@ -82,6 +82,42 @@ class Store(ctx: Context) {
         )
     }
 
+    // ---------------- Maker Bank categories (3.16) ----------------
+
+    companion object {
+        val CATS = arrayOf("Kick", "Snare & Clap", "Hats", "Toms & Cymbals", "FM & Synth", "Loops", "Voice", "Recorded", "Other")
+        private val NOTE_END = Regex(" [A-G]#?-?\\d$")
+        private val STAMP = Regex("_\\d{8}_\\d{6}")
+    }
+
+    /** The category a sound sits in: the one chosen by hand, else guessed from its name and tags. */
+    fun categoryOf(name: String): String {
+        tags.getProperty("cat." + name)?.let { if (it in CATS) return it }
+        val base = name.removeSuffix(".wav").removeSuffix(".WAV")
+        val n = (base + " " + getTags(name)).lowercase(Locale.ROOT)
+        fun has(vararg w: String) = w.any { n.contains(it) }
+        return when {
+            has("kick", "808", "bassdrum", "bass drum") || n.startsWith("bd") -> "Kick"
+            has("snare", "clap", "rim") -> "Snare & Clap"
+            has("hat", "hihat", "hh") -> "Hats"
+            has("tom", "crash", "china", "ride", "cymbal", "perc", "cowbell", "shaker", "conga", "bongo") -> "Toms & Cymbals"
+            n.startsWith("fm ") || has(" fm ", "makerhip", "synth", "bass ", "pad", "lead") || NOTE_END.containsMatchIn(base) -> "FM & Synth"
+            has("loop", "break", "resample", "bar") -> "Loops"
+            has("voice", "vocal", "vox", "sing") -> "Voice"
+            has("rec", "take", "kit_hit", "spoon", "mic", "fm1", "sampl") || STAMP.containsMatchIn(base) -> "Recorded"
+            else -> "Other"
+        }
+    }
+
+    fun setCategory(name: String, cat: String?) {
+        if (cat == null) tags.remove("cat." + name) else tags.setProperty("cat." + name, cat)
+        saveTags()
+    }
+
+    /** The sounds of one category ("All" or null: every sound), newest first. */
+    fun listCat(cat: String?, query: String = ""): List<File> =
+        list(query).filter { cat == null || cat == "All" || categoryOf(it.name) == cat }
+
     // ---------------- tags ----------------
 
     fun getTags(name: String): String = tags.getProperty(name, "")
@@ -107,6 +143,10 @@ class Store(ctx: Context) {
         val t = getTags(f.name)
         tags.remove(f.name)
         if (t.isNotEmpty()) tags.setProperty(target.name, t)
+        tags.getProperty("cat." + f.name)?.let {
+            tags.remove("cat." + f.name)
+            tags.setProperty("cat." + target.name, it)
+        }
         saveTags()
         return target
     }
@@ -114,6 +154,7 @@ class Store(ctx: Context) {
     fun delete(f: File) {
         f.delete()
         tags.remove(f.name)
+        tags.remove("cat." + f.name)
         saveTags()
     }
 

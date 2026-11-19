@@ -363,6 +363,54 @@ class NewAmbient {
     }
 
     /** One stereo sample of the whole soundscape (audio thread). */
+    // ---------------- 3.16: thicker and warmer ----------------
+    // a slow stereo chorus doubles every creature (thickness), a low / low-mid lift and a soft top (warmth),
+    // then a little tape-like saturation, which also makes it louder without hard clipping
+    private val chBuf = Array(2) { FloatArray(4096) }
+    private var chPos = 0
+    private var chPh = 0.0
+    private val lowL = GtrFilter(GtrFilter.PEAK, 150f, 0.7f, 5f)
+    private val lowR = GtrFilter(GtrFilter.PEAK, 150f, 0.7f, 5f)
+    private val midL = GtrFilter(GtrFilter.PEAK, 420f, 0.8f, 2.5f)
+    private val midR = GtrFilter(GtrFilter.PEAK, 420f, 0.8f, 2.5f)
+    private val topL = GtrFilter(GtrFilter.LP, 6000f, 0.6f)
+    private val topR = GtrFilter(GtrFilter.LP, 6000f, 0.6f)
+
+    private fun chorusTap(buf: FloatArray, delay: Float): Float {
+        val d = (chPos - delay + buf.size) % buf.size
+        val i = d.toInt()
+        val fr = d - i
+        val a = buf[i % buf.size]
+        val b = buf[(i + 1) % buf.size]
+        return a + (b - a) * fr
+    }
+
+    private var wOutL = 0f
+    private var wOutR = 0f
+
+    private fun warm(inL: Float, inR: Float) {
+        chBuf[0][chPos] = inL
+        chBuf[1][chPos] = inR
+        chPh += 0.27 / sr
+        if (chPh >= 1.0) chPh -= 1.0
+        val m = sin(2.0 * PI * chPh).toFloat()
+        val base = 0.016f * sr
+        val depth = 0.004f * sr
+        // the doubled copy crosses over: left hears the right's copy and the other way round (wider)
+        val cl = chorusTap(chBuf[1], base + depth * m)
+        val cr = chorusTap(chBuf[0], base * 1.27f - depth * m)
+        chPos = (chPos + 1) % chBuf[0].size
+        var l = inL + cl * 0.55f
+        var r = inR + cr * 0.55f
+        l = topL.run(midL.run(lowL.run(l)))
+        r = topR.run(midR.run(lowR.run(r)))
+        // warm saturation with make-up: about +5 dB for quiet calls, softly held near 1.0 for loud ones
+        l = kotlin.math.tanh(l * 1.8f)
+        r = kotlin.math.tanh(r * 1.8f)
+        wOutL = l
+        wOutR = r
+    }
+
     fun render() {
         if (callReq) {
             callReq = false
@@ -393,8 +441,9 @@ class NewAmbient {
         val rl = reverb(send, false)
         val rr = reverb(send, true)
         val g = if (mute) 0f else volume
-        outL = ((dl * (1f - wet * 0.5f) + rl * wet * 1.6f) * g).coerceIn(-1.5f, 1.5f)
-        outR = ((dr * (1f - wet * 0.5f) + rr * wet * 1.6f) * g).coerceIn(-1.5f, 1.5f)
+        warm(dl * (1f - wet * 0.5f) + rl * wet * 1.6f, dr * (1f - wet * 0.5f) + rr * wet * 1.6f)
+        outL = wOutL * g
+        outR = wOutR * g
         if (!any && !free) untilNext = 0
 
         // the live picture

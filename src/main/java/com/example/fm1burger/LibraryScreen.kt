@@ -11,47 +11,55 @@ import android.widget.ScrollView
 import java.io.File
 import java.util.Locale
 
+/**
+ * MAKER BANK (3.16): the sounds sorted into categories. Tap a category, then a name: the list is only names,
+ * big and easy to tap. One set of function buttons sits above the list and works on the name picked.
+ * The buttons are coloured by what they do: green hear, orange put somewhere, blue change, purple out, red delete.
+ */
 class LibraryScreen(private val a: MainActivity) : Screen {
 
     private val ui = a.ui
     private val store = a.store
-    override val root = ScrollView(a)
-    private val content = ui.col()
+    override val root = LinearLayout(a)
+    private val listScroll = ScrollView(a)
     private val listBox = ui.col()
+    private val catRow = ui.row()
+    private val catBtns = ArrayList<android.widget.Button>()
     private val search = EditText(a)
+    private val selText = ui.text("", 15f, Theme.TEXT, true)
+    private val selInfo = ui.text("", 12f, Theme.DIM)
+    private val fnBtns = ArrayList<android.widget.Button>()
+    private var cat = "All"
+    private var sel: File? = null
+    private val rowOf = HashMap<String, android.widget.Button>()
 
     init {
-        content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
-        root.addView(content)
+        root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(Theme.BG)
+        val head = ui.col()
+        head.setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(4))
+        root.addView(head, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        content.addView(ui.title("Sample library"))
-        val top = ui.row()
-        top.addView(ui.button("Import WAV") { a.importFiles() }, ui.w(1f, 3))
-        top.addView(ui.button("Stop preview") { a.engine.previewStop() }, ui.w(1f, 3))
-        content.addView(top, ui.fullWidth(6))
+        val tr = ui.row()
+        tr.gravity = android.view.Gravity.CENTER_VERTICAL
+        tr.addView(ui.title("Maker Bank"), ui.w(1f, 0))
+        tr.addView(ui.button("Import WAV") { a.importFiles() }, ui.w(0f, 3))
+        tr.addView(ui.button("Add sounds…") { addMenu() }, ui.w(0f, 3))
+        head.addView(tr)
 
-        // FM sound banks
-        val fm = ui.row()
-        fm.addView(ui.button("MakerHip FM bank (32)") {
-            ui.toast("Adding the MakerHip FM bank...")
-            Thread {
-                val n = try { FmBank.install(a, store) } catch (ex: Exception) { -1 }
-                a.runOnUiThread {
-                    refresh()
-                    ui.toast(when {
-                        n < 0 -> "Could not add the FM bank"
-                        n == 0 -> "The 32 MakerHip FM sounds are already in the Library (search \"FM\")"
-                        else -> "Added $n MakerHip FM sounds (search \"FM\")"
-                    })
-                }
-            }.start()
-        }, ui.w(1f, 3))
-        fm.addView(ui.button("Import FM bank (.syx)") { a.importSyx() }, ui.w(1f, 3))
-        content.addView(fm, ui.fullWidth(4))
-        content.addView(
-            ui.text("FM banks: any DX7-style .syx bank (32 voices) can be turned into samples here. " +
-                "The MakerHip FM bank is our own.", 11f, Theme.DIM), ui.fullWidth(2)
-        )
+        // the categories
+        val hs = android.widget.HorizontalScrollView(a)
+        hs.isHorizontalScrollBarEnabled = false
+        for (c in arrayOf("All") + Store.CATS) {
+            val b = ui.button(c) { setCat(c) }
+            b.minHeight = ui.dp(40)
+            b.minimumHeight = ui.dp(40)
+            b.setPadding(ui.dp(16), 0, ui.dp(16), 0)
+            catBtns.add(b)
+            catRow.addView(b, ui.w(0f, 3))
+        }
+        hs.addView(catRow)
+        head.addView(hs, ui.fullWidth(8))
 
         search.hint = "Search name or tag..."
         search.setSingleLine(true)
@@ -65,8 +73,85 @@ class LibraryScreen(private val a: MainActivity) : Screen {
             override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, af: Int) {}
             override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
         })
-        content.addView(search, ui.fullWidth(6))
-        content.addView(listBox, ui.fullWidth(4))
+        head.addView(search, ui.fullWidth(4))
+
+        // the one set of functions, for the name picked
+        val fp = ui.panel()
+        fp.addView(selText)
+        fp.addView(selInfo)
+        val r1 = ui.row()
+        fn(r1, "▶ Play", Theme.GREEN) { preview(it) }
+        fn(r1, "■ Stop", Theme.GREEN) { a.engine.previewStop() }
+        fn(r1, "→ MPC pad", Theme.ACCENT) { choosePad(it) }
+        fn(r1, "→ Track", Theme.ACCENT) { chooseTrack(it) }
+        fn(r1, "Edit", Theme.BLUE) { a.openEdit(it) }
+        fp.addView(r1, ui.fullWidth(6))
+        val r2 = ui.row()
+        fn(r2, "Category", Theme.BLUE) { catDialog(it) }
+        fn(r2, "Tags", Theme.BLUE) { tagsDialog(it) }
+        fn(r2, "Rename", Theme.BLUE) { renameDialog(it) }
+        fn(r2, "Export", Theme.PURPLE) { exportPlain(it) }
+        fn(r2, "Devices…", Theme.PURPLE) { deviceMenu(it) }
+        fn(r2, "Delete", Theme.RED) { deleteDialog(it) }
+        fp.addView(r2, ui.fullWidth(4))
+        head.addView(fp, ui.fullWidth(6))
+
+        listBox.setPadding(ui.dp(12), ui.dp(4), ui.dp(12), ui.dp(88))
+        listScroll.addView(listBox)
+        root.addView(listScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        showSel()
+    }
+
+    private fun fn(r: LinearLayout, label: String, color: Int, act: (File) -> Unit) {
+        val b = ui.button(label) {
+            val f = sel
+            if (f == null || !f.exists()) ui.toast("Tap a name in the list first") else act(f)
+        }
+        b.setTag(color)
+        fnBtns.add(b)
+        r.addView(b, ui.w(1f, 3))
+    }
+
+    /** Sounds that come with the app, and FM banks. */
+    private fun addMenu() {
+        AlertDialog.Builder(a)
+            .setTitle("Add sounds to the Maker Bank")
+            .setItems(arrayOf(
+                "MakerHip FM bank (32 sounds)",
+                "Import an FM bank (.syx, DX7 style, 32 voices)",
+                "Rock Heavy drum kit (12 sounds)",
+                "Electronic drum kit"
+            )) { _, w ->
+                when (w) {
+                    0 -> Thread {
+                        val n = try { FmBank.install(a, store) } catch (ex: Exception) { -1 }
+                        a.runOnUiThread {
+                            refresh()
+                            ui.toast(when {
+                                n < 0 -> "Could not add the FM bank"
+                                n == 0 -> "The 32 MakerHip FM sounds are already here (FM & Synth)"
+                                else -> "Added $n MakerHip FM sounds (FM & Synth)"
+                            })
+                        }
+                    }.start()
+                    1 -> a.importSyx()
+                    2 -> Thread {
+                        val ok = try { RockKit.install(a, store); true } catch (ex: Exception) { false }
+                        a.runOnUiThread { refresh(); ui.toast(if (ok) "Rock Heavy kit added" else "Could not add the kit") }
+                    }.start()
+                    else -> Thread {
+                        val n = try { DrumKit.ensureAll(store) } catch (ex: Exception) { -1 }
+                        a.runOnUiThread { refresh(); ui.toast(if (n < 0) "Could not make the kit" else "Electronic kit ready") }
+                    }.start()
+                }
+            }
+            .show()
+    }
+
+    private fun setCat(c: String) {
+        cat = c
+        refresh()
+        listScroll.scrollTo(0, 0)
     }
 
     override fun onShow() {
@@ -74,55 +159,94 @@ class LibraryScreen(private val a: MainActivity) : Screen {
     }
 
     fun refresh() {
-        listBox.removeAllViews()
-        val files = store.list(search.text.toString())
-        if (files.isEmpty()) {
-            listBox.addView(ui.text("No samples yet. Record, sample an instrument, or import a WAV file.", 14f, Theme.DIM))
-            return
+        // the category buttons show how many sounds each holds
+        val all = store.list()
+        val counts = HashMap<String, Int>()
+        for (f in all) {
+            val c = store.categoryOf(f.name)
+            counts[c] = (counts[c] ?: 0) + 1
         }
-        for (f in files) listBox.addView(rowFor(f), ui.fullWidth(8))
+        for (b in catBtns) {
+            val name = b.text.toString().substringBefore("  ")
+            val n = if (name == "All") all.size else counts[name] ?: 0
+            b.text = "$name  $n"
+            ui.styleButton(b, name == cat, Theme.ACCENT, 18)
+        }
+        listBox.removeAllViews()
+        rowOf.clear()
+        val files = store.listCat(cat, search.text.toString())
+        if (sel?.exists() != true) sel = null
+        if (files.isEmpty()) {
+            listBox.addView(ui.text(
+                if (all.isEmpty()) "No sounds yet. Record, sample an instrument, import a WAV, or Add sounds… above."
+                else "Nothing in $cat yet.", 14f, Theme.DIM), ui.fullWidth(8))
+        }
+        // the names, two in a row: big and easy to tap
+        var r: LinearLayout? = null
+        files.forEachIndexed { i, f ->
+            if (i % 2 == 0) {
+                r = ui.row()
+                listBox.addView(r, ui.fullWidth(2))
+            }
+            val b = ui.button(f.nameWithoutExtension) { pick(f) }
+            b.textSize = 15f
+            b.isAllCaps = false
+            b.gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+            b.setPadding(ui.dp(16), 0, ui.dp(12), 0)
+            b.maxLines = 1
+            b.ellipsize = android.text.TextUtils.TruncateAt.END
+            b.minHeight = ui.dp(54)
+            b.minimumHeight = ui.dp(54)
+            b.setOnLongClickListener { pick(f); preview(f); true }
+            rowOf[f.name] = b
+            r!!.addView(b, ui.w(1f, 3))
+        }
+        if (files.size % 2 == 1) r?.addView(View(a), ui.w(1f, 3))
+        paintRows()
+        showSel()
     }
 
-    private fun rowFor(f: File): View {
-        val p = ui.panel()
-        p.addView(ui.text(f.name, 16f, Theme.TEXT, true))
-        val tg = store.getTags(f.name)
-        if (tg.isNotEmpty()) p.addView(ui.text("# $tg", 12f, Theme.ACCENT))
-        p.addView(ui.text(store.describe(f), 12f, Theme.DIM))
-
-        val r1 = ui.row()
-        r1.addView(ui.button("Play") { preview(f) }, ui.w(1f, 2))
-        r1.addView(ui.button("To track") { chooseTrack(f) }, ui.w(1f, 2))
-        r1.addView(ui.button("To pad") { choosePad(f) }, ui.w(1f, 2))
-        r1.addView(ui.button("Edit") { a.openEdit(f) }, ui.w(1f, 2))
-        p.addView(r1, ui.fullWidth(6))
-
-        val r2 = ui.row()
-        r2.addView(ui.button("Tags") { tagsDialog(f) }, ui.w(1f, 2))
-        r2.addView(ui.button("Rename") { renameDialog(f) }, ui.w(1f, 2))
-        r2.addView(ui.button("Export") { exportPlain(f) }, ui.w(1f, 2))
-        r2.addView(ui.button("Devices…") { deviceMenu(f) }, ui.w(1f, 2))
-        r2.addView(ui.button("Delete") { deleteDialog(f) }, ui.w(1f, 2))
-        p.addView(r2)
-        return p
+    /** A tap on a name: it is picked, and plays once. */
+    private fun pick(f: File) {
+        sel = f
+        paintRows()
+        showSel()
+        preview(f)
     }
 
-    /** Things for connected gear (the FM-1 for now), kept out of the way of the main buttons. */
-    private fun deviceMenu(f: File) {
+    private fun paintRows() {
+        for ((n, b) in rowOf) ui.styleButton(b, n == sel?.name, Theme.ACCENT, 12)
+    }
+
+    private fun showSel() {
+        val f = sel
+        if (f == null) {
+            selText.text = "Tap a name"
+            selInfo.text = "The buttons below work on the name you tap. Long press a name to hear it."
+        } else {
+            selText.text = f.nameWithoutExtension
+            val tg = store.getTags(f.name)
+            selInfo.text = store.categoryOf(f.name) + " · " + store.describe(f) + (if (tg.isNotEmpty()) " · # $tg" else "")
+        }
+        for (b in fnBtns) {
+            val c = b.tag as Int
+            if (f == null) {
+                b.background = ui.touchBg(ui.bg(Theme.PANEL2, 10, Theme.alpha(c, 90), 1), 10)
+                b.setTextColor(Theme.FAINT)
+            } else {
+                b.background = ui.touchBg(ui.bg(Theme.alpha(c, 46), 10, c, 1), 10)
+                b.setTextColor(c)
+            }
+        }
+    }
+
+    private fun catDialog(f: File) {
+        val items = arrayOf("Guess from the name") + Store.CATS
         AlertDialog.Builder(a)
-            .setTitle(f.name)
-            .setItems(arrayOf(
-                "Send into the sample slots of " + (a.hub.slotDevice ?: "a connected device") + " (USB)",
-                "Export a WAV that fits a 496 KB sample memory (M-VAVE FM-1)"
-            )) { _, w ->
-                if (w == 0) {
-                    Thread {
-                        val d = store.loadEngine(f.name)
-                        a.runOnUiThread { if (d == null) ui.toast("Cannot read this file") else a.sendToFm1(f.name, d) }
-                    }.start()
-                } else {
-                    fm1Dialog(f)
-                }
+            .setTitle("Category of ${f.nameWithoutExtension}")
+            .setItems(items) { _, w ->
+                store.setCategory(f.name, if (w == 0) null else Store.CATS[w - 1])
+                refresh()
             }
             .show()
     }
@@ -145,8 +269,8 @@ class LibraryScreen(private val a: MainActivity) : Screen {
 
     private fun choosePad(f: File) {
         AlertDialog.Builder(a)
-            .setTitle("Put on which pad?")
-            .setItems(Array(Cfg.PADS) { "Pad ${Cfg.padName(it)}" }) { _, which ->
+            .setTitle("Put on which MPC pad?")
+            .setItems(Array(Cfg.PADS) { "Pad ${Cfg.padName(it)}  " + a.engine.pads[it].name.removeSuffix(".wav").ifEmpty { "(empty)" } }) { _, which ->
                 a.assignPad(which, f)
                 ui.toast("Pad ${Cfg.padName(which)}: ${f.name}")
             }
@@ -180,6 +304,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
                     ui.toast("That name is empty or already used")
                 } else {
                     a.renameRefs(f.name, nf.name)
+                    if (sel == f) sel = nf
                     refresh()
                 }
             }

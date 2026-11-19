@@ -12,7 +12,7 @@ import kotlin.math.abs
  * screen, while you hit the next one. Shown only while a device that takes samples is connected (DeviceHub).
  *
  * After a take: the silence before and after is cut, a 3 ms fade at both ends, peak normalised, at most the slot's
- * 7 s; a copy goes into the Library too.
+ * 7 s; a copy goes into the Maker Bank too.
  */
 class QuickSamplePanel(private val a: MainActivity) {
 
@@ -314,7 +314,7 @@ class QuickSamplePanel(private val a: MainActivity) {
                 a.libraryScreen.refresh()
             } catch (ex: Exception) {
             }
-            status.text = String.format(java.util.Locale.US, "%s (%.1f s) is in the Library: edit it, or send it back.", name, d.size / Cfg.SR.toDouble())
+            status.text = String.format(java.util.Locale.US, "%s (%.1f s) is in the Maker Bank: edit it, or send it back.", name, d.size / Cfg.SR.toDouble())
         }
     }
 

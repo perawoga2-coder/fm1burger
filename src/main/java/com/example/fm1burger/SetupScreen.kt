@@ -96,7 +96,7 @@ class SetupScreen(private val a: MainActivity) : Screen {
                 val n = try { FmBank.install(a, a.store) } catch (ex: Exception) { -1 }
                 a.runOnUiThread {
                     a.libraryScreen.refresh()
-                    ui.toast(if (n < 0) "Could not add the FM bank" else if (n == 0) "Already in the Library" else "Added $n FM sounds")
+                    ui.toast(if (n < 0) "Could not add the FM bank" else if (n == 0) "Already in the Maker Bank" else "Added $n FM sounds")
                 }
             }.start()
         }, ui.w(1f, 3))

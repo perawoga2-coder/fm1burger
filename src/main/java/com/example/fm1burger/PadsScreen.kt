@@ -8,7 +8,7 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 
 /**
- * Pads: 8 pads you can tap, and below them a drum sequencer.
+ * The drum sequencer, the whole page (3.16: the pads moved to the MPC page).
  * Each pad is one row of 16 steps. Tap a cell to turn it on (full), tap again for medium,
  * again for soft, again to turn it off. The pattern plays together with the 4 tracks.
  * Every row has its own mute button and volume. Play / Pause / Stop are on this page too.
@@ -19,7 +19,6 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private val e = a.engine
     override val root = ScrollView(a)
     private val content = ui.col()
-    private val pads = ArrayList<Button>()
     private val labels = ArrayList<Button>()
     private val muteBtns = ArrayList<Button>()
     private val volBars = ArrayList<SeekBar>()
@@ -50,13 +49,13 @@ class PadsScreen(private val a: MainActivity) : Screen {
     init {
         content.setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(88))
         root.addView(content)
-        content.addView(ui.title("Pads and drum sequencer"))
+        content.addView(ui.title("Drum sequencer"))
         content.addView(
             ui.text(
-                "16 pads in each of 2 banks (A and B, 32 sounds). Tap a pad to play it, long press it to choose its sample. " +
-                    "Notes from a MIDI keyboard or controller also play the pads (note number modulo 32: notes 0-15 bank A, 16-31 bank B).",
+                "16 rows per bank, A and B (32 sounds). The sounds are the MPC page's pads: choose them there, " +
+                    "or long press a row name here.",
                 12f, Theme.DIM
-            ), ui.fullWidth(4)
+            ), ui.fullWidth(2)
         )
         val br = ui.row()
         for (k in 0 until Cfg.PADS / Cfg.PAD_BANK) {
@@ -64,31 +63,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
             bankBtns.add(b)
             br.addView(b, ui.w(1f, 3))
         }
-        content.addView(br, ui.fullWidth(4))
-        for (rowIdx in 0 until 4) {
-            val row = ui.row()
-            for (c in 0 until 4) {
-                val i = rowIdx * 4 + c
-                val b = Button(a)
-                b.isAllCaps = false
-                b.textSize = 13f
-                b.setTextColor(Theme.TEXT)
-                b.background = ui.bg(Theme.PANEL2, 14)
-                b.setOnClickListener { e.padHit(pi(i), 1f) }
-                b.setOnLongClickListener {
-                    val q = pi(i)
-                    a.pickSample("Sample for pad ${Cfg.padName(q)}") { f -> a.assignPad(q, f) }
-                    true
-                }
-                pads.add(b)
-                val lp = LinearLayout.LayoutParams(0, ui.dp(64), 1f)
-                lp.setMargins(ui.dp(4), ui.dp(4), ui.dp(4), ui.dp(4))
-                row.addView(b, lp)
-            }
-            content.addView(row, ui.fullWidth(4))
-        }
-
-        content.addView(ui.title("Drum sequencer"), ui.fullWidth(10))
+        br.addView(ui.button("MPC pads →") { a.showTab(MainActivity.TAB_MPC) }, ui.w(1f, 3))
+        content.addView(br, ui.fullWidth(6))
 
         val tr = ui.row()
         playBtn = ui.button("▶ Play") { doPlay() }
@@ -216,7 +192,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
         val lb = Button(a)
         lb.isAllCaps = false
-        lb.textSize = 11f
+        lb.textSize = 13f
         lb.minHeight = 0
         lb.minWidth = 0
         lb.maxLines = 1
@@ -227,17 +203,17 @@ class PadsScreen(private val a: MainActivity) : Screen {
         lb.setOnClickListener { e.padHit(pi(r), 1f) }
         lb.setOnLongClickListener {
             val q = pi(r)
-            a.pickSample("Sample for pad ${Cfg.padName(q)}") { f -> a.assignPad(q, f) }
+            a.pickSound("Sound for pad ${Cfg.padName(q)}") { f -> a.assignPad(q, f) }
             true
         }
         labels.add(lb)
-        row.addView(lb, LinearLayout.LayoutParams(ui.dp(96), ui.dp(34)))
+        row.addView(lb, LinearLayout.LayoutParams(ui.dp(140), ui.dp(46)))
 
         for (s in 0 until Pat.BAR) {
             val v = View(a)
             v.setOnClickListener { cycle(r, Pat.base() + s) }
             v.setOnLongClickListener { level(r, Pat.base() + s); true }
-            val lp = LinearLayout.LayoutParams(0, ui.dp(34), 1f)
+            val lp = LinearLayout.LayoutParams(0, ui.dp(46), 1f)
             val gap = if (s % 4 == 3 && s < Pat.BAR - 1) ui.dp(6) else ui.dp(1)
             lp.setMargins(ui.dp(1), ui.dp(2), gap, ui.dp(2))
             row.addView(v, lp)
@@ -260,7 +236,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
             refreshMutes()
         }
         muteBtns.add(mb)
-        val mlp = LinearLayout.LayoutParams(ui.dp(36), ui.dp(34))
+        val mlp = LinearLayout.LayoutParams(ui.dp(44), ui.dp(46))
         mlp.setMargins(ui.dp(4), 0, ui.dp(4), 0)
         row.addView(mb, mlp)
 
@@ -276,7 +252,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
             override fun onStopTrackingTouch(s: SeekBar?) {}
         })
         volBars.add(vb)
-        row.addView(vb, LinearLayout.LayoutParams(ui.dp(110), ui.dp(34)))
+        row.addView(vb, LinearLayout.LayoutParams(ui.dp(120), ui.dp(46)))
         return row
     }
 
@@ -376,7 +352,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
                     }
                     ui.toast(
                         "Drum kit ready: 8 sounds on the pads, " +
-                            "all ${DrumKit.names.size} drum sounds are in the Library."
+                            "all ${DrumKit.names.size} drum sounds are in the Maker Bank."
                     )
                 }
             }
@@ -398,7 +374,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 } else {
                     for (i in RockKit.pads.indices) a.assignPad(pi(i), a.store.file(RockKit.fileName(RockKit.pads[i])))
                     a.libraryScreen.refresh()
-                    ui.toast("Rock Heavy kit on the pads: kick, snare, hats, toms, crash, china. 4 more sounds are in the Library.")
+                    ui.toast("Rock Heavy kit on the pads: kick, snare, hats, toms, crash, china. 4 more sounds are in the Maker Bank.")
                 }
             }
         }.start()
@@ -488,7 +464,6 @@ class PadsScreen(private val a: MainActivity) : Screen {
             val q = pi(i)
             val n = e.pads[q].name
             val shortName = n.removeSuffix(".wav").removePrefix("Drum_").replace('_', ' ')
-            pads[i].text = Cfg.padName(q) + "\n" + (if (n.isEmpty()) "(empty)" else shortName)
             labels[i].text = Cfg.padName(q) + "  " + (if (n.isEmpty()) "(empty)" else shortName)
             volBars[i].progress = (e.pads[q].volume * 100f).toInt().coerceIn(0, 100)
         }

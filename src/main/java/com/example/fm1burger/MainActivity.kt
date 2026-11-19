@@ -41,7 +41,7 @@ class MainActivity : Activity() {
         val SECTIONS = arrayOf(
             intArrayOf(10, 2),                      // Home: lanes, mixer
             intArrayOf(0, 1, 3),                    // Sampler: sampler, steps, library
-            intArrayOf(6, 13, 7, 12, 11, 8),        // Instruments: drums, bassline, analog, guitars, ambient, voice
+            intArrayOf(16, 6, 13, 7, 12, 11, 8),    // Instruments: MPC, drum steps, bassline, analog, guitars, ambient, voice
             intArrayOf(9, 15),                      // Song, automation
             intArrayOf(14)                          // Setup
         )
@@ -56,6 +56,7 @@ class MainActivity : Activity() {
         const val TAB_AMBIENT = 11
         const val TAB_GUITAR = 12
         const val TAB_BASS = 13
+        const val TAB_MPC = 16
     }
 
     lateinit var ui: Ui
@@ -87,6 +88,8 @@ class MainActivity : Activity() {
     private var syncNote = ""
     private var pendingBytes: ByteArray? = null
     private var importTarget = -1
+    /** 3.16: a file chosen from this device goes to whoever asked (an MPC pad). */
+    private var importCb: ((File?) -> Unit)? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private lateinit var screens: List<Screen>
@@ -104,7 +107,7 @@ class MainActivity : Activity() {
     private lateinit var segRow: LinearLayout
     private var cueRow: View? = null
     private val navBtns = ArrayList<Button>()
-    private val lastInSection = intArrayOf(10, 0, 6, 9, 14)
+    private val lastInSection = intArrayOf(10, 0, 16, 9, 14)
     private var shownSection = -1
     private var dotColor = 0
     private val cueBtns = ArrayList<Button>()
@@ -377,12 +380,13 @@ class MainActivity : Activity() {
         guitarScreen = GuitarScreen(this)
         val setup = SetupScreen(this)
         val autoScreen = AutomationScreen(this)
-        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen, bassScreen, setup, autoScreen)
+        val mpc = MpcScreen(this)
+        screens = listOf(tracks, steps, mixer, libraryScreen, editScreen, fx, pads, synth, voice, song, homeScreen, ambient, guitarScreen, bassScreen, setup, autoScreen, mpc)
 
         // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
         tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
-        val names = listOf("Sampler", "Steps", "Mixer", "Library", "Edit", "FX", "Drums", "Analog synth", "Voice", "Song", "Lanes", "New Ambient", "Guitars", "Bassline", "Setup", "Automation")
+        val names = listOf("Sampler", "Steps", "Mixer", "Maker Bank", "Edit", "FX", "Drum steps", "Analog synth", "Voice", "Song", "Lanes", "New Ambient", "Guitars", "Bassline", "Setup", "Automation", "MPC")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -1158,7 +1162,7 @@ class MainActivity : Activity() {
         if (bk.version != lastPartVersion) {
             lastPartVersion = bk.version
             // the patterns changed to another part: redraw the pages that show patterns
-            if (cur in intArrayOf(0, 1, 2, 6, 7, 9, TAB_HOME, TAB_BASS)) screens[cur].onShow()
+            if (cur in intArrayOf(0, 1, 2, 6, 7, 9, TAB_HOME, TAB_BASS, TAB_MPC)) screens[cur].onShow()
         }
         if (preparing && statusText.currentTextColor != Theme.RED) {
             statusText.setTextColor(Theme.YELLOW)
@@ -1405,16 +1409,82 @@ class MainActivity : Activity() {
 
     // ---------------- samples ----------------
 
-    fun pickSample(title: String, cb: (File?) -> Unit) {
-        val files = store.list()
-        if (files.isEmpty()) {
-            ui.toast("The library is empty. Record or import a sample first.")
-            return
-        }
-        val items = arrayOf("(empty this slot)") + Array(files.size) { files[it].name }
+    fun pickSample(title: String, cb: (File?) -> Unit) = pickSound(title, cb)
+
+    /**
+     * 3.16: choose a sound from anywhere: the Maker Bank (by category), this device's files,
+     * a sampler track's sound, the built-in kits, or nothing.
+     */
+    fun pickSound(title: String, cb: (File?) -> Unit) {
+        val items = arrayOf(
+            "Maker Bank…",
+            "Browse this device (files, downloads, SD card)…",
+            "The sound of a sampler track…",
+            "Built-in drum kits…",
+            "(empty this pad)"
+        )
         AlertDialog.Builder(this)
             .setTitle(title)
-            .setItems(items) { _, which -> cb(if (which == 0) null else files[which - 1]) }
+            .setItems(items) { _, w ->
+                when (w) {
+                    0 -> pickFromBank(title, cb)
+                    1 -> {
+                        importCb = cb
+                        importFiles(false)
+                    }
+                    2 -> {
+                        val ts = (0 until Cfg.TRACKS).filter { engine.tracks[it].sampleName.isNotEmpty() && store.file(engine.tracks[it].sampleName).exists() }
+                        if (ts.isEmpty()) {
+                            ui.toast("No sampler track has a sound yet")
+                        } else {
+                            AlertDialog.Builder(this)
+                                .setTitle(title)
+                                .setItems(Array(ts.size) { "Track ${ts[it] + 1}: " + engine.tracks[ts[it]].sampleName.removeSuffix(".wav") }) { _, k ->
+                                    cb(store.file(engine.tracks[ts[k]].sampleName))
+                                }
+                                .show()
+                        }
+                    }
+                    3 -> {
+                        ui.toast("Getting the kits ready...")
+                        Thread {
+                            try { RockKit.install(this, store) } catch (ex: Exception) { }
+                            try { DrumKit.ensureAll(store) } catch (ex: Exception) { }
+                            val names = RockKit.pads + RockKit.extras
+                            val files = names.map { store.file(RockKit.fileName(it)) } + DrumKit.names.map { store.file(DrumKit.fileName(it)) }
+                            val ok = files.filter { it.exists() }
+                            runOnUiThread {
+                                if (ok.isEmpty()) ui.toast("Could not make the kits")
+                                else AlertDialog.Builder(this)
+                                    .setTitle(title)
+                                    .setItems(Array(ok.size) { ok[it].nameWithoutExtension.removePrefix("Drum_").replace('_', ' ') }) { _, k -> cb(ok[k]) }
+                                    .show()
+                            }
+                        }.start()
+                    }
+                    else -> cb(null)
+                }
+            }
+            .show()
+    }
+
+    private fun pickFromBank(title: String, cb: (File?) -> Unit) {
+        val all = store.list()
+        if (all.isEmpty()) {
+            ui.toast("The Maker Bank is empty. Record or import a sound first.")
+            return
+        }
+        val cats = Store.CATS.filter { c -> all.any { store.categoryOf(it.name) == c } }
+        val labels = arrayOf("All  ${all.size}") + Array(cats.size) { k -> cats[k] + "  " + all.count { store.categoryOf(it.name) == cats[k] } }
+        AlertDialog.Builder(this)
+            .setTitle("$title · category")
+            .setItems(labels) { _, w ->
+                val files = if (w == 0) all else store.listCat(cats[w - 1])
+                AlertDialog.Builder(this)
+                    .setTitle(if (w == 0) "All" else cats[w - 1])
+                    .setItems(Array(files.size) { files[it].nameWithoutExtension }) { _, k -> cb(files[k]) }
+                    .show()
+            }
             .show()
     }
 
@@ -1548,7 +1618,7 @@ class MainActivity : Activity() {
             }
             runOnUiThread {
                 libraryScreen.refresh()
-                ui.toast("$made FM sounds added to the Library. Load them into the Sampler with L.")
+                ui.toast("$made FM sounds added to the Maker Bank. Load them into the Sampler with L.")
             }
         }.start()
     }
@@ -1567,6 +1637,7 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_IMPORT && (resultCode != RESULT_OK || data == null)) {
             importTarget = -1
+            importCb = null
             return
         }
         if (resultCode != RESULT_OK || data == null) return
@@ -1580,6 +1651,8 @@ class MainActivity : Activity() {
             }
             val target = importTarget
             importTarget = -1
+            val cb = importCb
+            importCb = null
             if (uris.isEmpty()) return
             ui.toast(if (uris.size == 1) "Importing..." else "Importing ${uris.size} files...")
             // reading big files on the screen thread would freeze the app, so do it in the background
@@ -1592,6 +1665,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing) return@runOnUiThread
                     if (target >= 0 && imported.isNotEmpty()) assignTrack(target, imported[0])
+                    if (cb != null && imported.isNotEmpty()) cb(imported[0])
                     libraryScreen.refresh()
                     if (imported.size > 1) ui.toast("Imported ${imported.size} files")
                 }

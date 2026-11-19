@@ -170,7 +170,7 @@ class VoiceScreen(private val a: MainActivity) : Screen {
         content.addView(ui.text("Record a voice take", 14f, Theme.ACCENT, true), ui.fullWidth(10))
         content.addView(
             ui.text(
-                "Saves your dry voice (no room effect) as a sample in the Library. " +
+                "Saves your dry voice (no room effect) as a sample in the Maker Bank. " +
                     "Then load it on a track with the L button. Turn the mic on first.",
                 12f, Theme.DIM
             ), ui.fullWidth(2)
@@ -252,7 +252,7 @@ class VoiceScreen(private val a: MainActivity) : Screen {
             val f = a.store.saveNew("Voice_take", d, Cfg.SR)
             a.runOnUiThread {
                 a.libraryScreen.refresh()
-                ui.toast("Saved ${f.name} in the Library. Load it on a track with the L button.")
+                ui.toast("Saved ${f.name} in the Maker Bank. Load it on a track with the L button.")
             }
         }.start()
     }

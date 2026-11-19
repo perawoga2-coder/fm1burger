@@ -21,6 +21,10 @@ import kotlin.math.tanh
 class Engine {
 
     companion object {
+        // 3.16: the synths sat well under the samples; a fixed lift (the master soft clip catches the peaks)
+        const val SYNTH_LIFT_BASS = 1.6f      // +4 dB
+        const val SYNTH_LIFT_ANALOG = 1.75f   // +5 dB
+        const val SYNTH_LIFT_GTR = 1.4f       // +3 dB
         const val BLOCK = 256
         const val GRAIN = 2048          // time stretch grain length (samples)
 
@@ -521,8 +525,8 @@ class Engine {
                 pm = drumFx.process(drumHeavy.process(pm * pv), bpmNow, beatPos) * gPads
                 l += pm
                 r += pm
-                val bz = bass.render() * gBass * bassBoost
-                val sy = analog.fx.process(analog.render() * synthBoost, bpmNow, beatPos) * gSynth
+                val bz = bass.render() * gBass * bassBoost * SYNTH_LIFT_BASS
+                val sy = analog.fx.process(analog.render() * synthBoost * SYNTH_LIFT_ANALOG, bpmNow, beatPos) * gSynth
                 l += bz + sy
                 r += bz + sy
                 vocal.render()
@@ -531,8 +535,8 @@ class Engine {
                 l += ambient.outL * gAmb
                 r += ambient.outR * gAmb
                 // the two guitars, a little apart: rhythm left of centre, riff right
-                val gR = rhythmGtr.render() * gRhythm
-                val gF = riffGtr.render() * gRiff
+                val gR = rhythmGtr.render() * gRhythm * SYNTH_LIFT_GTR
+                val gF = riffGtr.render() * gRiff * SYNTH_LIFT_GTR
                 l += gR * 0.9f + gF * 0.55f
                 r += gR * 0.55f + gF * 0.9f
                 r += vocal.outR * gRest
