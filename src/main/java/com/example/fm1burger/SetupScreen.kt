@@ -16,6 +16,10 @@ class SetupScreen(private val a: MainActivity) : Screen {
     private lateinit var recInfo: TextView
     private lateinit var latInfo: TextView
     private lateinit var devList: TextView
+    private lateinit var devPanel: android.widget.LinearLayout
+    private lateinit var devInfo: TextView
+    private lateinit var storeBtn: android.widget.Button
+    private lateinit var labsBtn: android.widget.Button
     private lateinit var stemBtn: android.widget.Button
     private val latBtns = ArrayList<android.widget.Button>()
 
@@ -134,6 +138,51 @@ class SetupScreen(private val a: MainActivity) : Screen {
         dv.addView(dr, ui.fullWidth(4))
         content.addView(dv, ui.fullWidth(10))
 
+        // Developer: only the owner sees it (early access with the owner's code)
+        devPanel = ui.panel()
+        devPanel.addView(ui.text("Developer (only you see this)", 14f, Theme.ACCENT, true))
+        devInfo = ui.text("", 12f, Theme.DIM)
+        devPanel.addView(devInfo, ui.fullWidth(4))
+        val d1 = ui.row()
+        d1.addView(ui.button("Make an invite code") {
+            val code = Features.newInvite()
+            android.app.AlertDialog.Builder(a)
+                .setTitle("Invite code")
+                .setMessage("$code\n\nGive it to one tester: it unlocks the early access on their device.")
+                .setPositiveButton("Copy") { _, _ ->
+                    val cm = a.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Burger Studio invite", code))
+                    ui.toast("Copied $code")
+                }
+                .setNegativeButton("Close", null)
+                .show()
+        }, ui.w(1f, 3))
+        storeBtn = ui.button("") {
+            Features.storePreview = !Features.storePreview
+            onTick()
+            ui.toast(if (Features.storePreview) "Store preview: you see the free version (Pro features ask)" else "Store preview off: everything open")
+        }
+        d1.addView(storeBtn, ui.w(1f, 3))
+        devPanel.addView(d1, ui.fullWidth(4))
+        val d2 = ui.row()
+        labsBtn = ui.button("") {
+            Features.labsOn = !Features.labsOn
+            onTick()
+        }
+        d2.addView(labsBtn, ui.w(1f, 3))
+        d2.addView(ui.button("Lock the app again") {
+            android.app.AlertDialog.Builder(a)
+                .setMessage("The app shows the invite page again (your owner code opens it).")
+                .setPositiveButton("Lock") { _, _ ->
+                    Features.lockAgain()
+                    Features.showGate(a, a.findViewById(android.R.id.content))
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }, ui.w(1f, 3))
+        devPanel.addView(d2, ui.fullWidth(4))
+        content.addView(devPanel, ui.fullWidth(10))
+
         val ab = ui.panel()
         ab.addView(ui.text("About", 14f, Theme.ACCENT, true))
         val ver = try {
@@ -179,5 +228,18 @@ class SetupScreen(private val a: MainActivity) : Screen {
             (a.hub.slotDevice?.let { " · $it takes samples" } ?: "") +
             "\nRemembered: " + (if (names.isEmpty()) "none yet" else names.joinToString(", "))
         if (devList.text.toString() != dl) devList.text = dl
+        val own = Features.owner
+        val vis = if (own) android.view.View.VISIBLE else android.view.View.GONE
+        if (devPanel.visibility != vis) devPanel.visibility = vis
+        if (own) {
+            val di = "Early access: " + (if (Features.GATE) "on (invite codes)" else "off") +
+                " · Free / Pro split: " + (if (Features.SELLING) "on" else "off until the sale starts") +
+                "\nLABS (hidden features: Quick sample into a device): " + (if (Features.labsOn) "shown to you" else "hidden")
+            if (devInfo.text.toString() != di) devInfo.text = di
+            storeBtn.text = if (Features.storePreview) "Store preview: ON" else "Store preview: off"
+            ui.styleButton(storeBtn, Features.storePreview, Theme.YELLOW)
+            labsBtn.text = if (Features.labsOn) "LABS: shown" else "LABS: hidden"
+            ui.styleButton(labsBtn, Features.labsOn, Theme.TEAL)
+        }
     }
 }

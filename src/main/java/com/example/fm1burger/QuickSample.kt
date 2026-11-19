@@ -170,7 +170,7 @@ class QuickSamplePanel(private val a: MainActivity) {
 
     /** Every screen tick: shown only while a device that takes samples is connected; the timer while recording. */
     fun tick() {
-        val dev = a.hub.slotDevice
+        val dev = if (Features.labs()) a.hub.slotDevice else null     // LABS: the owner only, for now
         val vis = if (dev != null) View.VISIBLE else View.GONE
         if (view.visibility != vis) view.visibility = vis
         if (dev == null) return

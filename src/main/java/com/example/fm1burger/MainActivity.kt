@@ -126,7 +126,10 @@ class MainActivity : Activity() {
         project = Project(this)
         flow = RecordFlow(this)
 
+        Features.init(this)
         buildUi()
+        // early access: the invite page over everything (under the splash, so the splash still plays first)
+        if (Features.GATE && !Features.unlocked) Features.showGate(this, findViewById(android.R.id.content))
         if (savedInstanceState == null) showSplash()
         try {
             val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
@@ -460,6 +463,7 @@ class MainActivity : Activity() {
     fun showTab(i0: Int) {
         // Edit and FX are sections of the Sampler page now
         val i = if (i0 == TAB_EDIT || i0 == TAB_FX) TAB_TRACKS else i0
+        if (i == TAB_AUTO && !Features.gate(this, Features.AUTOMATION)) return
         cur = i
         // 3.0: the section, its page bar and the bottom bar
         val sec = sectionOf(i)
@@ -1290,6 +1294,7 @@ class MainActivity : Activity() {
     }
 
     fun toggleStems() {
+        if (!engine.stemsOn && !Features.gate(this, Features.STEMS)) return
         engine.stemsOn = !engine.stemsOn
         ui.toast(if (engine.stemsOn) "Stems on: the next mix recording also writes every part to its own file (.zip)"
                  else "Stems off: the next recording is the mix only")
@@ -1298,6 +1303,7 @@ class MainActivity : Activity() {
 
     /** Export the patterns (or the song) as a MIDI file for a DAW. */
     fun exportMidiDialog() {
+        if (!Features.gate(this, Features.MIDI_EXPORT)) return
         val b = engine.bank
         val items = ArrayList<String>()
         items.add("This pattern (${Pat.bars()} bar${if (Pat.bars() > 1) "s" else ""})")
@@ -1328,6 +1334,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Mix recording format (now: ${MixRecorder.label(m.bits)})")
             .setItems(items) { _, which ->
+                if (opts[which] != MixRecorder.BITS_16 && !Features.gate(this, Features.HIRES)) return@setItems
                 m.bits = opts[which]
                 ui.toast("The next mix recording will be ${MixRecorder.label(m.bits)}" + (if (m.recording) " (this one stays ${MixRecorder.label(m.recBits)})" else ""))
             }

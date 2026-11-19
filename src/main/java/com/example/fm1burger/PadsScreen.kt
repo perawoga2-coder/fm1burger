@@ -336,6 +336,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private fun bankPads(): List<PadVoice> = (0 until Cfg.PAD_BANK).map { e.pads[pi(it)] }
 
     private fun setBank(k: Int) {
+        if (k > 0 && !Features.gate(a, Features.PAD_BANK_B)) return
         bank = k
         onShow()
     }
