@@ -106,7 +106,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
         content.addView(
             ui.text(
-                "Tap a cell: full, medium, soft, off. Tap a row name to hear it, long press it to choose its sample. " +
+                "Tap a cell: on / off. Hold a cell: its level, full → medium → soft. Tap a row name to hear it, long press it to choose its sample. " +
                     "M = mute that row. The slider at the end of the row is its volume.",
                 12f, Theme.DIM
             ), ui.fullWidth(4)
@@ -236,6 +236,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
         for (s in 0 until Pat.BAR) {
             val v = View(a)
             v.setOnClickListener { cycle(r, Pat.base() + s) }
+            v.setOnLongClickListener { level(r, Pat.base() + s); true }
             val lp = LinearLayout.LayoutParams(0, ui.dp(34), 1f)
             val gap = if (s % 4 == 3 && s < Pat.BAR - 1) ui.dp(6) else ui.dp(1)
             lp.setMargins(ui.dp(1), ui.dp(2), gap, ui.dp(2))
@@ -311,22 +312,28 @@ class PadsScreen(private val a: MainActivity) : Screen {
         cells[r][c]?.background = ui.bg(base, 6, if (here) Theme.TEXT else 0, if (here) 2 else 0)
     }
 
+    /** A tap: on (full) / off. */
     private fun cycle(r: Int, s: Int) {
+        val p = e.pads[pi(r)]
+        p.on[s] = !p.on[s]
+        p.lvl[s] = levels[0]
+        paint(r, s - Pat.base())
+        if (p.on[s]) e.padHit(pi(r), p.lvl[s])
+    }
+
+    /** A long press: the step's level, full → medium → soft → full (an off step comes on soft... full first). */
+    private fun level(r: Int, s: Int) {
         val p = e.pads[pi(r)]
         if (!p.on[s]) {
             p.on[s] = true
             p.lvl[s] = levels[0]
         } else {
             val idx = levels.indexOfFirst { it == p.lvl[s] }
-            if (idx < 0 || idx >= levels.size - 1) {
-                p.on[s] = false
-                p.lvl[s] = 1f
-            } else {
-                p.lvl[s] = levels[idx + 1]
-            }
+            p.lvl[s] = levels[(idx + 1).coerceAtLeast(0) % levels.size]
         }
         paint(r, s - Pat.base())
-        if (p.on[s]) e.padHit(pi(r), p.lvl[s])
+        e.padHit(pi(r), p.lvl[s])
+        ui.toast(when (p.lvl[s]) { levels[0] -> "Full"; levels[1] -> "Medium"; else -> "Soft" })
     }
 
     private fun repaintAll() {

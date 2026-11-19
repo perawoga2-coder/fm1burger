@@ -204,7 +204,7 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         view.addView(ui.text("Step sequencer (analog synth)", 14f, Theme.ACCENT, true))
         view.addView(
             ui.text(
-                "Tap a step to turn it on and pick it, tap it again to clear it. The note buttons move all the notes of " +
+                "Tap a step: on / off. Hold a step to pick it without changing it. The note buttons move all the notes of " +
                     "the step. For chords and several notes on a step use the piano roll below.",
                 12f, Theme.DIM
             )
@@ -240,6 +240,7 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
                 b.minimumWidth = 0
                 b.setPadding(0, 0, 0, 0)
                 b.setOnClickListener { tapCell(Pat.base() + i) }
+                b.setOnLongClickListener { pickCell(Pat.base() + i); true }
                 val lp = LinearLayout.LayoutParams(0, ui.dp(54), 1f)
                 lp.setMargins(ui.dp(2), ui.dp(2), ui.dp(2), ui.dp(2))
                 r.addView(b, lp)
@@ -291,14 +292,22 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         view.postDelayed({ for (n in ns) syn.noteOff(n) }, 250)
     }
 
+    /** A tap: on / off (and the step is picked for the note buttons). */
     private fun tapCell(i: Int) {
-        if (i == sel && seq.has(i)) {
+        sel = i
+        if (seq.has(i)) {
             seq.clearStep(i)
         } else {
-            sel = i
-            if (!seq.has(i)) seq.set(i, lastNote, 1)
+            seq.set(i, lastNote, 1)
             hear(seq.notesAt(i))
         }
+        changed()
+    }
+
+    /** A long press: pick the step without turning it on or off. */
+    private fun pickCell(i: Int) {
+        sel = i
+        if (seq.has(i)) hear(seq.notesAt(i))
         changed()
     }
 

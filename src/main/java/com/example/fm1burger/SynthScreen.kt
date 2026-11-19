@@ -168,7 +168,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
     private fun buildBass() {
         bassBox.addView(
             ui.text(
-                "Classic bassline. Tap a step to select it and turn it on. Then change its note, " +
+                "Classic bassline. Tap a step: on / off (hold it to pick it without changing it). Change the picked step's note, " +
                     "Accent (louder, sharper) or Slide (glides into the note) below. It plays with the main ▶ button.",
                 12f, Theme.DIM
             ), ui.fullWidth(4)
@@ -207,6 +207,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
                 b.minWidth = 0
                 b.setPadding(0, 0, 0, 0)
                 b.setOnClickListener { tapStep(Pat.base() + i) }
+                b.setOnLongClickListener { pickStep(Pat.base() + i); true }
                 cells.add(b)
                 val lp = LinearLayout.LayoutParams(0, ui.dp(56), 1f)
                 lp.setMargins(ui.dp(2), ui.dp(2), ui.dp(2), ui.dp(2))
@@ -323,13 +324,17 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         bassBox.addView(panel, ui.fullWidth(8))
     }
 
+    /** A tap: on / off (and the step is picked for the note buttons). */
     private fun tapStep(i: Int) {
-        if (selStep == i) {
-            bs.on[i] = !bs.on[i]
-        } else {
-            selStep = i
-            bs.on[i] = true
-        }
+        selStep = i
+        bs.on[i] = !bs.on[i]
+        if (bs.on[i]) bs.previewReq = bs.note[i]
+        refreshBass()
+    }
+
+    /** A long press: pick the step without turning it on or off. */
+    private fun pickStep(i: Int) {
+        selStep = i
         if (bs.on[i]) bs.previewReq = bs.note[i]
         refreshBass()
     }

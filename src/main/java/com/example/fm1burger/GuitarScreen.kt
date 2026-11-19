@@ -62,12 +62,13 @@ class GuitarScreen(private val a: MainActivity) : Screen {
 
         // the 16 steps
         val sp = ui.panel()
-        sp.addView(ui.text("Steps: tap to choose, tap again to change", 14f, Theme.ACCENT, true))
+        sp.addView(ui.text("Steps: tap on / off · hold to pick · the buttons below set open, hold and the fret", 14f, Theme.ACCENT, true))
         for (half in 0 until 2) {
             val r = ui.row()
             for (c in 0 until 8) {
                 val s = half * 8 + c
                 val b = ui.button("") { tapStep(Pat.base() + s) }
+                b.setOnLongClickListener { pickStep(Pat.base() + s); true }
                 b.textSize = 11f
                 b.setPadding(0, 0, 0, 0)
                 b.maxLines = 2
@@ -190,12 +191,21 @@ class GuitarScreen(private val a: MainActivity) : Screen {
         return noteNames[midi % 12] + (midi / 12 - 1)
     }
 
+    /** A tap: on (a chug) / off (stop); the step is picked for the buttons below (open, hold, fret). */
     private fun tapStep(s: Int) {
         val gg = g()
-        if (s == selStep) {
-            gg.art[s] = (gg.art[s] + 1) % 4
-            if (gg.art[s] == MetalGuitar.CHUG || gg.art[s] == MetalGuitar.OPEN) gg.audition(gg.art[s], gg.fret[s])
+        selStep = s
+        if (gg.art[s] == MetalGuitar.CHUG || gg.art[s] == MetalGuitar.OPEN) {
+            gg.art[s] = MetalGuitar.OFF
+        } else {
+            gg.art[s] = MetalGuitar.CHUG
+            gg.audition(gg.art[s], gg.fret[s])
         }
+        refresh()
+    }
+
+    /** A long press: pick the step without changing it. */
+    private fun pickStep(s: Int) {
         selStep = s
         refresh()
     }
