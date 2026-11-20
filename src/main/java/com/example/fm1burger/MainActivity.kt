@@ -1468,7 +1468,7 @@ class MainActivity : Activity() {
 
     // ---------------- samples ----------------
 
-    fun pickSample(title: String, cb: (File?) -> Unit) = pickSound(title, cb)
+    fun pickSample(title: String, cb: (File?) -> Unit) = pickSound(title, cb = cb)
 
     /**
      * 3.16: choose a sound from anywhere: the Maker Bank (by category), this device's files,

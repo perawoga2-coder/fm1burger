@@ -54,6 +54,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     private var sendAfter = -1
     private var sendRef: FloatArray? = null
     private val room = IntArray(Cfg.TRACKS)
+    private var bakeBox: CheckBox? = null
     /** The FM-1 tools (KIT, resample from the device, the device's own REC button): only while such a device is plugged in. */
     private val quick = QuickSamplePanel(a)
 
@@ -208,8 +209,6 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         content.addView(quick.view, ui.fullWidth(10))
         select(a.sel.coerceIn(0, Cfg.TRACKS - 1))
     }
-
-    private var bakeBox: CheckBox? = null
 
     companion object {
         val ROOMS = arrayOf("Dry", "Room", "Bathroom", "Hall", "Mountain top")
