@@ -222,21 +222,36 @@ class Engine {
     @Volatile var grabPos = 0
         private set
 
+    @Volatile private var grabPending: FloatArray? = null
+
     /** Starts catching the mix (mono) for at most [seconds]. */
     fun grabStart(seconds: Double) {
+        grabPending = null
         grabPos = 0
         grabBuf = FloatArray((seconds * Cfg.SR).toInt().coerceAtLeast(Cfg.SR))
     }
 
+    /** Catches exactly [bars] bars from the start of the next bar (a loop that fits); the buffer is made here, not on the audio thread. */
+    fun grabArmBars(bars: Int) {
+        grabBuf = null
+        grabPos = 0
+        val n = (Cfg.SR * 60.0 / bpmF * 4.0 * bars).toInt().coerceIn(Cfg.SR / 4, Cfg.SR * 60)
+        grabPending = FloatArray(n)
+    }
+
+    /** Armed, waiting for the next bar. */
+    fun grabWaiting(): Boolean = grabPending != null
+
     /** Stops and returns what was caught (null if nothing). */
     fun grabStop(): FloatArray? {
+        grabPending = null
         val b = grabBuf ?: return null
         grabBuf = null
         val n = grabPos.coerceAtMost(b.size)
         return if (n < 64) null else b.copyOf(n)
     }
 
-    fun grabbing(): Boolean = grabBuf != null
+    fun grabbing(): Boolean = grabBuf != null || grabPending != null
     fun grabFull(): Boolean = grabBuf?.let { grabPos >= it.size } ?: false
 
     fun previewPlay(d: FloatArray) {
@@ -582,6 +597,7 @@ class Engine {
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
+                val preMono = (l + r) * 0.5f       // (3.19 RESAMPLE: caught before MASTER, at full level)
                 l = softClip(l * mv)
                 r = softClip(r * mv)
                 val al = abs(l)
@@ -591,7 +607,7 @@ class Engine {
                 fout[f * 2] = l
                 fout[f * 2 + 1] = r
                 val gb = grabBuf
-                if (gb != null && grabPos < gb.size) gb[grabPos++] = (l + r) * 0.5f
+                if (gb != null && grabPos < gb.size) gb[grabPos++] = softClip(preMono)
                 out[f * 2] = (l * 32767f).toInt().coerceIn(-32768, 32767).toShort()
                 out[f * 2 + 1] = (r * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             }
@@ -735,6 +751,14 @@ class Engine {
             // s = step inside the pattern, which can be 1, 2 or 4 bars long
             val b = ((tickCount / 6L) % Pat.BAR).toInt()
             if (tickCount == 0L) patCount = 0L
+            if (b == 0) {                                   // 3.19 RESAMPLE armed for bars: it starts on this frame
+                val gp = grabPending
+                if (gp != null) {
+                    grabPos = 0
+                    grabBuf = gp
+                    grabPending = null
+                }
+            }
             if (prep) {
                 // PREPARE: the pattern just loops, song parts and cues wait
             } else if (b == 0) {

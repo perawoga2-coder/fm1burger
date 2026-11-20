@@ -55,6 +55,14 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     private var sendRef: FloatArray? = null
     private val room = IntArray(Cfg.TRACKS)
     private var bakeBox: CheckBox? = null
+    // 🔁 THE APP (resample): its length (0 free, else 1 / 2 / 4 bars from the next bar) and whether the track it goes into is
+    // muted meanwhile (so its old sound stays out of the new one)
+    private val prefs = a.getSharedPreferences("sampling", 0)
+    private var resBars = prefs.getInt("resBars", 1)
+    private val resBarBtns = ArrayList<Button>()
+    private lateinit var resBox: LinearLayout
+    private lateinit var muteWhileBox: CheckBox
+    private var mutedPrev: Boolean? = null
     /** The FM-1 tools (KIT, resample from the device, the device's own REC button): only while such a device is plugged in. */
     private val quick = QuickSamplePanel(a)
 
@@ -142,6 +150,28 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         sc.addView(fm1Box)
         rr.addView(sc, ui.w(2f, 0))
         rp.addView(rr)
+        resBox = ui.col()                                   // (shown for 🔁 The app)
+        val rb = ui.row()
+        rb.gravity = Gravity.CENTER_VERTICAL
+        rb.addView(ui.text("Length", 12f, Theme.DIM), ui.w(0f, 3))
+        for ((k, n) in listOf(0 to "Free", 1 to "1 bar", 2 to "2 bars", 4 to "4 bars")) {
+            val b = ui.button(n) {
+                resBars = k
+                prefs.edit().putInt("resBars", k).apply()
+                refresh()
+            }
+            b.textSize = 13f
+            b.tag = k
+            resBarBtns.add(b)
+            rb.addView(b, ui.w(1f, 2))
+        }
+        resBox.addView(rb, ui.fullWidth(6))
+        muteWhileBox = CheckBox(a)
+        muteWhileBox.setTextColor(Theme.TEXT)
+        muteWhileBox.isChecked = prefs.getBoolean("muteWhile", true)
+        muteWhileBox.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("muteWhile", on).apply() }
+        resBox.addView(muteWhileBox)
+        rp.addView(resBox)
         recInfo = ui.text("", 12f, Theme.DIM)
         rp.addView(recInfo, ui.fullWidth(4))
         content.addView(rp, ui.fullWidth(10))
@@ -279,9 +309,17 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             0 -> a.flow.onRecordButton(ti)
             1 -> a.flow.onSampleButton(ti)
             else -> {
+                if (resBars > 0 && !e.playing) {
+                    ui.toast("Press ▶ first: REC starts on the next bar and stops after $resBars bar" + if (resBars > 1) "s" else "")
+                    return
+                }
                 if (!e.playing) ui.toast("Press ▶ to play something: REC catches the app's own sound")
                 resampleTrack = ti
-                e.grabStart(30.0)
+                if (muteWhileBox.isChecked) {
+                    mutedPrev = e.tracks[ti].mute
+                    e.tracks[ti].mute = true
+                }
+                if (resBars > 0) e.grabArmBars(resBars) else e.grabStart(30.0)
                 resampling = true
             }
         }
@@ -290,7 +328,11 @@ class SamplingScreen(private val a: MainActivity) : Screen {
 
     private fun stopResample() {
         resampling = false
+        val full = e.grabFull()                            // (bars: caught to the end = a loop that fits)
         val d = e.grabStop()
+        mutedPrev?.let { e.tracks[resampleTrack].mute = it }
+        mutedPrev = null
+        val loopIt = resBars > 0 && d != null && full
         refresh()
         if (d == null) {
             ui.toast("Nothing was caught")
@@ -305,6 +347,9 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             }
             a.runOnUiThread {
                 if (f == null) ui.toast("Could not save it") else {
+                    val tt = e.tracks[ti]
+                    tt.start = 0f; tt.end = 1f; tt.reverse = false; tt.boostDb = 0f
+                    if (loopIt) tt.loop = true                  // (bars: a loop that fits the pattern)
                     a.assignTrack(ti, f)
                     a.libraryScreen.refresh()
                     ui.toast("Track ${ti + 1}: ${f.nameWithoutExtension} (also in the Maker Bank)")
@@ -485,6 +530,9 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         ui.styleButton(muteBtn, tt.mute, Theme.RED)
         for ((k, b) in roomBtns.withIndex()) ui.styleButton(b, room[sel] == k && (k > 0 || !tt.fx.on[2]), c)
         for ((k, b) in srcBtns.withIndex()) ui.styleButton(b, k == src, Theme.RED)
+        resBox.visibility = if (src == 2) View.VISIBLE else View.GONE
+        for (b in resBarBtns) ui.styleButton(b, b.tag == resBars, Theme.RED)
+        muteWhileBox.text = "Mute track ${sel + 1} while it records (its old sound stays out)"
         paintRec()
     }
 
@@ -494,8 +542,10 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         recBtn.background = ui.touchBg(ui.bg(if (running) Theme.RED else Theme.alpha(Theme.RED, 60), 42, Theme.RED, 3), 42)
         recBtn.setTextColor(if (running) Theme.onColor(Theme.RED) else Theme.RED)
         recInfo.text = when {
-            resampling -> String.format(java.util.Locale.US, "Catching the app's sound into track %d: %.1f s (max 30 s). STOP to keep it.",
-                resampleTrack + 1, e.grabPos / Cfg.SR.toDouble())
+            resampling && e.grabWaiting() -> "Waiting for the next bar… (track ${resampleTrack + 1}, $resBars bar${if (resBars > 1) "s" else ""})"
+            resampling -> String.format(java.util.Locale.US, "Catching the app's sound into track %d: %.1f s%s",
+                resampleTrack + 1, e.grabPos / Cfg.SR.toDouble(),
+                if (resBars > 0) " (it stops by itself after $resBars bar${if (resBars > 1) "s" else ""})" else " (max 30 s). STOP to keep it.")
             a.recorder.running -> a.flow.statusLine()
             else -> "Records into track ${a.sel + 1} from " + arrayOf("the microphone", "the instrument on USB / line in",
                 "the app itself (what plays now)")[src] + ". Every take is also kept in the Maker Bank."
