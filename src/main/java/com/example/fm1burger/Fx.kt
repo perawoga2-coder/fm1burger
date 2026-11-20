@@ -86,21 +86,25 @@ private class AllP(len: Int) {
 class FxChain {
 
     companion object {
-        const val N = 10
+        const val N = 11
+        const val ECHO = 10
         val NAMES = arrayOf(
             "Low-pass", "High-pass", "Reverb", "Delay", "Distortion",
-            "Chorus", "Phaser", "Lo-fi", "Wobble", "Chop"
+            "Chorus", "Phaser", "Lo-fi", "Wobble", "Chop", "Echo"
         )
         val LABEL_A = arrayOf(
             "Cutoff", "Cutoff", "Mix", "Mix", "Drive",
-            "Depth", "Mix", "Bits", "Depth", "Depth"
+            "Depth", "Mix", "Bits", "Depth", "Depth", "Mix"
         )
         val LABEL_B = arrayOf(
             "Resonance", "Resonance", "Size", "Time", "Mix",
-            "Rate", "Rate", "Rate reduce", "Rate", "Rate"
+            "Rate", "Rate", "Rate reduce", "Rate", "Rate", "Time"
         )
-        val DEF_A = floatArrayOf(1f, 0f, 0.3f, 0.3f, 0.3f, 0.5f, 0.5f, 0.3f, 0.5f, 0.5f)
-        val DEF_B = floatArrayOf(0.1f, 0.1f, 0.5f, 0.5f, 0.5f, 0.3f, 0.3f, 0.3f, 0.3f, 0.5f)
+        val DEF_A = floatArrayOf(1f, 0f, 0.3f, 0.3f, 0.3f, 0.5f, 0.5f, 0.3f, 0.5f, 0.5f, 0.35f)
+        val DEF_B = floatArrayOf(0.1f, 0.1f, 0.5f, 0.5f, 0.5f, 0.3f, 0.3f, 0.3f, 0.3f, 0.5f, 0.35f)
+
+        /** Echo time in ms for the Time knob: 60 ms slapback .. 800 ms, free (not tied to the tempo). */
+        fun echoMs(b: Float): Float = 60f + 740f * b * b
         private val DELAY_BEATS = floatArrayOf(0.25f, 0.5f, 0.75f, 1f)
         private val CHOP_BEATS = doubleArrayOf(1.0, 0.5, 0.25, 0.125)
 
@@ -136,6 +140,13 @@ class FxChain {
     private val dbuf = FloatArray(Cfg.SR * 2)
     private var dw = 0
 
+    // echo: a tape-style echo, each repeat darker and a little wobbly
+    private val ebuf = FloatArray(Cfg.SR * 2)
+    private var ew = 0
+    private var elp = 0f
+    private var eph = 0f
+    private var eTime = -1f
+
     // chorus
     private val cbuf = FloatArray(4096)
     private var cw = 0
@@ -161,6 +172,8 @@ class FxChain {
 
     fun reset() {
         dbuf.fill(0f)
+        ebuf.fill(0f)
+        elp = 0f
         cbuf.fill(0f)
         apz.fill(0f)
         pfb = 0f
@@ -183,6 +196,7 @@ class FxChain {
                 6 -> phaser(x)
                 7 -> lofi(x)
                 8 -> wobble(x)
+                ECHO -> echo(x)
                 else -> chop(x, beat)
             }
         }
@@ -238,6 +252,26 @@ class FxChain {
         dw++
         if (dw >= dbuf.size) dw = 0
         return x + d * a[3] * (1f + 0.6f * k)
+    }
+
+    private fun echo(x: Float): Float {
+        val target = echoMs(b[ECHO]) * Cfg.SR / 1000f
+        eTime = if (eTime < 0f) target else eTime + (target - eTime) * 0.0005f   // glide, no clicks
+        eph += 0.6f / Cfg.SR
+        if (eph >= 1f) eph -= 1f
+        val dl = (eTime + sin(2f * PI.toFloat() * eph) * 0.0012f * Cfg.SR).coerceIn(1f, ebuf.size - 2f)
+        var pos = ew - dl
+        while (pos < 0f) pos += ebuf.size
+        val i0 = pos.toInt().coerceIn(0, ebuf.size - 1)
+        val fr = pos - i0
+        val i1 = if (i0 + 1 >= ebuf.size) 0 else i0 + 1
+        val d = ebuf[i0] * (1f - fr) + ebuf[i1] * fr
+        elp += (d - elp) * 0.35f                              // each repeat a bit darker
+        val fb = 0.42f + 0.18f * a[ECHO] + 0.25f * k
+        ebuf[ew] = tanh(x + elp * fb)
+        ew++
+        if (ew >= ebuf.size) ew = 0
+        return x + elp * a[ECHO] * (1.1f + 0.5f * k)
     }
 
     private fun dist(x: Float): Float {

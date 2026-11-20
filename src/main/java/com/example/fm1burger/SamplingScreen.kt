@@ -40,6 +40,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     private lateinit var fm1Box: CheckBox
     private lateinit var loopBtn: Button
     private lateinit var revBtn: Button
+    private lateinit var echoBtn: Button
     private lateinit var muteBtn: Button
     private val roomBtns = ArrayList<Button>()
     private val sliders = ArrayList<Pair<SliderRow, () -> Int>>()
@@ -181,10 +182,6 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         mp.addView(ui.text("The sound", 14f, Theme.ACCENT, true))
         val m1 = ui.row()
         m1.addView(colored("Load…", Theme.ACCENT) { load() }, ui.w(1f, 3))
-        loopBtn = colored("Loop", Theme.BLUE) { t().loop = !t().loop; refresh() }
-        m1.addView(loopBtn, ui.w(1f, 3))
-        revBtn = colored("Reverse", Theme.BLUE) { t().reverse = !t().reverse; refresh(); play() }
-        m1.addView(revBtn, ui.w(1f, 3))
         m1.addView(colored("Louder", Theme.BLUE) { louder() }, ui.w(1f, 3))
         m1.addView(colored("Clear", Theme.RED) { clear() }, ui.w(1f, 3))
         mp.addView(m1, ui.fullWidth(6))
@@ -212,6 +209,14 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         fh.addView(muteBtn, ui.w(0f, 3))
         fh.addView(ui.button("More effects…") { TrackPage(a, a.sel, TrackPage.TAB_FX).open() }, ui.w(0f, 3))
         fp.addView(fh)
+        val f0 = ui.row()
+        loopBtn = colored("Loop", Theme.BLUE) { t().loop = !t().loop; refresh() }
+        f0.addView(loopBtn, ui.w(1f, 3))
+        revBtn = colored("Reverse", Theme.BLUE) { t().reverse = !t().reverse; refresh(); play() }
+        f0.addView(revBtn, ui.w(1f, 3))
+        echoBtn = colored("Echo", Theme.BLUE) { toggleEcho() }
+        f0.addView(echoBtn, ui.w(1f, 3))
+        fp.addView(f0, ui.fullWidth(6))
         val f1 = ui.row()
         addSlider(f1, "Volume", { (t().volume * 100).toInt() }, 100, { "$it%" }) { t().volume = it / 100f }
         addSlider(f1, "Pan", { ((t().pan + 1f) * 50).toInt() }, 100, { if (it == 50) "centre" else if (it < 50) "L ${50 - it}" else "R ${it - 50}" }) { t().pan = it / 50f - 1f }
@@ -226,6 +231,10 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         addSlider(f3, "Delay", { fxv(3, 0) }, 100, { if (it == 0) "off" else "$it%" }) { setFx(3, it / 100f, it > 0) }
         addSlider(f3, "Reverb", { fxv(2, 0) }, 100, { if (it == 0) "off" else "$it%" }) { setFx(2, it / 100f, it > 0) }
         fp.addView(f3, ui.fullWidth(4))
+        val f4 = ui.row()
+        addSlider(f4, "Echo", { fxv(FxChain.ECHO, 0) }, 100, { if (it == 0) "off" else "$it%" }) { setFx(FxChain.ECHO, it / 100f, it > 0); refreshEcho() }
+        addSlider(f4, "Echo time", { (t().fx.b[FxChain.ECHO] * 100).toInt() }, 100, { "${FxChain.echoMs(it / 100f).toInt()} ms" }) { t().fx.b[FxChain.ECHO] = it / 100f }
+        fp.addView(f4, ui.fullWidth(4))
         fp.addView(ui.text("Room", 12f, Theme.DIM), ui.fullWidth(6))
         val rmr = ui.row()
         for ((k, n) in ROOMS.withIndex()) {
@@ -265,6 +274,21 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         t().fx.a[k] = v
         t().fx.on[k] = on
     }
+
+    /** The Echo button: on at a ready-to-use setting, or off. */
+    private fun toggleEcho() {
+        val fx = t().fx
+        val k = FxChain.ECHO
+        if (fx.on[k]) fx.on[k] = false
+        else {
+            if (fx.a[k] < 0.05f) fx.a[k] = FxChain.DEF_A[k]
+            fx.on[k] = true
+        }
+        refresh()
+        play()
+    }
+
+    private fun refreshEcho() { ui.styleButton(echoBtn, t().fx.on[FxChain.ECHO], Theme.BLUE) }
 
     private fun setRoom(k: Int) {
         val fx = t().fx
@@ -433,7 +457,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             }
             fx.order = src.order.copyOf()
             fx.intensity = src.intensity
-            val tail = if (src.on[2] || src.on[3]) Cfg.SR * 3 / 2 else 0
+            val tail = if (src.on[2] || src.on[3] || src.on[FxChain.ECHO]) Cfg.SR * 3 / 2 else 0
             val out = FloatArray(x.size + tail)
             val bpm = e.bpmF
             var beat = 0.0
@@ -527,6 +551,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         for ((s, get) in sliders) s.set(get())
         ui.styleButton(loopBtn, tt.loop, Theme.BLUE)
         ui.styleButton(revBtn, tt.reverse, Theme.BLUE)
+        refreshEcho()
         ui.styleButton(muteBtn, tt.mute, Theme.RED)
         for ((k, b) in roomBtns.withIndex()) ui.styleButton(b, room[sel] == k && (k > 0 || !tt.fx.on[2]), c)
         for ((k, b) in srcBtns.withIndex()) ui.styleButton(b, k == src, Theme.RED)

@@ -189,7 +189,11 @@ class Project(private val a: MainActivity) {
                     }
                     t.fx.intensity = j.optDouble("fxIntensity", 1.0).toFloat().coerceIn(1f, 2f)
                     val ord = j.optJSONArray("fxOrder")
-                    if (ord != null && ord.length() == FxChain.N) {
+                    if (ord != null && ord.length() == FxChain.N - 1) {
+                        // a project saved before Echo: keep its order, Echo goes last
+                        val arr = IntArray(FxChain.N) { if (it < ord.length()) ord.optInt(it, it) else FxChain.N - 1 }
+                        if (arr.sortedArray().contentEquals(IntArray(FxChain.N) { it })) t.fx.order = arr
+                    } else if (ord != null && ord.length() == FxChain.N) {
                         val arr = IntArray(FxChain.N) { ord.optInt(it, it) }
                         if (arr.sortedArray().contentEquals(IntArray(FxChain.N) { it })) t.fx.order = arr
                     }
