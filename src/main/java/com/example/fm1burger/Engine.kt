@@ -37,9 +37,12 @@ class Engine {
         const val PREP_RIFF = 14
         const val PREP_AMBIENT = 15
 
+        /** The first stem after the sampler tracks. */
+        const val ST = Cfg.TRACKS
+
         /** The stem files (in this order) when STEMS is on. */
         val STEM_NAMES = arrayOf(
-            "Sampler1", "Sampler2", "Sampler3", "Sampler4", "Drums", "Bassline", "AnalogSynth",
+            "Sampler1", "Sampler2", "Sampler3", "Sampler4", "Sampler5", "Drums", "Bassline", "AnalogSynth",
             "RhythmGuitar", "RiffGuitar", "NewAmbient", "Voice", "SongRecordings"
         )
 
@@ -213,6 +216,28 @@ class Engine {
     fun padHit(i: Int, vel: Float) {
         if (i in pads.indices) pads[i].req = vel.coerceIn(0.05f, 1f)
     }
+
+    // ---------------- 3.19 RESAMPLE: the app's own mix into memory (SAMPLING's REC, source "the app") ----------------
+    @Volatile private var grabBuf: FloatArray? = null
+    @Volatile var grabPos = 0
+        private set
+
+    /** Starts catching the mix (mono) for at most [seconds]. */
+    fun grabStart(seconds: Double) {
+        grabPos = 0
+        grabBuf = FloatArray((seconds * Cfg.SR).toInt().coerceAtLeast(Cfg.SR))
+    }
+
+    /** Stops and returns what was caught (null if nothing). */
+    fun grabStop(): FloatArray? {
+        val b = grabBuf ?: return null
+        grabBuf = null
+        val n = grabPos.coerceAtMost(b.size)
+        return if (n < 64) null else b.copyOf(n)
+    }
+
+    fun grabbing(): Boolean = grabBuf != null
+    fun grabFull(): Boolean = grabBuf?.let { grabPos >= it.size } ?: false
 
     fun previewPlay(d: FloatArray) {
         preview.data = d
@@ -545,14 +570,14 @@ class Engine {
                 l += bank.outL * gRest
                 r += bank.outR * gRest
                 if (stemOn) {
-                    stemBuf[4][f2] = pm * mv; stemBuf[4][f2 + 1] = pm * mv
-                    stemBuf[5][f2] = bz * mv; stemBuf[5][f2 + 1] = bz * mv
-                    stemBuf[6][f2] = sy * mv; stemBuf[6][f2 + 1] = sy * mv
-                    stemBuf[7][f2] = gR * 0.9f * mv; stemBuf[7][f2 + 1] = gR * 0.55f * mv
-                    stemBuf[8][f2] = gF * 0.55f * mv; stemBuf[8][f2 + 1] = gF * 0.9f * mv
-                    stemBuf[9][f2] = ambient.outL * gAmb * mv; stemBuf[9][f2 + 1] = ambient.outR * gAmb * mv
-                    stemBuf[10][f2] = vocal.outL * gRest * mv; stemBuf[10][f2 + 1] = vocal.outR * gRest * mv
-                    stemBuf[11][f2] = bank.outL * gRest * mv; stemBuf[11][f2 + 1] = bank.outR * gRest * mv
+                    stemBuf[ST][f2] = pm * mv; stemBuf[ST][f2 + 1] = pm * mv
+                    stemBuf[ST + 1][f2] = bz * mv; stemBuf[ST + 1][f2 + 1] = bz * mv
+                    stemBuf[ST + 2][f2] = sy * mv; stemBuf[ST + 2][f2 + 1] = sy * mv
+                    stemBuf[ST + 3][f2] = gR * 0.9f * mv; stemBuf[ST + 3][f2 + 1] = gR * 0.55f * mv
+                    stemBuf[ST + 4][f2] = gF * 0.55f * mv; stemBuf[ST + 4][f2 + 1] = gF * 0.9f * mv
+                    stemBuf[ST + 5][f2] = ambient.outL * gAmb * mv; stemBuf[ST + 5][f2 + 1] = ambient.outR * gAmb * mv
+                    stemBuf[ST + 6][f2] = vocal.outL * gRest * mv; stemBuf[ST + 6][f2 + 1] = vocal.outR * gRest * mv
+                    stemBuf[ST + 7][f2] = bank.outL * gRest * mv; stemBuf[ST + 7][f2 + 1] = bank.outR * gRest * mv
                 }
                 val pr = renderPad(preview) * 0.8f
                 l += pr
@@ -565,6 +590,8 @@ class Engine {
                 if (ar > mpk) mpk = ar
                 fout[f * 2] = l
                 fout[f * 2 + 1] = r
+                val gb = grabBuf
+                if (gb != null && grabPos < gb.size) gb[grabPos++] = (l + r) * 0.5f
                 out[f * 2] = (l * 32767f).toInt().coerceIn(-32768, 32767).toShort()
                 out[f * 2 + 1] = (r * 32767f).toInt().coerceIn(-32768, 32767).toShort()
             }

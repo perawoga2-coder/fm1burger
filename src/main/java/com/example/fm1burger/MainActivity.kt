@@ -40,8 +40,8 @@ class MainActivity : Activity() {
         // the 5 sections of the bottom bar, and the pages inside each one (3.0 Lab)
         val SECTIONS = arrayOf(
             intArrayOf(10, 2),                      // Home: lanes, mixer
-            intArrayOf(0, 1, 3),                    // Sampler: sampler, steps, library
-            intArrayOf(16, 6, 13, 7, 12, 11, 8),    // Instruments: MPC, drum steps, bassline, analog, guitars, ambient, voice
+            intArrayOf(0, 1, 3),                    // Sampler: SAMPLING, steps, Maker Bank
+            intArrayOf(16, 6, 13, 7, 12, 11),       // Instruments: MPC, drum steps, bassline, analog, guitars, ambient (3.19: no Voice)
             intArrayOf(9, 15),                      // Song, automation
             intArrayOf(14)                          // Setup
         )
@@ -71,7 +71,7 @@ class MainActivity : Activity() {
     lateinit var synthScreen: SynthScreen
     lateinit var bassScreen: SynthScreen
     lateinit var homeScreen: HomeScreen
-    lateinit var tracksScreen: TracksScreen
+    lateinit var tracksScreen: SamplingScreen
     lateinit var voiceScreen: VoiceScreen
     lateinit var guitarScreen: GuitarScreen
 
@@ -362,7 +362,7 @@ class MainActivity : Activity() {
         root.addView(head)
 
         // screens
-        val tracks = TracksScreen(this)
+        val tracks = SamplingScreen(this)      // 3.19: SAMPLING (the old Sampler, Edit and Voice in one page)
         tracksScreen = tracks
         val steps = StepsScreen(this)
         val mixer = MixerScreen(this)
@@ -387,7 +387,7 @@ class MainActivity : Activity() {
         // ---- tab bar: pills, the open page is filled ----
         val tabRow = ui.row()
         tabRow.setPadding(ui.dp(8), ui.dp(6), ui.dp(8), ui.dp(6))
-        val names = listOf("Sampler", "Steps", "Mixer", "Maker Bank", "Edit", "FX", "Drum steps", "Analog synth", "Voice", "Song", "Lanes", "New Ambient", "Guitars", "Bassline", "Setup", "Automation", "MPC")
+        val names = listOf("Sampling", "Steps", "Mixer", "Maker Bank", "Edit", "FX", "Drum steps", "Analog synth", "Voice", "Song", "Lanes", "New Ambient", "Guitars", "Bassline", "Setup", "Automation", "MPC")
         val btns = ArrayList<Button>()
         names.forEachIndexed { i, n ->
             val b = ui.button(n) { showTab(i) }
@@ -399,7 +399,6 @@ class MainActivity : Activity() {
         }
         tabBtns = btns
         // the editor and the effects now live inside the Sampler page
-        tracks.attachEmbedded(editScreen, fx)
         btns[TAB_EDIT].visibility = View.GONE
         btns[TAB_FX].visibility = View.GONE
         tabScroll = HorizontalScrollView(this)
@@ -556,9 +555,8 @@ class MainActivity : Activity() {
         showTab(TAB_GUITAR)
     }
 
-    /** First start: put the Rock Heavy kit into the library, and on the pads when they are all empty. */
+    /** First start: put the Rock Heavy kit into the Maker Bank (3.19: the MPC pads start empty: you choose). */
     private fun installRockKit() {
-        val padsEmpty = !project.hadPads
         Thread {
             val ok = try {
                 RockKit.install(this, store)
@@ -572,7 +570,6 @@ class MainActivity : Activity() {
             }
             runOnUiThread {
                 if (ok && !isFinishing) {
-                    if (padsEmpty) for (i in RockKit.pads.indices) assignPad(i, store.file(RockKit.fileName(RockKit.pads[i])))
                     libraryScreen.refresh()
                 }
             }
@@ -1477,13 +1474,13 @@ class MainActivity : Activity() {
      * 3.16: choose a sound from anywhere: the Maker Bank (by category), this device's files,
      * a sampler track's sound, the built-in kits, or nothing.
      */
-    fun pickSound(title: String, cb: (File?) -> Unit) {
+    fun pickSound(title: String, emptyLabel: String = "(empty this pad)", cb: (File?) -> Unit) {
         val items = arrayOf(
             "Maker Bank…",
             "Browse this device (files, downloads, SD card)…",
             "The sound of a sampler track…",
             "Built-in drum kits…",
-            "(empty this pad)"
+            emptyLabel
         )
         AlertDialog.Builder(this)
             .setTitle(title)
@@ -1612,10 +1609,10 @@ class MainActivity : Activity() {
         for (p in engine.pads) if (p.name == old) p.name = new
     }
 
+    /** 3.19: a sound to work on goes onto the selected SAMPLING track (the Edit page is part of SAMPLING now). */
     fun openEdit(f: File) {
-        editScreen.pendingOpen = f
+        if (engine.tracks[sel].sampleName != f.name) assignTrack(sel, f)
         showTab(TAB_TRACKS)
-        tracksScreen.scrollToEditor()
     }
 
     // ---------------- import / export ----------------

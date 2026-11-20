@@ -43,7 +43,7 @@ object Theme {
     val TEAL = Color.parseColor("#2DD4BF")
     val STEEL = Color.parseColor("#C0C7D6")
     val LIME = Color.parseColor("#B8F23C")
-    val TRACK_COLORS = intArrayOf(ACCENT, BLUE, GREEN, YELLOW)
+    val TRACK_COLORS = intArrayOf(ACCENT, BLUE, GREEN, YELLOW, PINK)
 
     /** Text color that reads well on top of a filled color. */
     fun onColor(c: Int): Int {

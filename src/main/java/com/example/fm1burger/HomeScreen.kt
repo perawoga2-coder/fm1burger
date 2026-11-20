@@ -74,7 +74,7 @@ class LaneSetup {
         var k = 0
         for (i in 0 until Cfg.TRACKS) { type[k] = Inst.SAMPLE; idx[k] = i; k++ }
         for (i in 0 until 8) { type[k] = Inst.DRUM; idx[k] = i; k++ }
-        for (t in intArrayOf(Inst.BASS, Inst.SYNTH, Inst.VOICE, Inst.SONG, Inst.AMBIENT, Inst.RHYTHM, Inst.RIFF)) {
+        for (t in intArrayOf(Inst.BASS, Inst.SYNTH, Inst.SONG, Inst.AMBIENT, Inst.RHYTHM, Inst.RIFF)) {   // (3.19: no Voice; sampler 5)
             if (k < N) { type[k] = t; idx[k] = 0; k++ }
         }
         while (k < N) { type[k] = Inst.EMPTY; idx[k] = 0; k++ }
@@ -82,7 +82,8 @@ class LaneSetup {
 
     /** Tap on a lane number: the next instrument. A sample / drum lane takes a free slot when there is one. */
     fun cycle(lane: Int) {
-        val t = (type[lane] + 1) % Inst.COUNT
+        var t = (type[lane] + 1) % Inst.COUNT
+        if (t == Inst.VOICE) t = (t + 1) % Inst.COUNT     // (3.19: the Voice page is gone: sampler track 5 records voices)
         type[lane] = t
         val n = Inst.slots(t)
         idx[lane] = 0
@@ -125,6 +126,12 @@ class LaneSetup {
             type[i] = if (t in 0 until Inst.COUNT) t else Inst.EMPTY
             val n = Inst.slots(type[i])
             idx[i] = (ia?.optInt(i, 0) ?: 0).coerceIn(0, max(0, n - 1))
+        }
+        // 3.19: a Voice lane becomes sampler track 5 (when no lane shows it yet)
+        for (i in 0 until N) if (type[i] == Inst.VOICE) {
+            val used = (0 until N).any { type[it] == Inst.SAMPLE && idx[it] == Cfg.TRACKS - 1 }
+            type[i] = if (used) Inst.EMPTY else Inst.SAMPLE
+            idx[i] = Cfg.TRACKS - 1
         }
     }
 }
@@ -235,7 +242,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
             Inst.DRUM -> a.showTab(MainActivity.TAB_PADS)
             Inst.BASS -> a.openSynth(0)
             Inst.SYNTH -> a.openSynth(1)
-            Inst.VOICE -> a.showTab(MainActivity.TAB_VOICE)
+            Inst.VOICE -> a.showTab(MainActivity.TAB_TRACKS)
             Inst.SONG -> a.showTab(MainActivity.TAB_SONG)
             Inst.AMBIENT -> a.showTab(MainActivity.TAB_AMBIENT)
             Inst.RHYTHM -> a.openGuitar(0)

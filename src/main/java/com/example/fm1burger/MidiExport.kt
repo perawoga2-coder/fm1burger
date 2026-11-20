@@ -6,7 +6,7 @@ import kotlin.math.roundToInt
 
 /**
  * Writes the patterns as a Standard MIDI File (type 1, 96 ticks a beat), to open in any DAW.
- * One track per instrument: drums on channel 10 (General MIDI notes), sampler tracks 1-4,
+ * One track per instrument: drums on channel 10 (General MIDI notes), sampler tracks 1-5 (channels 1-5),
  * bassline, analog synth (with its chord) and the two guitars. The sample sounds themselves are not in it.
  */
 object MidiExport {
@@ -91,14 +91,14 @@ object MidiExport {
                 if (!sn.bMute && sn.bOn[s]) {
                     val nx = (s + 1) % len
                     val held = sn.bOn[nx] && sn.bSlide[nx]
-                    bass.note(4, bassRoot + sn.bNote[s], if (sn.bAcc[s]) 120 else 90, t, if (held) T16 + T16 / 4 else T16 * 3 / 5)
+                    bass.note(5, bassRoot + sn.bNote[s], if (sn.bAcc[s]) 120 else 90, t, if (held) T16 + T16 / 4 else T16 * 3 / 5)
                 }
                 // analog synth with its chord
                 if (!sn.aMute && sn.aEnabled) {
                     val b = s * AnalogSeq.NOTES
                     for (n in 0 until AnalogSeq.NOTES) {
                         val l = sn.aGrid[b + n]
-                        if (l > 0) for (x in chord) synth.note(5, n + x, 100, t, l.coerceIn(1, AnalogSeq.MAX_LEN) * T16)
+                        if (l > 0) for (x in chord) synth.note(6, n + x, 100, t, l.coerceIn(1, AnalogSeq.MAX_LEN) * T16)
                     }
                 }
             }
@@ -120,7 +120,7 @@ object MidiExport {
                     if (art == MetalGuitar.OPEN) {
                         while (k + l < steps && g.art[(k + l) % len] == MetalGuitar.HOLD) l++
                     }
-                    gtr[gi].note(6 + gi, (root.roundToInt() + g.fret[s] + oct), if (art == MetalGuitar.CHUG) 100 else 115, k * T16,
+                    gtr[gi].note(7 + gi, (root.roundToInt() + g.fret[s] + oct), if (art == MetalGuitar.CHUG) 100 else 115, k * T16,
                         if (art == MetalGuitar.CHUG) T16 / 2 else l * T16)
                 }
                 k++

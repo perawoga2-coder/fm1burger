@@ -2,7 +2,7 @@ package com.example.fm1burger
 
 object Cfg {
     const val SR = 44100
-    const val TRACKS = 4
+    const val TRACKS = 5      // 3.19: five sampler tracks (SAMPLING page)
     /** Room for the longest pattern (4 bars of 16th notes). The pattern plays [Pat.len] of them. */
     const val STEPS = 64
     /** Drum pads: 2 banks (A, B) of 16. */
