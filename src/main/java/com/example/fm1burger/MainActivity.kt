@@ -241,14 +241,16 @@ class MainActivity : Activity() {
         val head = LinearLayout(this)
         head.orientation = LinearLayout.VERTICAL
         head.setBackgroundColor(Theme.PANEL)
-        head.setPadding(ui.dp(10), ui.dp(8), ui.dp(10), ui.dp(8))
+        head.setPadding(ui.dp(10), ui.dp(6), ui.dp(10), ui.dp(6))
 
         val r1 = ui.row()
+        r1.gravity = android.view.Gravity.CENTER_VERTICAL
+        // 3.22: a bigger PLAY: green to play, red while playing (a tap again stops)
         playBtn = ui.button("▶") { togglePlay() }
-        playBtn.textSize = 20f
+        playBtn.textSize = 30f
         playBtn.setPadding(0, 0, 0, 0)
-        ui.styleButton(playBtn, false, Theme.ACCENT, 26)
-        r1.addView(playBtn, LinearLayout.LayoutParams(ui.dp(52), ui.dp(52)).also { it.marginEnd = ui.dp(10) })
+        ui.styleButton(playBtn, true, Theme.GREEN, 30)
+        r1.addView(playBtn, LinearLayout.LayoutParams(ui.dp(72), ui.dp(72)).also { it.marginEnd = ui.dp(10) })
 
         // tempo block: − [ BPM 120 ] +
         val tempo = ui.row()
@@ -299,7 +301,10 @@ class MainActivity : Activity() {
         })
         r1.addView(bpmBar, ui.w(1f, 4))
         bpmBar.visibility = View.GONE                    // 3.0: tap the number, or − / + (hold for ±10)
-        r1.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        val statusSlot = LinearLayout(this)              // 3.22: the status line here, in the row's free middle
+        r1.addView(statusSlot, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).also {
+            it.setMargins(ui.dp(8), 0, ui.dp(8), 0)
+        })
         syncBtn = ui.button("SYNC") { toggleSync() }
         r1.addView(syncBtn, ui.w(0f, 3))
         muteAllBtn = ui.button("MUTE ALL") { muteAll() }
@@ -325,9 +330,8 @@ class MainActivity : Activity() {
         statusText.maxLines = 2
         statusText.ellipsize = android.text.TextUtils.TruncateAt.END
         statusBox.addView(statusText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        r2.addView(statusBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).also {
-            it.setMargins(0, ui.dp(3), ui.dp(3), ui.dp(3))
-        })
+        statusSlot.addView(statusBox, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT))
         recPartBtn = ui.button("● REC PART") { toggleRecPart() }
         recMixBtn = ui.button("● REC MIX") { toggleMixRec() }
         recMixBtn.setOnLongClickListener {
@@ -338,6 +342,7 @@ class MainActivity : Activity() {
         r2.addView(recMixBtn, ui.w(0f, 3))
         recPartBtn.visibility = View.GONE                // 3.0: one REC button in the first row
         recMixBtn.visibility = View.GONE
+        r2.visibility = View.GONE                        // 3.22: its status line went up into the first row
         head.addView(r2, ui.fullWidth(6))
 
         // the 6 cue parts, on every page
@@ -596,12 +601,8 @@ class MainActivity : Activity() {
     // ---------------- header actions ----------------
 
     private fun togglePlay() {
-        when {
-            // a part plays alone (PREPARE): the big play button switches to the full mix
-            engine.playing && engine.prepare >= 0 -> engine.play()
-            engine.playing -> engine.stop()
-            else -> engine.play()
-        }
+        // 3.22: a tap again always stops (a part playing alone too; the cue buttons go to the full mix)
+        if (engine.playing) engine.stop() else engine.play()
     }
 
     /** A cue button: jump to that part (at the next bar while playing). */
@@ -1138,7 +1139,7 @@ class MainActivity : Activity() {
         val pt = if (engine.playing) "■" else "▶"
         if (playBtn.text.toString() != pt) playBtn.text = pt
         val preparing = engine.playing && engine.prepare >= 0
-        ui.styleButton(playBtn, engine.playing, if (preparing) Theme.YELLOW else Theme.GREEN, 26)
+        ui.styleButton(playBtn, true, if (!engine.playing) Theme.GREEN else if (preparing) Theme.YELLOW else Theme.RED, 30)
         val sb = when (syncState) {
             1 -> "LEAD"
             2 -> "FOLLOW"
