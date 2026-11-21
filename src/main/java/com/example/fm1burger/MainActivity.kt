@@ -95,6 +95,7 @@ class MainActivity : Activity() {
     private lateinit var screens: List<Screen>
     private lateinit var tabBtns: List<Button>
     private lateinit var playBtn: Button
+    private var homeBar: View? = null
     private lateinit var syncBtn: Button
     private lateinit var muteAllBtn: Button
     private lateinit var bpmText: TextView
@@ -411,7 +412,32 @@ class MainActivity : Activity() {
         tabScroll.setBackgroundColor(Theme.BG)
         tabScroll.addView(tabRow)
         segRow = tabRow
-        root.addView(tabScroll)
+        // 3.23: the page bar's row also holds Home's own line (its name, the version, a short hint, Reset lanes)
+        val barRow = ui.row()
+        barRow.gravity = android.view.Gravity.CENTER_VERTICAL
+        barRow.setBackgroundColor(Theme.BG)
+        barRow.addView(tabScroll, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val hx = ui.row()
+        hx.gravity = android.view.Gravity.CENTER_VERTICAL
+        hx.setPadding(0, 0, ui.dp(8), 0)
+        val hxText = ui.col()
+        val ver = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (ex: Exception) { "" }
+        val hxTitle = ui.text("Home  ·  Burger Studio Lab v$ver", 12f, Theme.TEXT, true)
+        hxTitle.maxLines = 1
+        hxTitle.ellipsize = android.text.TextUtils.TruncateAt.END
+        val hxHint = ui.text("Number: instrument · Icon: its page · Picture: hear · M: mute", 10f, Theme.DIM)
+        hxHint.maxLines = 1
+        hxHint.ellipsize = android.text.TextUtils.TruncateAt.END
+        hxText.addView(hxTitle)
+        hxText.addView(hxHint)
+        hx.addView(hxText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        hx.addView(ui.button("Reset lanes") {
+            lanes.reset()
+            homeScreen.refresh()
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, ui.dp(40)).also { it.marginStart = ui.dp(8) })
+        barRow.addView(hx, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f))
+        homeBar = hx
+        root.addView(barRow)
         val line = View(this)
         line.setBackgroundColor(Theme.LINE)
         root.addView(line, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(1)))
@@ -492,6 +518,7 @@ class MainActivity : Activity() {
         }
         cueRow?.visibility = if (sec == 0 || sec == 3) View.VISIBLE else View.GONE
         homeFab.visibility = if (i == TAB_HOME) View.GONE else View.VISIBLE
+        homeBar?.visibility = if (i == TAB_HOME) View.VISIBLE else View.GONE   // (3.23: Home's line in the bar)
         screens.forEachIndexed { idx, s -> s.root.visibility = if (idx == i) View.VISIBLE else View.GONE }
         paintTabs()
         // keep the open tab visible in the scrolling tab bar

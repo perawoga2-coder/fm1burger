@@ -155,34 +155,43 @@ class HomeScreen(private val a: MainActivity) : Screen {
     private val muteBtns = ArrayList<Button>()
     private var lastStep = -2
 
+    private var rowH = 0
+
     init {
-        content.setPadding(ui.dp(10), ui.dp(12), ui.dp(10), ui.dp(32))
+        // 3.23: the name, the version, the hint and Reset lanes are in the page bar's row (MainActivity); the lanes
+        // take the room, as tall as the screen lets them (48 dp at least)
+        content.setPadding(ui.dp(10), ui.dp(8), ui.dp(10), ui.dp(8))
         root.addView(content)
-        val head = ui.row()
-        head.addView(ui.title("Home"), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        head.addView(ui.button("Reset lanes") {
-            lanes.reset()
-            refresh()
-        }, ui.w(0f, 2))
-        content.addView(head)
-        val ver = try {
-            a.packageManager.getPackageInfo(a.packageName, 0).versionName ?: ""
-        } catch (ex: Exception) {
-            ""
-        }
-        content.addView(ui.text("Burger Studio Lab  v$ver", 11f, Theme.FAINT, true), ui.fullWidth(0))
-        content.addView(
-            ui.text(
-                "Tap a number to change the instrument of that lane. " +
-                    "Tap the icon to open the instrument's own page. Tap the picture to hear it. M = mute.",
-                12f, Theme.DIM
-            ), ui.fullWidth(4)
-        )
         val list = ui.col()
         list.background = ui.bg(Theme.PANEL, 16, Theme.LINE, 1)
         list.setPadding(ui.dp(6), ui.dp(6), ui.dp(6), ui.dp(6))
         for (i in 0 until LaneSetup.N) list.addView(buildLane(i))
-        content.addView(list, ui.fullWidth(10))
+        content.addView(list, ui.fullWidth(0))
+        root.viewTreeObserver.addOnGlobalLayoutListener { fitLanes() }
+    }
+
+    /** The lanes' height: the page's height shared out (48 .. 110 dp a lane), the buttons in proportion. */
+    private fun fitLanes() {
+        val h = root.height
+        if (h <= 0) return
+        val free = h - ui.dp(8 + 8 + 12) - LaneSetup.N * ui.dp(4)
+        val want = (free / LaneSetup.N).coerceIn(ui.dp(48), ui.dp(110))
+        if (want == rowH) return
+        rowH = want
+        for (i in numBtns.indices) {
+            fun size(v: View, w: Int) {
+                val lp = v.layoutParams
+                lp.height = want
+                if (w > 0) lp.width = w
+                v.layoutParams = lp
+            }
+            size(numBtns[i], want * 40 / 48)
+            size(icons[i], want)
+            size(views[i], 0)
+            size(muteBtns[i], want * 38 / 48)
+            numBtns[i].textSize = 14f * want / ui.dp(48)
+            muteBtns[i].textSize = 14f * want / ui.dp(48)
+        }
     }
 
     private fun buildLane(i: Int): View {
