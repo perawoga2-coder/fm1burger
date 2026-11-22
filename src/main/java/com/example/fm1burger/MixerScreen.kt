@@ -44,6 +44,18 @@ class MixerScreen(private val a: MainActivity) : Screen {
     private lateinit var ambMuteBtn: Button
     private var muteKey = ""
 
+    // 3.40 CUE: a button on every strip, and the headphone mix in the Output panel
+    private val cueBtns = ArrayList<Button>()                  // the fixed strips
+    private val cueIdx = ArrayList<Int>()                      // their Engine.CUE_* source (-1: all the drum pads)
+    private val padCueBtns = ArrayList<Button>()
+    private var cueKey = -1
+    private lateinit var splitBtn: Button
+    private lateinit var swapBtn: Button
+    private lateinit var cueMixRow: SliderRow
+    private lateinit var cueVolRow: SliderRow
+    private lateinit var cueInfo: TextView
+    private var cueInfoSeen = ""
+
     // 3.38: one strip for each drum pad a Home lane shows (in Home's lane order), on pads[k].volume
     private val lanes = a.lanes
     private val padRow = ui.row()
@@ -77,6 +89,43 @@ class MixerScreen(private val a: MainActivity) : Screen {
             )
         )
         op.addView(ui.button("Rescan outputs") { scanOutputs() }, ui.fullWidth(4))
+
+        // 3.40 CUE: the headphone mix
+        op.addView(ui.text("Headphones (CUE \uD83C\uDFA7)", 14f, Theme.ACCENT, true), ui.fullWidth(10))
+        op.addView(
+            ui.text(
+                "A lane in CUE is silent in the main output and plays in the headphones: a USB interface with 4 " +
+                    "outputs (1-2 main, 3-4 headphones), or headphones next to another Output (the tablet speaker), " +
+                    "or a split cable. Recordings and exports always get the whole mix.",
+                12f, Theme.DIM
+            )
+        )
+        cueMixRow = ui.slider("CUE MIX (main mix in the headphones)", 100, Math.round(e.cueMix * 100f), { "$it %" }) { v ->
+            e.cueMix = v / 100f
+        }
+        op.addView(cueMixRow.view)
+        cueVolRow = ui.slider("Headphone level", 100, Math.round(e.cueLevel() * 100f), { "$it %" }) { v ->
+            e.cueVol = v / 100f
+        }
+        op.addView(cueVolRow.view)
+        val sr = ui.row()
+        splitBtn = ui.button("Split cable (DJ)") {
+            e.cueSplit = !e.cueSplit
+            e.cueSync()
+            refreshCues()
+        }
+        sr.addView(splitBtn, ui.w(1.4f, 3))
+        swapBtn = ui.button("SWAP L / R") {
+            e.cueSwap = !e.cueSwap
+            refreshCues()
+        }
+        sr.addView(swapBtn, ui.w(1f, 3))
+        op.addView(sr, ui.fullWidth(4))
+        op.addView(
+            ui.text("Split cable: a Y cable on the one 3.5 mm jack. Left = main mix, right = headphone mix, both mono.", 12f, Theme.DIM)
+        )
+        cueInfo = ui.text("", 12f, Theme.TEXT)
+        op.addView(cueInfo)
         content.addView(op, ui.fullWidth(0))
 
         val mp = ui.panel()
@@ -116,6 +165,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
                 refreshMutes()
             }
             col.addView(m, ui.fullWidth(4))
+            col.addView(cueButton(i), ui.fullWidth(4))
             faders.add(f)
             pans.add(pan)
             muteBtns.add(m)
@@ -135,6 +185,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
             refreshMutes()
         }
         pcol.addView(drumMuteBtn, ui.fullWidth(4))
+        pcol.addView(cueButton(-1), ui.fullWidth(4))
         row.addView(pcol, colLp())
         // 3.38: the strips of the drum lanes on Home (filled by syncPadStrips)
         padRow.gravity = android.view.Gravity.TOP
@@ -152,6 +203,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
             refreshMutes()
         }
         bcol.addView(bassMuteBtn, ui.fullWidth(4))
+        bcol.addView(cueButton(Engine.CUE_BASS), ui.fullWidth(4))
         row.addView(bcol, colLp())
 
         val scol = ui.panel()
@@ -166,6 +218,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
             refreshMutes()
         }
         scol.addView(synthMuteBtn, ui.fullWidth(4))
+        scol.addView(cueButton(Engine.CUE_SYNTH), ui.fullWidth(4))
         row.addView(scol, colLp())
 
         val vcol = ui.panel()
@@ -180,6 +233,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
             refreshMutes()
         }
         vcol.addView(voiceMuteBtn, ui.fullWidth(4))
+        vcol.addView(cueButton(Engine.CUE_VOICE), ui.fullWidth(4))
         row.addView(vcol, colLp())
 
         val gcol = ui.panel()
@@ -194,10 +248,11 @@ class MixerScreen(private val a: MainActivity) : Screen {
             refreshMutes()
         }
         gcol.addView(songMuteBtn, ui.fullWidth(4))
+        gcol.addView(cueButton(Engine.CUE_SONG), ui.fullWidth(4))
         row.addView(gcol, colLp())
 
         // the newer instruments, so every lane on Home has its strip here
-        fun strip(name: String, col: Int, sub: String, vol: () -> Float, setVol: (Float) -> Unit, toggle: () -> Unit): Pair<FaderView, Button> {
+        fun strip(name: String, col: Int, sub: String, cue: Int, vol: () -> Float, setVol: (Float) -> Unit, toggle: () -> Unit): Pair<FaderView, Button> {
             val c = ui.panel()
             c.addView(ui.text(name, 13f, col, true))
             val f = FaderView(a)
@@ -211,16 +266,17 @@ class MixerScreen(private val a: MainActivity) : Screen {
                 refreshMutes()
             }
             c.addView(m, ui.fullWidth(4))
+            c.addView(cueButton(cue), ui.fullWidth(4))
             row.addView(c, colLp())
             return Pair(f, m)
         }
-        strip("Rhythm gtr", Theme.STEEL, "Power chords (Guitars page)", { e.rhythmGtr.volume }, { e.rhythmGtr.volume = it }) {
+        strip("Rhythm gtr", Theme.STEEL, "Power chords (Guitars page)", Engine.CUE_RHYTHM, { e.rhythmGtr.volume }, { e.rhythmGtr.volume = it }) {
             e.rhythmGtr.mute = !e.rhythmGtr.mute
         }.also { rhythmFader = it.first; rhythmMuteBtn = it.second }
-        strip("Riff gtr", Theme.LIME, "Single notes (Guitars page)", { e.riffGtr.volume }, { e.riffGtr.volume = it }) {
+        strip("Riff gtr", Theme.LIME, "Single notes (Guitars page)", Engine.CUE_RIFF, { e.riffGtr.volume }, { e.riffGtr.volume = it }) {
             e.riffGtr.mute = !e.riffGtr.mute
         }.also { riffFader = it.first; riffMuteBtn = it.second }
-        strip("New Ambient", Theme.TEAL, "Creatures (New Ambient page)", { e.ambient.volume }, { e.ambient.volume = it }) {
+        strip("New Ambient", Theme.TEAL, "Creatures (New Ambient page)", Engine.CUE_AMBIENT, { e.ambient.volume }, { e.ambient.volume = it }) {
             e.ambient.mute = !e.ambient.mute
         }.also { ambFader = it.first; ambMuteBtn = it.second }
 
@@ -237,6 +293,46 @@ class MixerScreen(private val a: MainActivity) : Screen {
         hs.addView(row)
         content.addView(hs, ui.fullWidth(10))
         scanOutputs()
+    }
+
+    /** 3.40: the CUE button of a strip ([src]: Engine.CUE_*, or -1 = all the drum pads). */
+    private fun cueButton(src: Int): Button {
+        val b = ui.button("CUE \uD83C\uDFA7") {
+            if (src < 0) {
+                val on = !allPadsCue()
+                for (k in e.pads.indices) e.setCue(Engine.CUE_PAD + k, on)
+            } else {
+                e.setCue(src, !e.isCue(src))
+            }
+            refreshCues()
+        }
+        cueBtns.add(b)
+        cueIdx.add(src)
+        return b
+    }
+
+    private fun allPadsCue(): Boolean {
+        for (k in e.pads.indices) if (!e.isCue(Engine.CUE_PAD + k)) return false
+        return true
+    }
+
+    /** All the CUE states in one number (no string each tick): when it changes anywhere, the buttons follow. */
+    private fun currentCueKey(): Int {
+        var h = if (e.cueSplit) 3 else 1
+        if (e.cueSwap) h += 4
+        for (c in e.cue) h = h * 31 + (if (c) 1 else 0)
+        return h
+    }
+
+    private fun refreshCues() {
+        for (j in 0 until cueBtns.size) {
+            val s = cueIdx[j]
+            ui.styleButton(cueBtns[j], if (s < 0) allPadsCue() else e.isCue(s), Theme.BLUE)
+        }
+        for (j in 0 until padCueBtns.size) ui.styleButton(padCueBtns[j], e.isCue(Engine.CUE_PAD + padIdx[j]), Theme.BLUE)
+        ui.styleButton(splitBtn, e.cueSplit, Theme.BLUE)
+        ui.styleButton(swapBtn, e.cueSwap, Theme.BLUE)
+        cueKey = currentCueKey()
     }
 
     /** Every mixer strip has the same width; the row scrolls sideways when there are more strips than fit. */
@@ -280,6 +376,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
         padRow.removeAllViews()
         padFaders.clear()
         padMuteBtns.clear()
+        padCueBtns.clear()
         padCount = n
         val col = Inst.color(Inst.DRUM)
         for (j in 0 until n) {
@@ -302,11 +399,18 @@ class MixerScreen(private val a: MainActivity) : Screen {
                 refreshMutes()
             }
             c.addView(m, ui.fullWidth(4))
+            val cb = ui.button("CUE \uD83C\uDFA7") {
+                e.setCue(Engine.CUE_PAD + k, !e.isCue(Engine.CUE_PAD + k))
+                refreshCues()
+            }
+            c.addView(cb, ui.fullWidth(4))
             padFaders.add(f)
             padMuteBtns.add(m)
+            padCueBtns.add(cb)
             padRow.addView(c, colLp())
         }
         refreshMutes()
+        refreshCues()
     }
 
     /** 3.38: a fader follows its value when it changed somewhere else (Home, automation, MIDI...) and no finger is on it. */
@@ -396,12 +500,26 @@ class MixerScreen(private val a: MainActivity) : Screen {
         ambFader.value = e.ambient.volume
         masterFader.value = e.masterVol
         refreshMutes()
+        cueMixRow.set(Math.round(e.cueMix * 100f))
+        cueVolRow.set(Math.round(e.cueLevel() * 100f))
+        refreshCues()
     }
 
     override fun onTick() {
         syncPadStrips()
         syncFaders()
         if (currentMuteKey() != muteKey) refreshMutes()
+        if (currentCueKey() != cueKey) refreshCues()
+        // the headphone level follows MASTER until its own slider is moved
+        if (e.cueVol < 0f) {
+            val mvp = Math.round(e.masterVol * 100f)
+            if (cueVolRow.get() != mvp) cueVolRow.set(mvp)
+        }
+        val ci = e.cueStatus()
+        if (ci != cueInfoSeen) {
+            cueInfoSeen = ci
+            cueInfo.text = ci
+        }
         for (i in 0 until Cfg.TRACKS) faders[i].meter = e.tracks[i].peak
         masterFader.meter = e.masterPeak
         val mr = e.mixRec

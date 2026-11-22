@@ -140,6 +140,8 @@ class MainActivity : Activity() {
             val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
             am.getProperty(android.media.AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()?.let { engine.nativeRate = it }
             am.getProperty(android.media.AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull()?.let { engine.burst = it }
+            // 3.40 CUE: the engine asks for the outputs when the first source goes into CUE
+            engine.cueDevices = { am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS) }
         } catch (ex: Exception) {
         }
         engine.start()
@@ -1278,6 +1280,7 @@ class MainActivity : Activity() {
     }
 
     private fun tick() {
+        engine.cueSync()          // 3.40 CUE: the headphone output follows (closes after a recording, a pulled plug...)
         if (engine.bank.wantSounds) preloadBank()
         if (syncState != 0 && !midi.connected) {
             syncOff()

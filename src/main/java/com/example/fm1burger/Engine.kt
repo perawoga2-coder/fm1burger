@@ -6,6 +6,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Build
 import android.os.Process
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.math.cos
@@ -26,6 +27,17 @@ class Engine {
         const val SYNTH_LIFT_ANALOG = 1.75f   // +5 dB
         const val SYNTH_LIFT_GTR = 1.4f       // +3 dB
         const val BLOCK = 256
+
+        // 3.40 CUE: the sources that can go to the headphones (the index into Engine.cue)
+        const val CUE_PAD = Cfg.TRACKS                 // sampler track i = i; drum pad k = CUE_PAD + k
+        const val CUE_BASS = CUE_PAD + Cfg.PADS
+        const val CUE_SYNTH = CUE_BASS + 1
+        const val CUE_RHYTHM = CUE_BASS + 2
+        const val CUE_RIFF = CUE_BASS + 3
+        const val CUE_AMBIENT = CUE_BASS + 4
+        const val CUE_SONG = CUE_BASS + 5
+        const val CUE_VOICE = CUE_BASS + 6
+        const val CUE_N = CUE_BASS + 7
         const val GRAIN = 2048          // time stretch grain length (samples)
 
         // 3.32: the full-screen keyboard's own voices
@@ -227,6 +239,281 @@ class Engine {
     fun setOutput(d: AudioDeviceInfo?) {
         outDevice = d
         restartOut = true
+        cueTried = false          // 3.40: another main output: the headphones may be free now (one new try)
+    }
+
+    // ---------------- 3.40 CUE: a source in CUE is silent in the main output and heard in the headphones ----------------
+    // Three ways out, chosen by the engine (see cueSync / makeOut / loop):
+    //  - the Output is a USB interface with 4+ channels: one 4-channel AudioTrack, 1-2 main, 3-4 headphones
+    //  - else a second AudioTrack on a headphone-type device that is not the main output's (opened off the audio
+    //    thread when the first source goes into CUE, written non-blocking, closed when no source is in CUE)
+    //  - "Split cable": no second track; the main output is left = main (mono), right = headphones (mono)
+    // With no way out the CUE sources stay in the main output. The recordings always get the whole mix.
+
+    /** The CUE flags (index: CUE_*). Per session, not saved. Change them with [setCue] only. */
+    val cue = BooleanArray(CUE_N)
+    @Volatile var cueAny = false
+        private set
+    @Volatile private var cuePads = false
+    /** How much of the main mix the headphones also get, 0 .. 1. */
+    @Volatile var cueMix = 0.5f
+    /** The headphone level; below 0 = the same as MASTER (until its slider is moved). */
+    @Volatile var cueVol = -1f
+    /** Split cable (DJ): the main output is left = main mix (mono), right = headphone mix (mono). */
+    @Volatile var cueSplit = false
+    /** Split cable: the sides exchanged. */
+    @Volatile var cueSwap = false
+    /** The activity gives the output devices (AudioManager.getDevices); called off the audio thread. */
+    @Volatile var cueDevices: (() -> Array<AudioDeviceInfo>)? = null
+
+    /** The main AudioTrack has 4 channels (1-2 main, 3-4 headphones). Set by the audio thread. */
+    @Volatile var cueQuad = false
+        private set
+    @Volatile private var mainTrack: AudioTrack? = null
+    @Volatile private var hpTrack: AudioTrack? = null      // the second output; opened and released by cueWork
+    @Volatile private var hpAck: AudioTrack? = null        // the one the audio thread uses now (for a safe release)
+    @Volatile private var hpRate = Cfg.SR
+    @Volatile private var hpDevId = -1
+    @Volatile private var hpName = ""
+    @Volatile private var hpBroken = false                 // a write failed or the routes met: back to the main output
+    @Volatile private var cueTried = false                 // one try for each "first source into CUE": never a loop
+    @Volatile private var cueNote = ""
+    private val cueBusy = AtomicBoolean(false)
+    private var cueCheckMs = 0L
+    /** audio thread: this block is rendered with the headphone mix (mainF / hpF) */
+    private var cueRender = false
+    /** What the main output plays while CUE is live (the recordings keep fout), and the headphone mix. */
+    private val mainF = FloatArray(BLOCK * 2)
+    private val hpF = FloatArray(BLOCK * 2)
+    // the drum bus without the pads in CUE (the bus effects are not linear: a second, identical chain); made by
+    // setCue on the UI thread the first time a pad goes into CUE
+    @Volatile private var padFx2: FxChain? = null
+    private val drumHeavy2 = DrumHeavy()
+    private val rs2 = OutResampler()
+
+    /** UI thread: source [i] (CUE_*) into / out of CUE. */
+    fun setCue(i: Int, on: Boolean) {
+        if (i !in cue.indices) return
+        cue[i] = on
+        var any = false
+        var pd = false
+        for (k in cue.indices) if (cue[k]) {
+            any = true
+            if (k >= CUE_PAD && k < CUE_BASS) pd = true
+        }
+        if (pd && padFx2 == null) padFx2 = FxChain()
+        cuePads = pd
+        cueAny = any
+        cueSync()
+    }
+
+    fun isCue(i: Int): Boolean = i in cue.indices && cue[i]
+
+    /** The headphone level as its slider shows it. */
+    fun cueLevel(): Float = cueVol.let { if (it < 0f) masterVol else it }
+
+    /** One line for the Mixer: where the headphone mix goes now. */
+    fun cueStatus(): String = when {
+        cueSplit -> "Split cable: " + (if (cueSwap) "left = headphones, right = main" else "left = main, right = headphones") + " (both mono)."
+        cueQuad -> "USB 4 channels: 1-2 main, 3-4 headphones."
+        !cueAny -> "No source in CUE."
+        hpTrack != null && !hpBroken -> "Headphones: $hpName."
+        cueNote.isNotEmpty() -> cueNote
+        else -> "Looking for the headphones..."
+    }
+
+    private fun cueRecording(): Boolean = mixRec.recording || bank.recState == 1 || bank.recState == 2
+
+    /**
+     * UI thread (after every CUE change, and on the UI tick): opens the second output when the first source goes
+     * into CUE, closes it when none is left (after a recording, not during it). Cheap when there is nothing to do;
+     * the work itself runs on a thread of its own, never on the audio thread.
+     */
+    fun cueSync() {
+        if (!cueAny) {
+            cueTried = false
+            cueNote = ""
+        }
+        if (!running) return
+        val cur = hpTrack
+        if (cur != null && !hpBroken) {
+            // about once a second: both outputs still on different devices? (headphones pulled out ...)
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - cueCheckMs > 1000L) {
+                cueCheckMs = now
+                val hr = routed(cur)
+                val mr = routed(mainTrack)
+                if (hr == null || hr.id != hpDevId || (mr != null && mr.id == hr.id)) {
+                    hpBroken = true
+                    cueNote = "The headphones are gone: CUE sources play in the main output."
+                }
+            }
+        }
+        val want = cueAny && !cueSplit && !cueQuad && !restartOut
+        val close = cur != null && (hpBroken || (!want && !restartOut && !cueRecording()))
+        val open = cur == null && want && !cueTried
+        if (!close && !open) return
+        if (!cueBusy.compareAndSet(false, true)) return
+        try {
+            val th = Thread {
+                try {
+                    cueWork()
+                } catch (ex: Throwable) {
+                } finally {
+                    cueBusy.set(false)
+                }
+            }
+            th.isDaemon = true
+            th.name = "burger-cue"
+            th.start()
+        } catch (ex: Throwable) {
+            cueBusy.set(false)
+        }
+    }
+
+    private fun routed(t: AudioTrack?): AudioDeviceInfo? = try {
+        t?.routedDevice
+    } catch (ex: Throwable) {
+        null
+    }
+
+    /** The cue thread: closes and / or opens the second output (one at a time: cueBusy). */
+    private fun cueWork() {
+        val cur = hpTrack
+        val want = cueAny && !cueSplit && !cueQuad && !restartOut
+        if (cur != null && (hpBroken || (!want && !cueRecording()))) {
+            cueClose(cur)
+            return                 // (a broken one is not opened again: cueTried stays set until CUE is empty)
+        }
+        if (cur == null && want && !cueTried) {
+            cueTried = true
+            cueOpen()
+        }
+    }
+
+    private fun cueClose(t: AudioTrack) {
+        hpTrack = null
+        // the audio thread lets go of it at its next block
+        var n = 0
+        while (running && hpAck === t && n++ < 40) {
+            try {
+                Thread.sleep(10)
+            } catch (ex: Exception) {
+            }
+        }
+        try {
+            t.pause()
+            t.flush()
+        } catch (ex: Throwable) {
+        }
+        try {
+            t.release()
+        } catch (ex: Throwable) {
+        }
+        hpBroken = false
+    }
+
+    private fun cueOpen() {
+        val src = cueDevices
+        val devs = try {
+            src?.invoke()
+        } catch (ex: Throwable) {
+            null
+        }
+        if (devs == null) {
+            cueNote = "No headphone output found: CUE sources play in the main output."
+            return
+        }
+        // where the main output plays: the Output chosen in the Mixer, or what the system gave it
+        val mainDev = outDevice ?: routed(mainTrack)
+        if (mainDev == null) {
+            cueNote = "The main output's device is not known: CUE sources play in the main output."
+            return
+        }
+        // a headphone-type output that is not the main output's device (wired first, then USB, then Bluetooth)
+        val order = intArrayOf(
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+        )
+        var hp: AudioDeviceInfo? = null
+        for (ty in order) {
+            for (d in devs) if (d.isSink && d.type == ty && d.id != mainDev.id) {
+                hp = d
+                break
+            }
+            if (hp != null) break
+        }
+        if (hp == null) {
+            cueNote = if (mainDev.type in order)
+                "The main output is on the headphones: choose the tablet speaker as Output (or Split cable) to use CUE."
+            else "No headphones found: CUE sources play in the main output."
+            return
+        }
+        var t: AudioTrack? = null
+        try {
+            val rate = if (latencyMode < 2 && nativeRate in 8000..192000) nativeRate else Cfg.SR
+            val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_FLOAT)
+            val bu = burst.coerceIn(64, 2048)
+            val b = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(rate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                        .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                        .build()
+                )
+                .setBufferSizeInBytes(max(minBuf, bu * 8 * 8))
+                .setTransferMode(AudioTrack.MODE_STREAM)
+            if (Build.VERSION.SDK_INT >= 26) b.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            val tr = b.build()
+            t = tr
+            if (!tr.setPreferredDevice(hp)) throw IllegalStateException("device")
+            if (Build.VERSION.SDK_INT >= 24) {
+                val cap = tr.bufferCapacityInFrames
+                tr.setBufferSizeInFrames((max(bu * 2, BLOCK * rate / Cfg.SR + bu) + bu * 2).coerceAtMost(cap))
+            }
+            tr.play()
+            // the system must really play it on the headphones, and not where the main output plays
+            var rd: AudioDeviceInfo? = null
+            var n = 0
+            while (n++ < 10) {
+                rd = routed(tr)
+                if (rd != null) break
+                try {
+                    Thread.sleep(50)
+                } catch (ex: Exception) {
+                }
+            }
+            val mr = routed(mainTrack)
+            if (rd == null || rd.id != hp.id || rd.id == mainDev.id || (mr != null && mr.id == rd.id)) {
+                throw IllegalStateException("route")
+            }
+            hpRate = rate
+            hpDevId = hp.id
+            hpName = when (hp.type) {
+                AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET -> "3.5 mm headphones"
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth ${hp.productName}"
+                else -> "USB ${hp.productName}"
+            }
+            hpBroken = false
+            cueCheckMs = android.os.SystemClock.uptimeMillis()
+            cueNote = ""
+            hpTrack = tr          // from the next block the audio thread feeds it
+        } catch (ex: Throwable) {
+            try {
+                t?.release()
+            } catch (e2: Throwable) {
+            }
+            cueNote = if (ex.message == "route")
+                "The system plays the headphones and the main output on the same device: CUE sources play in the main output."
+            else "The headphone output could not be opened: CUE sources play in the main output."
+        }
     }
 
     fun padHit(i: Int, vel: Float) {
@@ -549,18 +836,46 @@ class Engine {
             thread?.join(600)
         } catch (e: Exception) {
         }
+        // 3.40: the second (headphone) output, when it is open
+        val h = hpTrack
+        hpTrack = null
+        try {
+            h?.release()
+        } catch (e: Throwable) {
+        }
     }
 
     // ---------------- audio thread ----------------
 
     private fun makeOut(): AudioTrack? {
+        // 3.40 CUE: the Output chosen in the Mixer is a USB audio output with 4 or more channels: one 4-channel
+        // track (1-2 main, 3-4 headphones). Anything else, or when that fails: the stereo track, as always.
+        val d = outDevice
+        if (d != null && (d.type == AudioDeviceInfo.TYPE_USB_DEVICE || d.type == AudioDeviceInfo.TYPE_USB_HEADSET) &&
+            d.isSink && d.channelCounts.any { it >= 4 }
+        ) {
+            val t = buildOut(true)
+            if (t != null) return t
+        }
+        return buildOut(false)
+    }
+
+    private fun buildOut(quad: Boolean): AudioTrack? {
         val mode = latencyMode
+        val ch = if (quad) 4 else 2
+        val mask = if (quad) AudioFormat.CHANNEL_OUT_QUAD else AudioFormat.CHANNEL_OUT_STEREO
         // low / normal: the device's own rate, so Android can use its fast (low latency) mixer path;
         // the engine still runs at 44.1 kHz and a small resampler sits at the very end
         val rate = if (mode < 2 && nativeRate in 8000..192000) nativeRate else Cfg.SR
         return try {
-            val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-            val bytes = if (mode == 2) max(minBuf, BLOCK * 4 * 6) else max(minBuf, burst.coerceIn(64, 2048) * 4 * 8)
+            val minBuf = AudioTrack.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_16BIT)
+            val bytes = if (mode == 2) max(minBuf, BLOCK * 2 * ch * 6) else max(minBuf, burst.coerceIn(64, 2048) * 2 * ch * 8)
+            val fmt = AudioFormat.Builder()
+                .setSampleRate(rate)
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            // the interface's own channels 1-4 when it says so (index mask), else front left / right + back left / right
+            if (quad && outDevice?.channelIndexMasks?.contains(0xF) == true) fmt.setChannelIndexMask(0xF)
+            else fmt.setChannelMask(mask)
             val b = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -568,19 +883,17 @@ class Engine {
                         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                         .build()
                 )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setSampleRate(rate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .build()
-                )
+                .setAudioFormat(fmt.build())
                 .setBufferSizeInBytes(bytes)
                 .setTransferMode(AudioTrack.MODE_STREAM)
             if (Build.VERSION.SDK_INT >= 26 && mode < 2) {
                 b.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             }
             val t = b.build()
+            if (quad && t.channelCount != 4) {
+                t.release()
+                return null
+            }
             val d = outDevice
             if (d != null) t.setPreferredDevice(d)
             outCapacity = if (Build.VERSION.SDK_INT >= 24) t.bufferCapacityInFrames else t.bufferSizeInFrames
@@ -596,9 +909,11 @@ class Engine {
             outRate = rate
             outFrames = t.bufferSizeInFrames
             rs.reset(Cfg.SR.toDouble() / rate)
+            if (quad) rs2.reset(Cfg.SR.toDouble() / rate)
+            cueQuad = quad
             // fill the buffer with silence before it starts, so the start itself is no underrun
             try {
-                val z = ShortArray(outFrames * 2)
+                val z = ShortArray(outFrames * ch)
                 t.write(z, 0, z.size, AudioTrack.WRITE_NON_BLOCKING)
             } catch (e: Exception) {
             }
@@ -652,7 +967,14 @@ class Engine {
         val tl = FloatArray(Cfg.TRACKS)
         val tr = FloatArray(Cfg.TRACKS)
         val tpk = FloatArray(Cfg.TRACKS)
+        // 3.40 CUE: everything the headphone mix needs, made once here
+        val spk = ShortArray(BLOCK * 2)                 // the main output while CUE is live
+        val rsOut2 = ShortArray(rsOut.size)             // 4 channels: the headphone pair, resampled
+        val quadOut = ShortArray(rsOut.size * 2)        // 4 channels, interleaved
+        val hpRs = FloatArray(rsOut.size)               // the second output, resampled
+        var hpCur: AudioTrack? = null
         var at = makeOut()
+        mainTrack = at
         while (running) {
             if (restartOut) {
                 restartOut = false
@@ -662,6 +984,7 @@ class Engine {
                 } catch (e: Exception) {
                 }
                 at = makeOut()
+                mainTrack = at
             }
             val a = at
             if (a == null) {
@@ -670,8 +993,22 @@ class Engine {
                 } catch (e: Exception) {
                 }
                 at = makeOut()
+                mainTrack = at
                 continue
             }
+
+            // 3.40 CUE: how this block goes out (nothing of it when no source is in CUE and there is no split cable)
+            val hp = hpTrack
+            if (hp !== hpCur) {
+                hpCur = hp
+                hpAck = hp
+                if (hp != null) rs2.reset(Cfg.SR.toDouble() / hpRate)
+            }
+            val quad = cueQuad
+            val split = cueSplit
+            val hpLive = hp != null && !hpBroken && !split && !quad
+            val live = split || (cueAny && (quad || hpLive))
+            cueRender = live
 
             val t0 = System.nanoTime()
             try {
@@ -681,15 +1018,65 @@ class Engine {
                 errors++
                 java.util.Arrays.fill(out, 0.toShort())
                 java.util.Arrays.fill(fout, 0f)
+                java.util.Arrays.fill(mainF, 0f)
+                java.util.Arrays.fill(hpF, 0f)
                 for (t in tracks) t.playing = false
             }
 
+            // 3.40 CUE: the second output first, and never waiting for it: what does not fit is dropped
+            if (hpLive && live && hp != null) {
+                val hw = try {
+                    if (hpRate == Cfg.SR) {
+                        hp.write(hpF, 0, BLOCK * 2, AudioTrack.WRITE_NON_BLOCKING)
+                    } else {
+                        val n = rs2.processF(hpF, BLOCK, hpRs)
+                        hp.write(hpRs, 0, n * 2, AudioTrack.WRITE_NON_BLOCKING)
+                    }
+                } catch (ex: Throwable) {
+                    -1
+                }
+                if (hw < 0) hpBroken = true      // (cueSync closes it; the CUE sources are back in the main output)
+            }
+
             val w = try {
-                if (outRate == Cfg.SR) {
-                    a.write(out, 0, out.size)
+                if (!live && !quad) {
+                    if (outRate == Cfg.SR) {
+                        a.write(out, 0, out.size)
+                    } else {
+                        val n = rs.process(fout, BLOCK, rsOut)
+                        a.write(rsOut, 0, n * 2)
+                    }
                 } else {
-                    val n = rs.process(fout, BLOCK, rsOut)
-                    a.write(rsOut, 0, n * 2)
+                    // the main output without the CUE sources (the recordings got fout: the whole mix)
+                    val src = if (live) mainF else fout
+                    if (quad) {
+                        if (!live) java.util.Arrays.fill(hpF, 0f)
+                        if (outRate == Cfg.SR) {
+                            for (i in 0 until BLOCK) {
+                                quadOut[i * 4] = (src[i * 2] * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+                                quadOut[i * 4 + 1] = (src[i * 2 + 1] * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+                                quadOut[i * 4 + 2] = (hpF[i * 2] * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+                                quadOut[i * 4 + 3] = (hpF[i * 2 + 1] * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+                            }
+                            a.write(quadOut, 0, BLOCK * 4)
+                        } else {
+                            val n = rs.process(src, BLOCK, rsOut)
+                            val n2 = rs2.process(hpF, BLOCK, rsOut2)
+                            for (i in 0 until n) {
+                                quadOut[i * 4] = rsOut[i * 2]
+                                quadOut[i * 4 + 1] = rsOut[i * 2 + 1]
+                                quadOut[i * 4 + 2] = if (i < n2) rsOut2[i * 2] else 0.toShort()
+                                quadOut[i * 4 + 3] = if (i < n2) rsOut2[i * 2 + 1] else 0.toShort()
+                            }
+                            a.write(quadOut, 0, n * 4)
+                        }
+                    } else if (outRate == Cfg.SR) {
+                        for (i in 0 until BLOCK * 2) spk[i] = (src[i] * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+                        a.write(spk, 0, spk.size)
+                    } else {
+                        val n = rs.process(src, BLOCK, rsOut)
+                        a.write(rsOut, 0, n * 2)
+                    }
                 }
             } catch (ex: Exception) {
                 -1
@@ -777,6 +1164,22 @@ class Engine {
             val gRest = if (pr < 0) 1f else 0f          // voice and song recordings: only in the full mix
             val gate = recGate
             val stemOn = gate and 2 != 0
+            // 3.40 CUE (only when the loop said this block has a headphone mix)
+            val cq = cueRender
+            val pfx = if (cq && cuePads) padFx2 else null
+            if (pfx != null) {
+                // the second drum bus is set like the first
+                System.arraycopy(drumFx.on, 0, pfx.on, 0, FxChain.N)
+                System.arraycopy(drumFx.a, 0, pfx.a, 0, FxChain.N)
+                System.arraycopy(drumFx.b, 0, pfx.b, 0, FxChain.N)
+                pfx.order = drumFx.order
+                pfx.intensity = drumFx.intensity
+                drumHeavy2.amount = drumHeavy.amount
+            }
+            val cmx = cueMix.coerceIn(0f, 1f)
+            val hv = cueVol.let { if (it < 0f) mv else it }
+            val split = cueSplit
+            val swap = cueSwap
 
             for (f in 0 until BLOCK) {
                 while (nextTick < nTicks && tickFrames[nextTick] <= f) {
@@ -795,6 +1198,8 @@ class Engine {
                 }
                 var l = 0f
                 var r = 0f
+                var cl = 0f                        // (3.40: the sources in CUE, as they sit in the mix)
+                var cr = 0f
                 val f2 = f * 2
                 for (i in 0 until Cfg.TRACKS) {
                     val t = tracks[i]
@@ -808,17 +1213,31 @@ class Engine {
                     if (!t.mute && (pr < 0 || pr == i)) {
                         l += s * tl[i]
                         r += s * tr[i]
+                        if (cq && cue[i]) {
+                            cl += s * tl[i]
+                            cr += s * tr[i]
+                        }
                         val ab = abs(s * t.volume)
                         if (ab > tpk[i]) tpk[i] = ab
                     }
                 }
                 var pm = 0f
-                for (p in pads) {
-                    pm += renderPad(p) * (if (p.mute) 0f else p.volume)
+                var pmMain = 0f                    // (3.40: the pads that are not in CUE)
+                for (k in pads.indices) {
+                    val p = pads[k]
+                    val pvk = renderPad(p) * (if (p.mute) 0f else p.volume)
+                    pm += pvk
+                    if (pfx != null && !cue[CUE_PAD + k]) pmMain += pvk
                 }
                 pm = drumFx.process(drumHeavy.process(pm * pv), bpmNow, beatPos) * gPads
                 l += pm
                 r += pm
+                if (pfx != null) {
+                    // the pads in CUE = the whole drum bus less the bus of the others
+                    val pc = pm - pfx.process(drumHeavy2.process(pmMain * pv), bpmNow, beatPos) * gPads
+                    cl += pc
+                    cr += pc
+                }
                 val bz = bass.render() * gBass * bassBoost * SYNTH_LIFT_BASS
                 val sy = analog.fx.process(analog.render() * synthBoost * SYNTH_LIFT_ANALOG, bpmNow, beatPos) * gSynth
                 l += bz + sy
@@ -848,6 +1267,15 @@ class Engine {
                     stemBuf[ST + 6][f2] = vocal.outL * gRest * mv; stemBuf[ST + 6][f2 + 1] = vocal.outR * gRest * mv
                     stemBuf[ST + 7][f2] = bank.outL * gRest * mv; stemBuf[ST + 7][f2 + 1] = bank.outR * gRest * mv
                 }
+                if (cq) {
+                    if (cue[CUE_BASS]) { cl += bz; cr += bz }
+                    if (cue[CUE_SYNTH]) { cl += sy; cr += sy }
+                    if (cue[CUE_VOICE]) { cl += vocal.outL * gRest; cr += vocal.outR * gRest }
+                    if (cue[CUE_AMBIENT]) { cl += ambient.outL * gAmb; cr += ambient.outR * gAmb }
+                    if (cue[CUE_RHYTHM]) { cl += gR * 0.9f; cr += gR * 0.55f }
+                    if (cue[CUE_RIFF]) { cl += gF * 0.55f; cr += gF * 0.9f }
+                    if (cue[CUE_SONG]) { cl += bank.outL * gRest; cr += bank.outR * gRest }
+                }
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
@@ -855,6 +1283,26 @@ class Engine {
                     val kv = keyBuf[f] * KEYS_LEVEL
                     l += kv
                     r += kv
+                }
+                if (cq) {
+                    // 3.40: main = the mix less the CUE sources; headphones = the CUE sources + CUE MIX x main.
+                    // (l / r stay the whole mix: that is what every recording below gets)
+                    val ml = l - cl
+                    val mr = r - cr
+                    val hl = cl + cmx * ml
+                    val hr = cr + cmx * mr
+                    if (split) {
+                        // split cable: one side the main mix, the other the headphone mix, both mono
+                        val a = softClip((ml + mr) * 0.5f * mv)
+                        val b = softClip((hl + hr) * 0.5f * hv)
+                        mainF[f2] = if (swap) b else a
+                        mainF[f2 + 1] = if (swap) a else b
+                    } else {
+                        mainF[f2] = softClip(ml * mv)
+                        mainF[f2 + 1] = softClip(mr * mv)
+                    }
+                    hpF[f2] = softClip(hl * hv)
+                    hpF[f2 + 1] = softClip(hr * hv)
                 }
                 val preMono = (l + r) * 0.5f       // (3.19 RESAMPLE: caught before MASTER, at full level)
                 l = softClip(l * mv)
@@ -1415,6 +1863,34 @@ class OutResampler {
                 val c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1)
                 val y = ((c3 * t + c2) * t + c1) * t + x0
                 out[k * 2 + ch] = (y * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+            }
+            k++
+            pos += step
+        }
+        pos -= n
+        for (q in 0 until 3) {
+            hist[q * 2] = inp[(n - 3 + q) * 2]
+            hist[q * 2 + 1] = inp[(n - 3 + q) * 2 + 1]
+        }
+        return k
+    }
+
+    /** 3.40: the same, into floats (the headphone output of CUE). */
+    fun processF(inp: FloatArray, n: Int, out: FloatArray): Int {
+        var k = 0
+        val maxK = out.size / 2
+        while (pos < n - 2 && k < maxK) {
+            val i = Math.floor(pos).toInt()
+            val t = (pos - i).toFloat()
+            for (ch in 0..1) {
+                val xm1 = x(inp, i - 1, ch)
+                val x0 = x(inp, i, ch)
+                val x1 = x(inp, i + 1, ch)
+                val x2 = x(inp, i + 2, ch)
+                val c1 = 0.5f * (x1 - xm1)
+                val c2 = xm1 - 2.5f * x0 + 2f * x1 - 0.5f * x2
+                val c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1)
+                out[k * 2 + ch] = ((c3 * t + c2) * t + c1) * t + x0
             }
             k++
             pos += step

@@ -144,7 +144,8 @@ class LaneSetup {
  * then the instrument icon (tap it to open that instrument's own page; 3.28: on a Sampler / Drum lane it is the icon
  * of the sound's group, a tap opens the sound picker and a long press opens the instrument's page),
  * then a picture of what the lane holds (waveform or pattern; 3.27: tap a Sampler / Drum lane's to edit its steps,
- * long press to hear it; a finger dragged sideways along it sets the lane's volume), and a mute button.
+ * long press to hear it; a finger dragged sideways along it sets the lane's volume), a mute button and
+ * (3.40) a CUE button: the lane is silent in the main output and heard in the headphones.
  */
 class HomeScreen(private val a: MainActivity) : Screen {
 
@@ -157,6 +158,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
     private val icons = ArrayList<InstIconView>()
     private val views = ArrayList<LaneView>()
     private val muteBtns = ArrayList<Button>()
+    private val cueBtns = ArrayList<Button>()
     private var lastStep = -2
 
     private var rowH = 0
@@ -195,6 +197,8 @@ class HomeScreen(private val a: MainActivity) : Screen {
             size(muteBtns[i], want * 38 / 48)
             numBtns[i].textSize = 14f * want / ui.dp(48)
             muteBtns[i].textSize = 14f * want / ui.dp(48)
+            size(cueBtns[i], want * 38 / 48)
+            cueBtns[i].textSize = 13f * want / ui.dp(48)
         }
     }
 
@@ -242,6 +246,15 @@ class HomeScreen(private val a: MainActivity) : Screen {
         m.minimumHeight = 0
         m.setPadding(0, 0, 0, 0)
         row.addView(m, LinearLayout.LayoutParams(ui.dp(38), ui.dp(48)).also { it.marginStart = ui.dp(5) })
+
+        // 3.40 CUE: this lane to the headphones only
+        val c = ui.button("\uD83C\uDFA7") { toggleCue(i) }
+        c.minHeight = 0
+        c.minimumHeight = 0
+        c.setPadding(0, 0, 0, 0)
+        c.contentDescription = "CUE"
+        row.addView(c, LinearLayout.LayoutParams(ui.dp(38), ui.dp(48)).also { it.marginStart = ui.dp(4) })
+        cueBtns.add(c)
 
         numBtns.add(num)
         icons.add(icon)
@@ -332,6 +345,32 @@ class HomeScreen(private val a: MainActivity) : Screen {
         return n
     }
 
+    /** 3.40: the engine's CUE source of lane i (Engine.CUE_*), or -1. */
+    private fun cueIdx(i: Int): Int {
+        val k = lanes.idx[i]
+        return when (lanes.type[i]) {
+            Inst.SAMPLE -> k
+            Inst.DRUM -> Engine.CUE_PAD + k
+            Inst.BASS -> Engine.CUE_BASS
+            Inst.SYNTH -> Engine.CUE_SYNTH
+            Inst.VOICE -> Engine.CUE_VOICE
+            Inst.SONG -> Engine.CUE_SONG
+            Inst.AMBIENT -> Engine.CUE_AMBIENT
+            Inst.RHYTHM -> Engine.CUE_RHYTHM
+            Inst.RIFF -> Engine.CUE_RIFF
+            else -> -1
+        }
+    }
+
+    private fun toggleCue(i: Int) {
+        val c = cueIdx(i)
+        if (c < 0) return
+        val was = e.cueAny
+        e.setCue(c, !e.isCue(c))
+        if (!was && e.cueAny) ui.toast("CUE: this lane plays in the headphones only (Mixer: Output)")
+        refresh()
+    }
+
     private fun toggleMute(i: Int) {
         val k = lanes.idx[i]
         val m = !isMuted(i)
@@ -371,6 +410,9 @@ class HomeScreen(private val a: MainActivity) : Screen {
         val m = muteBtns[i]
         m.visibility = if (t == Inst.EMPTY) View.INVISIBLE else View.VISIBLE
         ui.styleButton(m, isMuted(i), Theme.RED)
+        val cb = cueBtns[i]
+        cb.visibility = if (t == Inst.EMPTY) View.INVISIBLE else View.VISIBLE
+        ui.styleButton(cb, e.isCue(cueIdx(i)), Theme.BLUE)
         views[i].muted = isMuted(i)
         views[i].changed()
     }
@@ -392,6 +434,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
 
     // what onTick last saw of each lane (no string is built each tick)
     private val seenMute = BooleanArray(LaneSetup.N)
+    private val seenCue = BooleanArray(LaneSetup.N)
     private val seenSound = arrayOfNulls<String>(LaneSetup.N)
     private val seenVol = FloatArray(LaneSetup.N) { -1f }
 
@@ -402,7 +445,9 @@ class HomeScreen(private val a: MainActivity) : Screen {
         for (i in 0 until LaneSetup.N) {
             val m = isMuted(i)
             val n = laneSound(i)
-            if (m != seenMute[i] || n != seenSound[i]) {
+            val cu = e.isCue(cueIdx(i))
+            if (m != seenMute[i] || n != seenSound[i] || cu != seenCue[i]) {
+                seenCue[i] = cu
                 seenMute[i] = m
                 seenSound[i] = n
                 changed = true
