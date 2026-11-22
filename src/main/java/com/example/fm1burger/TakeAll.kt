@@ -21,6 +21,7 @@ class TakeAllPanel(private val a: MainActivity) {
     private val bank = e.bank
     private val rows = ui.col()
     private var dlg: AlertDialog? = null
+    private var mix = false
 
     private fun qName(i: Int): String = "Q${i + 1} ${PartNames.NAMES[i]}"
 
@@ -42,6 +43,7 @@ class TakeAllPanel(private val a: MainActivity) {
     }
 
     private fun build() {
+        mix = MixSend.installed(a)          // (3.36: looked at every time the panel is shown or rebuilt)
         rows.removeAllViews()
         for (i in 0 until PartBank.N) rows.addView(slotRow(i), ui.fullWidth(4))
         if (bank.last.used) rows.addView(lastRow(), ui.fullWidth(10))
@@ -79,6 +81,8 @@ class TakeAllPanel(private val a: MainActivity) {
         rec.isEnabled = p.used
         rec.alpha = if (p.used) 1f else 0.35f
         row.addView(rec, ui.w(0f, 3))
+        // 3.36: a used slot goes to 16 Track's INBOX as stems (only when 16 Track is on this device)
+        if (mix && (p.used || isScreen(i))) row.addView(ui.button("→ MIX") { MixSend.askQ(a, i) }, ui.w(0f, 3))
         return row
     }
 

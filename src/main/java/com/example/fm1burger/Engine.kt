@@ -43,6 +43,11 @@ class Engine {
         const val PREP_RHYTHM = 13
         const val PREP_RIFF = 14
         const val PREP_AMBIENT = 15
+        /** 3.36 offline stems (offlineBlock): the part's recording */
+        const val OFF_CLIP = 16
+        /** 3.36: where renderBlock puts the two guitars (rhythm: near = left; riff: near = right) */
+        const val GTR_NEAR = 0.9f
+        const val GTR_FAR = 0.55f
 
         /** The first stem after the sampler tracks. */
         const val ST = Cfg.TRACKS
@@ -885,6 +890,108 @@ class Engine {
             }
             for (i in 0 until Cfg.TRACKS) tracks[i].peak = tpk[i]
             masterPeak = mpk
+    }
+
+    // ---------------- 3.36 → MIX: offline stems (MixSend.kt) ----------------
+    // Only for an Engine of its own that was never start()ed (no audio thread, no output, no MIDI): the same
+    // sequencer (onTick: the parts, the song, the automation, the step triggers) and the same voice code as
+    // playback, one source at a time. The engine that plays is never touched by it.
+
+    /** Offline: the transport starts at bar 1, beat 1 (what Play does in handleRequests; nothing is sent). */
+    fun offlineBegin() {
+        if (running) return
+        prepare = PREP_NONE
+        follow = false
+        sendClock = false
+        playing = true
+        paused = false
+        tickCount = 0L
+        tickAcc = Cfg.SR * 60.0 / (bpmF * 24.0)
+        beatPos = 0.0
+        curStep = -1
+        for (t in tracks) t.playing = false
+        if (bank.songOn) bank.songStart() else bank.whileStopped()
+    }
+
+    /**
+     * Offline: the next [n] frames (at most BLOCK) of one source into [out] (stereo, interleaved), as renderBlock
+     * mixes it: after its own effects, volume and mute, where it sits left / right, before the master.
+     * [src]: 0 .. TRACKS-1 a sampler track, PREP_PADS (the drum pad [pad], alone through the drum bus), PREP_BASS,
+     * PREP_SYNTH, PREP_RHYTHM, PREP_RIFF, PREP_AMBIENT or OFF_CLIP (the part's recording, as the song plays it).
+     * A sampler track comes out without its pan (the same in both channels, at its volume).
+     */
+    fun offlineBlock(src: Int, pad: Int, out: FloatArray, n: Int) {
+        if (running) return
+        auto.block()
+        val bpmNow = bpmF
+        val spt = Cfg.SR * 60.0 / (bpmNow * 24.0)
+        val beatInc = 1.0 / (Cfg.SR * 60.0 / bpmNow)
+        val pv = padVol
+        analog.bpm = bpmNow
+        val trk = if (src in 0 until Cfg.TRACKS) tracks[src] else null
+        val pd = if (src == PREP_PADS && pad in pads.indices) pads[pad] else null
+        val boost = when {
+            trk != null -> 10f.pow(trk.boostDb / 20f)
+            src == PREP_BASS -> 10f.pow(bass.boostDb / 20f)
+            src == PREP_SYNTH -> 10f.pow(analog.boostDb / 20f)
+            else -> 1f
+        }
+        val tv = trk?.volume ?: 0f
+        for (f in 0 until minOf(n, BLOCK, out.size / 2)) {
+            if (playing) {
+                tickAcc += 1.0
+                if (tickAcc >= spt) {
+                    tickAcc -= spt
+                    onTick(f, 0L)
+                }
+                beatPos += beatInc
+            }
+            var l = 0f
+            var r = 0f
+            if (trk != null) {
+                var s = renderTrack(trk) * boost
+                s = trk.fx.process(s, bpmNow, beatPos)
+                if (!trk.mute) {
+                    l = s * tv
+                    r = l
+                }
+            } else if (pd != null) {
+                val pm = renderPad(pd) * (if (pd.mute) 0f else pd.volume)
+                l = drumFx.process(drumHeavy.process(pm * pv), bpmNow, beatPos)
+                r = l
+            } else when (src) {
+                PREP_BASS -> {
+                    l = bass.render() * boost * SYNTH_LIFT_BASS
+                    r = l
+                }
+                PREP_SYNTH -> {
+                    l = analog.fx.process(analog.render() * boost * SYNTH_LIFT_ANALOG, bpmNow, beatPos)
+                    r = l
+                }
+                PREP_RHYTHM -> {
+                    val g = rhythmGtr.render() * SYNTH_LIFT_GTR
+                    l = g * GTR_NEAR
+                    r = g * GTR_FAR
+                }
+                PREP_RIFF -> {
+                    val g = riffGtr.render() * SYNTH_LIFT_GTR
+                    l = g * GTR_FAR
+                    r = g * GTR_NEAR
+                }
+                PREP_AMBIENT -> {
+                    ambient.render()
+                    l = ambient.outL
+                    r = ambient.outR
+                }
+                OFF_CLIP -> {
+                    bank.renderClip()
+                    l = bank.outL
+                    r = bank.outR
+                }
+            }
+            out[f * 2] = l
+            out[f * 2 + 1] = r
+        }
     }
 
     private fun send(b: Int, target: Long) {

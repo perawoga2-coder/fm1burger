@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.burgerstudio.lab"   // 3.0 Lab: its own app, next to Burger Studio 2.x
         minSdk = 23
         targetSdk = 34
-        versionCode = 65
-        versionName = "3.35-lab"
+        versionCode = 66
+        versionName = "3.36-lab"
     }
 
     // Same signing key for every build, so a new APK can be installed over the old one

@@ -8,6 +8,13 @@
     <uses-feature android:name="android.software.midi" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
+    <!-- 3.36 → MIX: the Maker Hip INBOX (INBOX.md of 16 Track). Only apps signed with the same key get the permission. -->
+    <permission android:name="com.makerhip.permission.INBOX" android:protectionLevel="signature" />
+    <uses-permission android:name="com.makerhip.permission.INBOX" />
+    <queries>
+        <package android:name="com.makerhip.track16" />
+    </queries>
+
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="Burger Studio Lab"
@@ -22,6 +29,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 3.36 → MIX: the boxes of stems that 16 Track reads (InboxProvider.kt) -->
+        <provider
+            android:name=".InboxProvider"
+            android:authorities="com.makerhip.burger.inbox"
+            android:exported="true"
+            android:readPermission="com.makerhip.permission.INBOX"
+            android:writePermission="com.makerhip.permission.INBOX" />
     </application>
 
 </manifest>

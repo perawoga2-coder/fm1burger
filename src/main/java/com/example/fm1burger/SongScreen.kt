@@ -36,6 +36,8 @@ class SongScreen(private val a: MainActivity) : Screen {
     private lateinit var playSongBtn: Button
     private lateinit var info: TextView
     private lateinit var songInfo: TextView
+    private lateinit var mixSongBtn: Button
+    private var mixCheckMs = 0L
     private val listBox = ui.col()
     private val rowViews = ArrayList<LinearLayout>()
     private var lastKey = ""
@@ -137,6 +139,10 @@ class SongScreen(private val a: MainActivity) : Screen {
 
         songInfo = ui.text("", 13f, Theme.TEXT)
         content.addView(songInfo, ui.fullWidth(6))
+        // 3.36: the whole song to 16 Track's INBOX as stems (shown only when 16 Track is on this device: onShow)
+        mixSongBtn = ui.button("Whole song → MIX") { MixSend.askSong(a) }
+        mixSongBtn.visibility = android.view.View.GONE
+        content.addView(mixSongBtn, ui.fullWidth(4))
 
         content.addView(ui.text("Add a part to the end of the song:", 12f, Theme.DIM), ui.fullWidth(8))
         for (rowNo in 0 until 2) {
@@ -225,7 +231,11 @@ class SongScreen(private val a: MainActivity) : Screen {
             names.add("Delete the recording")
             acts.add { deleteClip(i) }
         }
-        // (room for more: "→ MIX" comes here)
+        // 3.36: this Q to 16 Track's INBOX as stems (only when 16 Track is on this device)
+        if (MixSend.installed(a) && (p.used || (i == bank.cur && !bank.loose))) {
+            names.add("→ MIX (stems to 16 Track)")
+            acts.add { MixSend.askQ(a, i) }
+        }
         AlertDialog.Builder(a)
             .setTitle(qName(i))
             .setItems(names.toTypedArray()) { _, which -> acts[which]() }
@@ -596,17 +606,32 @@ class SongScreen(private val a: MainActivity) : Screen {
                 bank.songLen, total, secs / 60, secs % 60, e.bpm
             )
         }
+        val canMix = bank.songLen > 0
+        if (mixSongBtn.isEnabled != canMix) {
+            mixSongBtn.isEnabled = canMix
+            mixSongBtn.alpha = if (canMix) 1f else 0.35f
+        }
         paintList()
     }
 
     override fun onShow() {
         padKey.fill("")
+        checkMix()
         if (rowViews.size != bank.songLen) rebuildList()
         lastKey = ""
         paint()
     }
 
+    /** 3.36: "Whole song → MIX" shows only while 16 Track is on this device */
+    private fun checkMix() {
+        mixCheckMs = android.os.SystemClock.uptimeMillis()
+        val v = if (MixSend.installed(a)) android.view.View.VISIBLE else android.view.View.GONE
+        if (mixSongBtn.visibility != v) mixSongBtn.visibility = v
+    }
+
     override fun onTick() {
+        // (16 Track may be installed or removed while this page stays open: looked at again every few seconds)
+        if (android.os.SystemClock.uptimeMillis() - mixCheckMs > 4000L) checkMix()
         val key = "${e.playing}|${bank.cur}|${bank.cueReq}|${bank.songIdx}|${bank.songBar}|${bank.songOn}|" +
             "${bank.version}|${(System.currentTimeMillis() / 250L) % 2L}|${e.bpm}|${bank.loose}|${e.prepare}|${onBeat()}"
         if (key == lastKey) return
