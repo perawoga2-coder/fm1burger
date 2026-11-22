@@ -8,7 +8,9 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -142,7 +144,7 @@ class LaneSetup {
  * then the instrument icon (tap it to open that instrument's own page; 3.28: on a Sampler / Drum lane it is the icon
  * of the sound's group, a tap opens the sound picker and a long press opens the instrument's page),
  * then a picture of what the lane holds (waveform or pattern; 3.27: tap a Sampler / Drum lane's to edit its steps,
- * long press to hear it), and a mute button.
+ * long press to hear it; a finger dragged sideways along it sets the lane's volume), and a mute button.
  */
 class HomeScreen(private val a: MainActivity) : Screen {
 
@@ -367,6 +369,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
     // what onTick last saw of each lane (no string is built each tick)
     private val seenMute = BooleanArray(LaneSetup.N)
     private val seenSound = arrayOfNulls<String>(LaneSetup.N)
+    private val seenVol = FloatArray(LaneSetup.N) { -1f }
 
     override fun onTick() {
         // a mute changed on another page (Mixer, Synth, Pads...): show it here too
@@ -397,7 +400,11 @@ class HomeScreen(private val a: MainActivity) : Screen {
                 Inst.RIFF -> e.riffGtr.ringing()
                 else -> false
             }
-            if (stepChanged || live) v.invalidate()
+            // the volume overlay follows a change made elsewhere (the Mixer page, an automation...)
+            val vol = v.laneVolume()
+            val volChanged = vol != seenVol[i]
+            seenVol[i] = vol
+            if (stepChanged || live || volChanged) v.invalidate()
         }
     }
 }
@@ -589,6 +596,8 @@ class InstIconView(ctx: Context) : View(ctx) {
  * The picture of one lane: the waveform of a sample / drum sound / recording,
  * the note pattern of the bass and synth, the live mic for the voice.
  * A light column shows the step that is playing.
+ * A thin overlay in the lane's colour, from the left, shows the lane's volume: a finger dragged sideways along
+ * the picture sets it (the same value as the Mixer page's fader of that source).
  */
 class LaneView(
     ctx: Context,
@@ -609,9 +618,95 @@ class LaneView(
     private var mn = FloatArray(0)
     private var mx = FloatArray(0)
 
+    // the volume drag: a small move is still a tap, a sideways one sets the volume, an upright one scrolls the page
+    private val slop = ViewConfiguration.get(ctx).scaledTouchSlop
+    private var downX = 0f
+    private var downY = 0f
+    private var dragging = false
+    private var longDone = false
+
     init {
         tp.textSize = 11f * d
         tp.typeface = Ui.MEDIUM
+    }
+
+    /** The lane's volume, 0..1: the value the Mixer page's fader of this source shows; -1: an empty lane. */
+    fun laneVolume(): Float {
+        val k = lanes.idx[lane]
+        return when (lanes.type[lane]) {
+            Inst.SAMPLE -> e.tracks[k].volume
+            Inst.DRUM -> e.pads[k].volume
+            Inst.BASS -> e.bass.volume
+            Inst.SYNTH -> e.analog.volume
+            Inst.VOICE -> e.vocal.volume
+            Inst.SONG -> e.bank.clipVol
+            Inst.AMBIENT -> e.ambient.volume
+            Inst.RHYTHM -> e.rhythmGtr.volume
+            Inst.RIFF -> e.riffGtr.volume
+            else -> -1f
+        }
+    }
+
+    /** All these volumes run 0..1 (as the Mixer's faders do), so 0..100 % of the bar is the value itself. */
+    private fun setLaneVolume(v: Float) {
+        val k = lanes.idx[lane]
+        when (lanes.type[lane]) {
+            Inst.SAMPLE -> e.tracks[k].volume = v
+            Inst.DRUM -> e.pads[k].volume = v
+            Inst.BASS -> e.bass.volume = v
+            Inst.SYNTH -> e.analog.volume = v
+            Inst.VOICE -> e.vocal.volume = v
+            Inst.SONG -> e.bank.clipVol = v
+            Inst.AMBIENT -> e.ambient.volume = v
+            Inst.RHYTHM -> e.rhythmGtr.volume = v
+            Inst.RIFF -> e.riffGtr.volume = v
+        }
+    }
+
+    override fun performLongClick(): Boolean {
+        val done = super.performLongClick()
+        if (done) longDone = true
+        return done
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x
+                downY = ev.y
+                dragging = false
+                longDone = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!dragging && !longDone && lanes.type[lane] != Inst.EMPTY) {
+                    val dx = abs(ev.x - downX)
+                    val dy = abs(ev.y - downY)
+                    if (dx > slop && dx > dy) {
+                        // a sideways drag: no tap / long press any more, and the page must not scroll
+                        dragging = true
+                        val cancel = MotionEvent.obtain(ev)
+                        cancel.action = MotionEvent.ACTION_CANCEL
+                        super.onTouchEvent(cancel)
+                        cancel.recycle()
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                }
+                if (dragging) {
+                    setLaneVolume((ev.x / max(1, width)).coerceIn(0f, 1f))
+                    invalidate()
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (dragging) {
+                    dragging = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    invalidate()
+                    return true
+                }
+            }
+        }
+        return super.onTouchEvent(ev)
     }
 
     fun changed() {
@@ -720,6 +815,19 @@ class LaneView(
         for (b in 1 until nb) {
             p.color = if (b % 4 == 0) Theme.PANEL3 else Theme.PANEL2
             c.drawRect(w * b / nb - 0.5f, 0f, w * b / nb + 0.5f, h, p)
+        }
+
+        // the lane's volume: a thin overlay from the left up to the level (drag a finger along the lane to set it)
+        val vol = laneVolume().coerceAtMost(1f)
+        if (vol >= 0f) {
+            val vx = w * vol
+            c.save()
+            c.clipRect(0f, 0f, vx, h)
+            p.color = Theme.alpha(col, if (dragging) 80 else 56)
+            c.drawRoundRect(r, 10 * d, 10 * d, p)
+            c.restore()
+            p.color = Theme.alpha(col, if (dragging) 220 else 110)
+            c.drawRect(max(0f, vx - d), 0f, max(d, vx), h, p)
         }
 
         // the step that is playing
@@ -854,7 +962,23 @@ class LaneView(
             }
         }
         if (muted && t != Inst.EMPTY) name += " · muted"
-        label(c, TextUtils.ellipsize(name, android.text.TextPaint(tp), w - 16 * d, TextUtils.TruncateAt.END).toString(),
+        // while a finger sets the volume: its value, at the right of the lane
+        var room = w - 16 * d
+        if (dragging && vol >= 0f) {
+            val txt = "${(vol * 100f + 0.5f).toInt()} %"
+            tp.textSize = 15f * d
+            tp.typeface = Ui.BOLD
+            val tw = tp.measureText(txt)
+            p.color = Theme.alpha(Theme.BG, 200)
+            r.set(w - tw - 16 * d, 3 * d, w - 4 * d, 23 * d)
+            c.drawRoundRect(r, 6 * d, 6 * d, p)
+            tp.color = Theme.TEXT
+            c.drawText(txt, w - tw - 10 * d, 18.5f * d, tp)
+            tp.textSize = 11f * d
+            tp.typeface = Ui.MEDIUM
+            room -= tw + 16 * d
+        }
+        label(c, TextUtils.ellipsize(name, android.text.TextPaint(tp), max(0f, room), TextUtils.TruncateAt.END).toString(),
             if (t == Inst.EMPTY) Theme.FAINT else Theme.TEXT)
     }
 }
