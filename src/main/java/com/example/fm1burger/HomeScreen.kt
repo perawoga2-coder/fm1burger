@@ -139,7 +139,8 @@ class LaneSetup {
 /**
  * Home: one page with all 17 lanes.
  * Left: the lane number (tap again and again to choose the instrument; the color follows it),
- * then the instrument icon (tap it to open that instrument's own page),
+ * then the instrument icon (tap it to open that instrument's own page; 3.28: on a Sampler / Drum lane it is the icon
+ * of the sound's group, a tap opens the sound picker and a long press opens the instrument's page),
  * then a picture of what the lane holds (waveform or pattern; 3.27: tap a Sampler / Drum lane's to edit its steps,
  * long press to hear it), and a mute button.
  */
@@ -219,7 +220,11 @@ class HomeScreen(private val a: MainActivity) : Screen {
         row.addView(num, LinearLayout.LayoutParams(ui.dp(40), ui.dp(48)).also { it.marginEnd = ui.dp(5) })
 
         val icon = InstIconView(a)
-        icon.setOnClickListener { openLane(i) }
+        // 3.28: the icon of a Sampler / Drum lane manages its sound (tap: the sound picker); long press: the old tap
+        icon.setOnClickListener {
+            if (lanes.type[i] == Inst.SAMPLE || lanes.type[i] == Inst.DRUM) SoundPicker(a, i).show() else openLane(i)
+        }
+        icon.setOnLongClickListener { openLane(i); true }
         row.addView(icon, LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)).also { it.marginEnd = ui.dp(5) })
 
         val lv = LaneView(a, e, lanes, i)
@@ -245,7 +250,7 @@ class HomeScreen(private val a: MainActivity) : Screen {
 
     // ---------------- actions ----------------
 
-    /** Tap on the icon: jump to the page where this instrument is made. */
+    /** Tap on the icon (long press on a Sampler / Drum lane): jump to the page where this instrument is made. */
     private fun openLane(i: Int) {
         val k = lanes.idx[i]
         when (lanes.type[i]) {
@@ -334,11 +339,21 @@ class HomeScreen(private val a: MainActivity) : Screen {
             num.setTextColor(Theme.onColor(col))
         }
         icons[i].kind = t
+        // a Sampler / Drum lane that holds a sound shows the icon of that sound's group
+        val snd = laneSound(i)
+        icons[i].group = if (snd.isEmpty()) null else SoundIcons.groupOf(a, a.store, snd)
         val m = muteBtns[i]
         m.visibility = if (t == Inst.EMPTY) View.INVISIBLE else View.VISIBLE
         ui.styleButton(m, isMuted(i), Theme.RED)
         views[i].muted = isMuted(i)
         views[i].changed()
+    }
+
+    /** the file name of the sound a Sampler / Drum lane holds ("" for an empty lane and for the other instruments) */
+    private fun laneSound(i: Int): String = when (lanes.type[i]) {
+        Inst.SAMPLE -> e.tracks[lanes.idx[i]].sampleName
+        Inst.DRUM -> e.pads[lanes.idx[i]].name
+        else -> ""
     }
 
     fun refresh() {
@@ -353,7 +368,8 @@ class HomeScreen(private val a: MainActivity) : Screen {
 
     override fun onTick() {
         // a mute changed on another page (Mixer, Synth, Pads...): show it here too
-        val mk = (0 until LaneSetup.N).joinToString("") { if (isMuted(it)) "1" else "0" }
+        // (3.28: or a lane got another sound: its icon follows)
+        val mk = (0 until LaneSetup.N).joinToString("|") { (if (isMuted(it)) "1" else "0") + laneSound(it) }
         if (mk != muteKey) {
             muteKey = mk
             refresh()
@@ -387,6 +403,15 @@ class InstIconView(ctx: Context) : View(ctx) {
             invalidate()
         }
 
+    /** a sound group (SoundIcons) to draw instead of the instrument, in the instrument's colour; null: the instrument */
+    var group: String? = null
+        set(v) {
+            if (field != v) {
+                field = v
+                invalidate()
+            }
+        }
+
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val r = RectF()
     private val path = Path()
@@ -415,6 +440,11 @@ class InstIconView(ctx: Context) : View(ctx) {
         p.strokeCap = Paint.Cap.ROUND
         p.strokeJoin = Paint.Join.ROUND
         p.pathEffect = null
+        val g = group
+        if (g != null && (kind == Inst.SAMPLE || kind == Inst.DRUM)) {
+            SoundIcons.draw(c, g, cx, cy, s, d, col, p, r, path)
+            return
+        }
         when (kind) {
             Inst.SAMPLE -> {
                 // a waveform

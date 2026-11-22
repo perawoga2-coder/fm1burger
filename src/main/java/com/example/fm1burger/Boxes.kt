@@ -77,6 +77,12 @@ object Boxes {
         SafeWrite.text(kitFile(ctx), JSONObject().put("kits", a).toString())
     }
 
+    /** the engine of a sound of the Synths box (bank_index.json), or null when it is not one of them */
+    fun synthEngine(ctx: Context, name: String): String? {
+        load(ctx)
+        return synths?.get(name)
+    }
+
     // ---------------- the tree ----------------
 
     /** the kits that come with the app (their first 8 slots) */

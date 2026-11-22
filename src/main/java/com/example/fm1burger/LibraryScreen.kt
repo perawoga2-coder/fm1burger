@@ -13,7 +13,8 @@ import java.util.Locale
 
 /**
  * MAKER BANK (3.16): the sounds sorted into categories. Tap a category, then a name: the list is only names,
- * big and easy to tap. One set of function buttons sits above the list and works on the name picked.
+ * big and easy to tap. 3.28: the list has the page; when a name is picked a slim bar comes up under the list with
+ * the functions for that name (the rest of them behind "⋯").
  * The buttons are coloured by what they do: green hear, orange put somewhere, blue change, purple out, red delete.
  */
 class LibraryScreen(private val a: MainActivity) : Screen {
@@ -28,6 +29,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
     private val search = EditText(a)
     private val selText = ui.text("", 15f, Theme.TEXT, true)
     private val selInfo = ui.text("", 12f, Theme.DIM)
+    private val selBar = ui.col()
     private val fnBtns = ArrayList<android.widget.Button>()
     private var cat = "All"
     // 3.26 BOXES: the box open (and its sub-box), the rows that show them
@@ -43,7 +45,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(Theme.BG)
         val head = ui.col()
-        head.setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(4))
+        head.setPadding(ui.dp(12), ui.dp(8), ui.dp(12), ui.dp(2))
         root.addView(head, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         val tr = ui.row()
@@ -58,23 +60,23 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         hs.isHorizontalScrollBarEnabled = false
         for (c in arrayOf("All") + Store.CATS) {
             val b = ui.button(c) { setCat(c) }
-            b.minHeight = ui.dp(40)
-            b.minimumHeight = ui.dp(40)
-            b.setPadding(ui.dp(16), 0, ui.dp(16), 0)
+            b.minHeight = ui.dp(34)
+            b.minimumHeight = ui.dp(34)
+            b.setPadding(ui.dp(14), 0, ui.dp(14), 0)
             catBtns.add(b)
-            catRow.addView(b, ui.w(0f, 3))
+            catRow.addView(b, ui.w(0f, 2))
         }
         hs.addView(catRow)
-        head.addView(hs, ui.fullWidth(8))
+        head.addView(hs, ui.fullWidth(4))
 
         // 3.26: the boxes (a second row opens with a box's sub-boxes)
         val bs = android.widget.HorizontalScrollView(a)
         bs.isHorizontalScrollBarEnabled = false
         bs.addView(boxRow)
-        head.addView(bs, ui.fullWidth(4))
+        head.addView(bs, ui.fullWidth(2))
         subScroll.isHorizontalScrollBarEnabled = false
         subScroll.addView(subRow)
-        head.addView(subScroll, ui.fullWidth(2))
+        head.addView(subScroll, ui.fullWidth(0))
 
         search.hint = "Search name or tag..."
         search.setSingleLine(true)
@@ -88,48 +90,81 @@ class LibraryScreen(private val a: MainActivity) : Screen {
             override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, af: Int) {}
             override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
         })
-        head.addView(search, ui.fullWidth(4))
-
-        // the one set of functions, for the name picked
-        val fp = ui.panel()
-        fp.addView(selText)
-        fp.addView(selInfo)
-        val r1 = ui.row()
-        fn(r1, "▶ Play", Theme.GREEN) { preview(it) }
-        fn(r1, "■ Stop", Theme.GREEN) { a.engine.previewStop() }
-        fn(r1, "→ MPC pad", Theme.ACCENT) { choosePad(it) }
-        fn(r1, "→ Track", Theme.ACCENT) { chooseTrack(it) }
-        fn(r1, "Edit", Theme.BLUE) { a.openEdit(it) }
-        fp.addView(r1, ui.fullWidth(6))
-        val r2 = ui.row()
-        fn(r2, "Category", Theme.BLUE) { catDialog(it) }
-        fn(r2, "Tags", Theme.BLUE) { tagsDialog(it) }
-        fn(r2, "Rename", Theme.BLUE) { renameDialog(it) }
-        fn(r2, "Export", Theme.PURPLE) { exportPlain(it) }
-        fn(r2, "Devices…", Theme.PURPLE) { deviceMenu(it) }
-        fn(r2, "Delete", Theme.RED) { deleteDialog(it) }
-        fp.addView(r2, ui.fullWidth(4))
-        val r3 = ui.row()
-        fn(r3, "→ Home lane", Theme.ACCENT) { homeDialog(it) }
-        fn(r3, "→ Kit", Theme.ACCENT) { kitDialog(it) }
-        fn(r3, "→ Box", Theme.BLUE) { boxDialog(it) }
-        fp.addView(r3, ui.fullWidth(4))
-        head.addView(fp, ui.fullWidth(6))
+        head.addView(search, ui.fullWidth(2))
 
         listBox.setPadding(ui.dp(12), ui.dp(4), ui.dp(12), ui.dp(88))
         listScroll.addView(listBox)
         root.addView(listScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        // 3.28: the functions for the name picked: a slim bar under the list, there only while a name is picked
+        selBar.setBackgroundColor(Theme.PANEL)
+        val barLine = View(a)
+        barLine.setBackgroundColor(Theme.LINE)
+        selBar.addView(barLine, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(1)))
+        val nameRow = ui.row()
+        nameRow.setPadding(ui.dp(12), ui.dp(4), ui.dp(12), 0)
+        selText.maxLines = 1
+        selText.ellipsize = android.text.TextUtils.TruncateAt.END
+        selInfo.maxLines = 1
+        selInfo.ellipsize = android.text.TextUtils.TruncateAt.END
+        selInfo.setPadding(ui.dp(10), 0, 0, 0)
+        nameRow.addView(selText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        nameRow.addView(selInfo, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        selBar.addView(nameRow)
+        val r1 = ui.row()
+        r1.setPadding(ui.dp(8), 0, ui.dp(8), ui.dp(4))
+        // the widths follow the labels, so that all seven fit a narrow phone
+        fn(r1, "▶", Theme.GREEN, 1f) { preview(it) }
+        fn(r1, "→ Home lane", Theme.ACCENT, 3f) { homeDialog(it) }
+        fn(r1, "→ Kit", Theme.ACCENT, 1.6f) { kitDialog(it) }
+        fn(r1, "→ Track", Theme.ACCENT, 2f) { chooseTrack(it) }
+        fn(r1, "Edit", Theme.BLUE, 1.4f) { a.openEdit(it) }
+        fn(r1, "⋯", Theme.PURPLE, 1f) { moreMenu(it) }
+        val close = ui.button("✕") { unpick() }
+        close.setPadding(ui.dp(2), ui.dp(4), ui.dp(2), ui.dp(4))
+        r1.addView(close, ui.w(1f, 2))
+        selBar.addView(r1)
+        root.addView(selBar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         showSel()
     }
 
-    private fun fn(r: LinearLayout, label: String, color: Int, act: (File) -> Unit) {
+    private fun fn(r: LinearLayout, label: String, color: Int, weight: Float, act: (File) -> Unit) {
         val b = ui.button(label) {
             val f = sel
             if (f == null || !f.exists()) ui.toast("Tap a name in the list first") else act(f)
         }
         b.setTag(color)
+        b.setPadding(ui.dp(2), ui.dp(4), ui.dp(2), ui.dp(4))
         fnBtns.add(b)
-        r.addView(b, ui.w(1f, 3))
+        r.addView(b, ui.w(weight, 2))
+    }
+
+    /** "⋯": the functions that are not on the bar. */
+    private fun moreMenu(f: File) {
+        AlertDialog.Builder(a)
+            .setTitle(f.nameWithoutExtension)
+            .setItems(arrayOf("Category", "Tags", "Rename", "→ Box", "→ MPC pad", "Export", "Devices…", "Delete", "■ Stop")) { _, w ->
+                if (w == 8) a.engine.previewStop()
+                else if (!f.exists()) ui.toast("Tap a name in the list first")
+                else when (w) {
+                    0 -> catDialog(f)
+                    1 -> tagsDialog(f)
+                    2 -> renameDialog(f)
+                    3 -> boxDialog(f)
+                    4 -> choosePad(f)
+                    5 -> exportPlain(f)
+                    6 -> deviceMenu(f)
+                    else -> deleteDialog(f)
+                }
+            }
+            .show()
+    }
+
+    /** "✕": no name picked, the bar goes away. */
+    private fun unpick() {
+        sel = null
+        paintRows()
+        showSel()
     }
 
     /** Sounds that come with the app, and FM banks. */
@@ -246,9 +281,10 @@ class LibraryScreen(private val a: MainActivity) : Screen {
 
     private fun showSel() {
         val f = sel
+        selBar.visibility = if (f == null) View.GONE else View.VISIBLE
         if (f == null) {
-            selText.text = "Tap a name"
-            selInfo.text = "The buttons below work on the name you tap. Long press a name to hear it."
+            selText.text = ""
+            selInfo.text = ""
         } else {
             selText.text = f.nameWithoutExtension
             val tg = store.getTags(f.name)
@@ -327,12 +363,12 @@ class LibraryScreen(private val a: MainActivity) : Screen {
 
     private fun boxButton(row: LinearLayout, label: String, on: Boolean, color: Int, act: () -> Unit): android.widget.Button {
         val b = ui.button(label) { act() }
-        b.minHeight = ui.dp(36)
-        b.minimumHeight = ui.dp(36)
+        b.minHeight = ui.dp(32)
+        b.minimumHeight = ui.dp(32)
         b.textSize = 13f
-        b.setPadding(ui.dp(14), 0, ui.dp(14), 0)
+        b.setPadding(ui.dp(12), 0, ui.dp(12), 0)
         ui.styleButton(b, on, color, 18)
-        row.addView(b, ui.w(0f, 3))
+        row.addView(b, ui.w(0f, 2))
         return b
     }
 
