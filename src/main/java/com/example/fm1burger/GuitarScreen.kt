@@ -28,6 +28,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
     private lateinit var fretText: TextView
     private lateinit var info: TextView
     private val cells = ArrayList<Button>()
+    private val barCells = BarCells(ui, cells, 50, 2, 3, true)
     private val tuneBtns = ArrayList<Button>()
     private val artBtns = ArrayList<Button>()
     private val presetRow = ui.row()
@@ -54,7 +55,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
         tabs.addView(riffTab, ui.w(1f, 3))
         content.addView(tabs, ui.fullWidth(8))
         content.addView(prep.view, ui.fullWidth(6))
-        prep.onPage = { if (cells.size == Pat.BAR) paintCells(true) }
+        prep.onPage = { if (cells.size == BarCells.MAX) paintCells(true) }
 
         // presets (filled in by showMode)
         content.addView(ui.text("Ready-made patterns", 13f, Theme.DIM), ui.fullWidth(10))
@@ -63,22 +64,16 @@ class GuitarScreen(private val a: MainActivity) : Screen {
         // the 16 steps
         val sp = ui.panel()
         sp.addView(ui.text("Steps: tap on / off · hold to pick · the buttons below set open, hold and the fret", 14f, Theme.ACCENT, true))
-        for (half in 0 until 2) {
-            val r = ui.row()
-            for (c in 0 until 8) {
-                val s = half * 8 + c
-                val b = ui.button("") { tapStep(Pat.base() + s) }
-                b.setOnLongClickListener { pickStep(Pat.base() + s); true }
-                b.textSize = 11f
-                b.setPadding(0, 0, 0, 0)
-                b.maxLines = 2
-                cells.add(b)
-                r.addView(b, LinearLayout.LayoutParams(0, ui.dp(50), 1f).also {
-                    it.setMargins(ui.dp(2), ui.dp(3), if (c == 3) ui.dp(8) else ui.dp(2), ui.dp(3))
-                })
-            }
-            sp.addView(r)
+        // (3.28: as many steps as the meter's bar; BarCells puts them in rows)
+        for (s in 0 until BarCells.MAX) {
+            val b = ui.button("") { tapStep(Pat.base() + s) }
+            b.setOnLongClickListener { pickStep(Pat.base() + s); true }
+            b.textSize = 11f
+            b.setPadding(0, 0, 0, 0)
+            b.maxLines = 2
+            cells.add(b)
         }
+        sp.addView(barCells.box)
         info = ui.text("", 12f, Theme.DIM)
         sp.addView(info, ui.fullWidth(6))
 
@@ -248,7 +243,8 @@ class GuitarScreen(private val a: MainActivity) : Screen {
         val gg = g()
         val col = Inst.color(if (mode == 0) Inst.RHYTHM else Inst.RIFF)
         val base = Pat.base()
-        for (c in 0 until Pat.BAR) {
+        barCells.layout()
+        for (c in 0 until Pat.spb()) {
             val s = base + c
             val b = cells[c]
             val art = gg.art[s]

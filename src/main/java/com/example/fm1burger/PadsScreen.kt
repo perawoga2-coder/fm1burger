@@ -403,7 +403,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 val n = edit.text.toString().trim()
                 if (n.isEmpty()) { ui.toast("Give the kit a name"); return@setPositiveButton }
                 val over = Boxes.kit(n) != null
-                Boxes.saveKit(a, n, rowsNow())
+                if (!Boxes.saveKit(a, n, rowsNow())) { ui.toast("$n is the name of a ready-made kit or box: choose another"); return@setPositiveButton }
                 buildKits()
                 a.libraryScreen.refresh()
                 ui.toast(if (over) "Kit $n saved again" else "Kit $n saved (also a box in the Maker Bank: Drum Kits)")
@@ -413,10 +413,11 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
     private fun loadKit(n: String) {
         val k = Boxes.kit(n) ?: return
-        for (i in 0 until Boxes.SLOTS) {
+        // (one background thread reads the files, then the pads are set and the page is shown once)
+        a.assignPads(IntArray(Boxes.SLOTS) { pi(it) }, List(Boxes.SLOTS) { i ->
             val f = k.slots[i]
-            a.assignPad(pi(i), if (f.isEmpty() || !a.store.file(f).exists()) null else a.store.file(f))
-        }
+            if (f.isEmpty() || !a.store.file(f).exists()) null else a.store.file(f)
+        })
         ui.toast("$n on the pads (bank ${"AB"[bank]})")
     }
 
@@ -431,7 +432,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
                         android.app.AlertDialog.Builder(a).setTitle("Rename the kit").setView(edit)
                             .setPositiveButton("OK") { _, _ ->
                                 val nn = edit.text.toString().trim()
-                                if (nn.isEmpty() || (nn != n && Boxes.kit(nn) != null)) ui.toast("That name is empty or already a kit")
+                                if (nn.isEmpty() || (nn != n && (Boxes.kit(nn) != null || Boxes.reserved(a, nn)))) ui.toast("That name is empty, already a kit, or the name of a ready-made kit or box")
                                 else { Boxes.kit(n)?.name = nn; Boxes.saveKits(a); buildKits(); a.libraryScreen.refresh() }
                             }.setNegativeButton("Cancel", null).show()
                     }
@@ -441,11 +442,13 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     private fun makerKit(kit: String) {
-        val files = MakerBank.pieces.map { a.store.file(MakerBank.fileName(kit, it)) }
+        val names = MakerBank.pieces.map { MakerBank.fileName(kit, it) }
+        val files = names.map { a.store.file(it) }
         if (files.none { it.exists() }) {
             ui.toast("Getting the Maker Bank ready...")
             Thread {
-                try { MakerBank.install(a, a.store, true) } catch (ex: Exception) {}
+                // only this kit's 8 sounds (not the whole bank: that is the start's job, and it waits for the music)
+                try { MakerBank.install(a, a.store, true, busy = null, only = { it in names }) } catch (ex: Exception) {}
                 a.runOnUiThread {
                     if (files.any { it.exists() }) { a.libraryScreen.refresh(); makerKit(kit) }
                     else ui.toast("Could not load $kit")
@@ -453,7 +456,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
             }.start()
             return
         }
-        for (i in files.indices) if (files[i].exists()) a.assignPad(pi(i), files[i])
+        val there = files.indices.filter { files[it].exists() }
+        a.assignPads(IntArray(there.size) { pi(there[it]) }, there.map { files[it] })
         ui.toast("$kit on the pads: " + MakerBank.pieces.joinToString(", ") + ". Edit any of them with e.")
     }
 
@@ -469,9 +473,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 if (made < 0) {
                     ui.toast("Could not make the drum kit")
                 } else {
-                    for (i in DrumKit.padKit.indices) {
-                        a.assignPad(pi(i), a.store.file(DrumKit.fileName(DrumKit.padKit[i])))
-                    }
+                    a.assignPads(IntArray(DrumKit.padKit.size) { pi(it) },
+                        DrumKit.padKit.indices.map { a.store.file(DrumKit.fileName(DrumKit.padKit[it])) })
                     ui.toast(
                         "Drum kit ready: 8 sounds on the pads, " +
                             "all ${DrumKit.names.size} drum sounds are in the Maker Bank."
@@ -494,7 +497,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
                 if (!ok) {
                     ui.toast("Could not load the Rock Heavy kit")
                 } else {
-                    for (i in RockKit.pads.indices) a.assignPad(pi(i), a.store.file(RockKit.fileName(RockKit.pads[i])))
+                    a.assignPads(IntArray(RockKit.pads.size) { pi(it) },
+                        RockKit.pads.indices.map { a.store.file(RockKit.fileName(RockKit.pads[it])) })
                     a.libraryScreen.refresh()
                     ui.toast("Rock Heavy kit on the pads: kick, snare, hats, toms, crash, china. 4 more sounds are in the Maker Bank.")
                 }
@@ -587,7 +591,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private fun paintEdit(r: Int) {
         val b = editBtns[r]
         val n = e.pads[pi(r)].name
-        val edited = n.isNotEmpty() && DrumEdit.readNote(a.filesDir, n) != null
+        val edited = n.isNotEmpty() && DrumEdit.hasNote(a.filesDir, n)
         b.background = ui.bg(if (r == editing) Theme.RED else Theme.PANEL2, 8)
         b.setTextColor(if (r == editing) Theme.BG else if (edited) Theme.ACCENT else Theme.DIM)
     }
@@ -625,19 +629,39 @@ class PadsScreen(private val a: MainActivity) : Screen {
         }
         box.addView(ui.text(kindText, 12f, Theme.DIM))
 
-        fun rebuild(play: Boolean) {
-            val my = ++gen
+        // one render at a time, the latest knobs win: a move while a render runs is only noted, and when the render
+        // ends the next one starts with the knobs as they are then (all of this on the UI thread, but the render)
+        var rendering = false
+        var want = false
+        var wantPlay = false
+        fun pump() {
+            if (rendering || !want) return
+            want = false
+            val play = wantPlay
+            wantPlay = false
+            val my = gen
             val kk = HashMap(k)
             val aud = audio
+            rendering = true
             Thread {
-                val d = try { DrumEdit.render(src, kk, aud) } catch (ex: Exception) { null }
+                try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) } catch (ex: Exception) { }
+                val d = try { DrumEdit.render(src, kk, aud) } catch (ex: Throwable) { null }
                 a.runOnUiThread {
-                    if (my != gen || d == null) return@runOnUiThread
-                    last = d
-                    e.setPad(q, pad.name, d)
-                    if (play) e.padHit(q, 1f)
+                    rendering = false
+                    if (my != gen) return@runOnUiThread          // (the window was closed)
+                    if (d != null) {
+                        last = d
+                        e.setPad(q, pad.name, d)
+                        if (play) e.padHit(q, 1f)
+                    }
+                    pump()
                 }
             }.start()
+        }
+        fun rebuild(play: Boolean) {
+            want = true
+            if (play) wantPlay = true
+            pump()
         }
 
         val rows = ArrayList<Pair<DrumEdit.Knob, SliderRow>>()
@@ -671,7 +695,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
         dlg.setOnDismissListener {
             gen++
             editing = -1
-            finishEdit(q, src, k, start, changed, last)
+            finishEdit(q, src, k, start, changed, last, audio)
             paintEdit(r)
         }
         dlg.window?.setDimAmount(0.25f)              // (the rows stay visible behind it)
@@ -686,7 +710,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     /** DONE: unchanged -> as it was; back at the original's knobs -> the original; else saved as "<name> edit" */
-    private fun finishEdit(q: Int, src: String, k: Map<String, Int>, start: Map<String, Int>, changed: Boolean, data: FloatArray?) {
+    private fun finishEdit(q: Int, src: String, k: Map<String, Int>, start: Map<String, Int>, changed: Boolean, data: FloatArray?,
+                           audio: FloatArray?) {
         val pad = e.pads[q]
         val cur = pad.name
         if (!changed || k == start) {
@@ -698,11 +723,19 @@ class PadsScreen(private val a: MainActivity) : Screen {
             onShow()
             return
         }
-        val d = data ?: return
+        // what is saved is made again from the knobs as they are now (the last render heard may be an older one)
+        val kk = HashMap(k)
         Thread {
+            val made = try {
+                val aud = audio ?: if (DrumEdit.kindOf(src) == DrumEdit.Kind.AUDIO) a.store.loadEngine(src) else null
+                DrumEdit.render(src, kk, aud)
+            } catch (ex: Throwable) {
+                null
+            }
+            val d = made ?: data ?: return@Thread
             val f = if (cur != src && DrumEdit.readNote(a.filesDir, cur)?.src == src) a.store.file(cur).also { a.store.overwrite(it, d, Cfg.SR) }
                 else a.store.saveNew(src.removeSuffix(".wav") + " edit", d, Cfg.SR)
-            DrumEdit.writeNote(a.filesDir, f.name, DrumEdit.Note(src, HashMap(k)))
+            DrumEdit.writeNote(a.filesDir, f.name, DrumEdit.Note(src, kk))
             a.runOnUiThread {
                 e.setPad(q, f.name, d)
                 onShow()

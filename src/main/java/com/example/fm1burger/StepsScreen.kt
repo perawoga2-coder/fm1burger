@@ -91,12 +91,14 @@ class StepsScreen(private val a: MainActivity) : Screen {
 
     private fun shift(dir: Int) {
         val t = sel()
-        val n = Pat.len
-        val on = BooleanArray(n) { t.steps[it].on }
-        val pi = IntArray(n) { t.steps[it].pitch }
-        val lv = FloatArray(n) { t.steps[it].level }
+        // (3.28: the steps that play, bar after bar: a step never moves into the part of a bar slot the meter skips)
+        val n = Pat.playLen()
+        val at = IntArray(n) { Pat.stepAt(it) }
+        val on = BooleanArray(n) { t.steps[at[it]].on }
+        val pi = IntArray(n) { t.steps[at[it]].pitch }
+        val lv = FloatArray(n) { t.steps[at[it]].level }
         for (i in 0 until n) {
-            val j = (i + dir + n) % n
+            val j = at[(i + dir + n) % n]
             t.steps[j].on = on[i]
             t.steps[j].pitch = pi[i]
             t.steps[j].level = lv[i]

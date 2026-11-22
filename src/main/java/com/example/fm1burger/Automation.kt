@@ -128,6 +128,12 @@ class Automation(e: Engine) {
         for (l in lanes) for (k in old until n) l[k] = l[k % old]
     }
 
+    /** The meter's bar slot changed size: step [j] goes to step [k] in every lane. */
+    fun moveStep(j: Int, k: Int) {
+        if (j !in 0 until Cfg.STEPS || k !in 0 until Cfg.STEPS) return
+        for (l in lanes) l[k] = l[j]
+    }
+
     fun toJson(): JSONObject {
         val o = JSONObject()
         for ((k, t) in targets.withIndex()) {
@@ -182,7 +188,8 @@ class AutoLaneView(ctx: Context, private val auto: Automation) : View(ctx) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val cw = w / Pat.BAR
+        val cols = Pat.spb()                          // (3.28: the meter's bar)
+        val cw = w / cols
         val base = Pat.base()
         val l = auto.lanes[lane]
         p.style = Paint.Style.FILL
@@ -192,9 +199,9 @@ class AutoLaneView(ctx: Context, private val auto: Automation) : View(ctx) {
         var held = Float.NaN
         for (s in 0 until base) if (!l[s].isNaN()) held = l[s]
         if (held.isNaN()) for (s in Pat.len - 1 downTo base) if (!l[s].isNaN()) { held = l[s]; break }
-        for (k in 0 until Pat.BAR) {
+        for (k in 0 until cols) {
             val s = base + k
-            p.color = if ((k / 4) % 2 == 0) Theme.PANEL2 else Theme.PANEL
+            p.color = if (Pat.beatOf(k) % 2 == 0) Theme.PANEL2 else Theme.PANEL
             c.drawRect(k * cw + 1f, 0f, (k + 1) * cw - 1f, h, p)
             val v = l[s]
             if (!v.isNaN()) {
@@ -207,7 +214,7 @@ class AutoLaneView(ctx: Context, private val auto: Automation) : View(ctx) {
             }
         }
         val ps = playStep - base
-        if (playStep >= 0 && ps in 0 until Pat.BAR) {
+        if (playStep >= 0 && ps in 0 until cols) {
             p.color = Color.argb(60, 255, 255, 255)
             c.drawRect(ps * cw, 0f, (ps + 1) * cw, h, p)
         }
@@ -217,7 +224,8 @@ class AutoLaneView(ctx: Context, private val auto: Automation) : View(ctx) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
-                val k = (e.x / (width.toFloat() / Pat.BAR)).toInt().coerceIn(0, Pat.BAR - 1)
+                val cols = Pat.spb()
+                val k = (e.x / (width.toFloat() / cols)).toInt().coerceIn(0, cols - 1)
                 val s = Pat.base() + k
                 auto.lanes[lane][s] = if (erase) Float.NaN else (1f - e.y / height).coerceIn(0f, 1f)
                 invalidate()

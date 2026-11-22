@@ -131,6 +131,10 @@ class Engine {
     private var idleAcc = 0.0
     /** 16th notes since the pattern started (the pattern step is this modulo Pat.len). */
     private var patCount = 0L
+    /** the step inside the bar (audio thread): counted, so that a meter change can restart the bar */
+    private var barStep = 0
+    /** the meter the audio thread last saw */
+    private var seenMeter = 0
     private var patVersion = 0
 
     /** The final mix of the last block as floats (before 16 bit), for the 24 bit / float recorder. */
@@ -221,7 +225,7 @@ class Engine {
     }
 
     fun padHit(i: Int, vel: Float) {
-        if (i in pads.indices) pads[i].req = vel.coerceIn(0.05f, 1f)
+        if (i in pads.indices) { pads[i].req = vel.coerceIn(0.05f, 1f); Live.touch() }
     }
 
     // ---------------- 3.19 RESAMPLE: the app's own mix into memory (SAMPLING's REC, source "the app") ----------------
@@ -242,7 +246,7 @@ class Engine {
     fun grabArmBars(bars: Int) {
         grabBuf = null
         grabPos = 0
-        val n = (Cfg.SR * 60.0 / bpmF * 4.0 * bars).toInt().coerceIn(Cfg.SR / 4, Cfg.SR * 60)
+        val n = (Pat.barFrames(bpmF) * bars).toInt().coerceIn(Cfg.SR / 4, Cfg.SR * 60)
         grabPending = FloatArray(n)
     }
 
@@ -276,7 +280,7 @@ class Engine {
 
     /** Plays track [i]'s sample once at [semis] semitones from its pitch (the piano keys of the STEPS window). The audio thread starts it. */
     fun auditionNote(i: Int, semis: Int) {
-        if (i in tracks.indices) tracks[i].noteReq = semis.coerceIn(-24, 24)
+        if (i in tracks.indices) { tracks[i].noteReq = semis.coerceIn(-24, 24); Live.touch() }
     }
 
     // ---------------- 3.32: the full-screen keyboard's voices (a small pool, mixed where the preview voice is) ----------------
@@ -330,6 +334,7 @@ class Engine {
      */
     fun keyOn(id: Int, d: FloatArray, rate: Double, gain: Float, lp: Float, releaseMs: Float,
               from: Int, to: Int, loopA: Int, loopB: Int, xfade: Int) {
+        Live.touch()
         synchronized(keyLock) {
             val h = kqHead
             val next = (h + 1) and (KQ - 1)
@@ -935,6 +940,8 @@ class Engine {
                     tickCount = spp * 6L
                     beatPos = tickCount / 24.0
                     patCount = spp.toLong()
+                    seenMeter = Pat.meter
+                    barStep = (spp % Pat.spbOf(seenMeter)).coerceAtLeast(0)
                     patVersion = bank.version
                 }
                 playing = true
@@ -1003,8 +1010,17 @@ class Engine {
         if (tickCount % 6L == 0L) {
             // b = step inside the bar (parts, cues and songs work in bars),
             // s = step inside the pattern, which can be 1, 2 or 4 bars long
-            val b = ((tickCount / 6L) % Pat.spb()).toInt()       // (3.28: the meter's bar)
-            if (tickCount == 0L) patCount = 0L
+            // (3.28: the meter's bar. The meter changed while playing: bar and pattern start again together)
+            val m = Pat.meter
+            if (tickCount == 0L || m != seenMeter) {
+                seenMeter = m
+                patCount = 0L
+                barStep = 0
+            }
+            val spbNow = Pat.spbOf(m)
+            if (barStep >= spbNow) barStep = 0
+            val b = barStep
+            barStep = if (b + 1 >= spbNow) 0 else b + 1
             if (b == 0) {                                   // 3.19 RESAMPLE armed for bars: it starts on this frame
                 val gp = grabPending
                 if (gp != null) {
@@ -1074,7 +1090,7 @@ class Engine {
         if (t.data == null) return
         if (t.loop) {
             if (s == 0) {
-                val bar = (tickCount / 96L).toInt()
+                val bar = (tickCount / (6L * Pat.spb())).toInt()
                 if (t.fitBars <= 0 || bar % t.fitBars == 0 || !t.playing) trigger(t, 0, 1f)
             }
         } else {
@@ -1127,7 +1143,7 @@ class Engine {
         t.stretch = false
         t.tlRate = 1.0
         if (t.loop && t.fitBars > 0) {
-            val want = t.fitBars * Cfg.SR * 240.0 / bpmF          // samples in N bars
+            val want = t.fitBars * Pat.barFrames(bpmF)            // samples in N bars (of the meter)
             val fit = (e - a) / want
             if (t.keepPitch) {
                 t.stretch = true

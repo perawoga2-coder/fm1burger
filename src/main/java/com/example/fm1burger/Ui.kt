@@ -307,3 +307,43 @@ class Ui(private val ctx: Context) {
         if (idx >= 0) sp.setSelection(idx)
     }
 }
+
+/**
+ * 3.33: the step buttons of one bar in the step editors (bassline, analog synth, guitars, ambient): as many as the
+ * meter's bar has, in rows (16 in 4/4: two rows of 8), laid out again when the meter changes. The editor makes
+ * [MAX] buttons into [cells] and puts [box] where the rows go; it calls [layout] before it paints them.
+ */
+class BarCells(private val ui: Ui, private val cells: List<Button>, private val hDp: Int, private val mxDp: Int,
+               private val myDp: Int, private val beatGap: Boolean, private val rowTopDp: Int = 0) {
+    val box: LinearLayout = ui.col()
+    private var meter = -1
+
+    /** the rows for the meter now (nothing when it did not change); true when the buttons were laid out again */
+    fun layout(): Boolean {
+        if (meter == Pat.meter) return false
+        meter = Pat.meter
+        val n = minOf(Pat.spb(), cells.size)
+        val rows = if (n <= 8) 1 else if (n <= 20) 2 else 3
+        val per = (n + rows - 1) / rows
+        for (b in cells) (b.parent as? ViewGroup)?.removeView(b)
+        box.removeAllViews()
+        for (r in 0 until rows) {
+            val row = ui.row()
+            for (c in 0 until per) {
+                val i = r * per + c
+                if (i >= n) break
+                val lp = LinearLayout.LayoutParams(0, ui.dp(hDp), 1f)
+                val gap = beatGap && c < per - 1 && Pat.accent(i + 1)       // (a wider gap where a beat ends)
+                lp.setMargins(ui.dp(mxDp), ui.dp(myDp), if (gap) ui.dp(8) else ui.dp(mxDp), ui.dp(myDp))
+                row.addView(cells[i], lp)
+            }
+            box.addView(row, ui.fullWidth(rowTopDp))
+        }
+        return true
+    }
+
+    companion object {
+        /** the longest bar (12/8: 24 steps) */
+        const val MAX = 24
+    }
+}

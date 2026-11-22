@@ -206,7 +206,7 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         else {
             if (!on(s)) setOn(s, true)
             picked = i
-            if (drum) e.padHit(k, level(s)) else e.audition(k)
+            if (drum) e.padHit(k, level(s)) else e.auditionNote(k, pitch(s))
         }
         paint()
     }
@@ -263,9 +263,17 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         override fun run() {
             val cur = if (e.playing) e.curStep else -1
             if (cur != lastPlay) {
+                val old = lastPlay
                 lastPlay = cur
+                val bar = Pat.viewBar()
                 if (Pat.follow && cur >= 0) Pat.view = cur / Pat.slot()
-                paint()
+                // everything only when the bar shown, the meter or play / stop changed; else the two play-head keys
+                if (Pat.viewBar() != bar || keyMeter != Pat.meter || (old < 0) != (cur < 0)) paint()
+                else {
+                    val base = Pat.base()
+                    paintKey(old - base, base, cur)
+                    paintKey(cur - base, base, cur)
+                }
             }
             h.postDelayed(this, 40)
         }
@@ -292,26 +300,31 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         }
     }
 
+    /** key [i] of the bar shown ([base] = its first step, [cur] = the step playing or -1) */
+    private fun paintKey(i: Int, base: Int, cur: Int) {
+        if (i < 0 || i >= Pat.spb() || i >= keys.size) return
+        val s = base + i
+        if (s >= Cfg.STEPS) return
+        val b = keys[i]
+        val lit = on(s)
+        val now = s == cur
+        val bg = when {
+            now -> Theme.TEXT
+            lit -> Theme.alpha(color, (90 + 165 * level(s)).toInt().coerceIn(90, 255))
+            else -> Theme.PANEL2
+        }
+        b.background = ui.bg(bg, 10, if (i == picked) Theme.YELLOW else if (Pat.accent(i)) Theme.STEEL else Theme.LINE,
+            if (i == picked) 3 else if (Pat.accent(i)) 2 else 1)
+        b.setTextColor(if (now) Theme.BG else if (lit) Theme.BG else Theme.DIM)
+        b.text = if (lit && !drum && pitch(s) != 0) "${i + 1}\n${if (pitch(s) > 0) "+" else ""}${pitch(s)}" else "${i + 1}"
+    }
+
     private fun paint() {
         layoutKeys()
         val base = Pat.base()
         val cur = if (e.playing) e.curStep else -1
         if (picked >= Pat.spb()) picked = 0
-        for (i in 0 until Pat.spb()) {
-            val s = base + i
-            val b = keys[i]
-            val lit = on(s)
-            val now = s == cur
-            val bg = when {
-                now -> Theme.TEXT
-                lit -> Theme.alpha(color, (90 + 165 * level(s)).toInt().coerceIn(90, 255))
-                else -> Theme.PANEL2
-            }
-            b.background = ui.bg(bg, 10, if (i == picked) Theme.YELLOW else if (Pat.accent(i)) Theme.STEEL else Theme.LINE,
-                if (i == picked) 3 else if (Pat.accent(i)) 2 else 1)
-            b.setTextColor(if (now) Theme.BG else if (lit) Theme.BG else Theme.DIM)
-            b.text = if (lit && !drum && pitch(s) != 0) "${i + 1}\n${if (pitch(s) > 0) "+" else ""}${pitch(s)}" else "${i + 1}"
-        }
+        for (i in 0 until Pat.spb()) paintKey(i, base, cur)
         for (b in 0 until 4) {
             barBtns[b].visibility = if (b < Pat.bars()) android.view.View.VISIBLE else android.view.View.INVISIBLE
             ui.styleButton(barBtns[b], b == Pat.viewBar(), color)

@@ -364,16 +364,24 @@ class HomeScreen(private val a: MainActivity) : Screen {
         refresh()
     }
 
-    private var muteKey = ""
+    // what onTick last saw of each lane (no string is built each tick)
+    private val seenMute = BooleanArray(LaneSetup.N)
+    private val seenSound = arrayOfNulls<String>(LaneSetup.N)
 
     override fun onTick() {
         // a mute changed on another page (Mixer, Synth, Pads...): show it here too
         // (3.28: or a lane got another sound: its icon follows)
-        val mk = (0 until LaneSetup.N).joinToString("|") { (if (isMuted(it)) "1" else "0") + laneSound(it) }
-        if (mk != muteKey) {
-            muteKey = mk
-            refresh()
+        var changed = false
+        for (i in 0 until LaneSetup.N) {
+            val m = isMuted(i)
+            val n = laneSound(i)
+            if (m != seenMute[i] || n != seenSound[i]) {
+                seenMute[i] = m
+                seenSound[i] = n
+                changed = true
+            }
         }
+        if (changed) refresh()
         val step = if (e.playing) e.curStep else -1
         val stepChanged = step != lastStep
         lastStep = step

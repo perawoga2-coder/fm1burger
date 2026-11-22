@@ -188,6 +188,7 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
     private val file = File(a.filesDir, "analogseq.json")
     private val names = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
     private val cells = ArrayList<Button>()
+    private val barCells = BarCells(ui, cells, 54, 2, 2, false)
     private val chordBtns = ArrayList<Button>()
     private lateinit var onBtn: Button
     private lateinit var lenBtn: Button
@@ -227,27 +228,21 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         }
         view.addView(cr, ui.fullWidth(2))
 
-        for (rowNo in 0 until 2) {
-            val r = ui.row()
-            for (k in 0 until 8) {
-                val i = rowNo * 8 + k
-                val b = Button(a)
-                b.isAllCaps = false
-                b.textSize = 12f
-                b.minHeight = 0
-                b.minimumHeight = 0
-                b.minWidth = 0
-                b.minimumWidth = 0
-                b.setPadding(0, 0, 0, 0)
-                b.setOnClickListener { tapCell(Pat.base() + i) }
-                b.setOnLongClickListener { pickCell(Pat.base() + i); true }
-                val lp = LinearLayout.LayoutParams(0, ui.dp(54), 1f)
-                lp.setMargins(ui.dp(2), ui.dp(2), ui.dp(2), ui.dp(2))
-                r.addView(b, lp)
-                cells.add(b)
-            }
-            view.addView(r, ui.fullWidth(if (rowNo == 0) 6 else 0))
+        // (3.28: as many steps as the meter's bar; BarCells puts them in rows)
+        for (i in 0 until BarCells.MAX) {
+            val b = Button(a)
+            b.isAllCaps = false
+            b.textSize = 12f
+            b.minHeight = 0
+            b.minimumHeight = 0
+            b.minWidth = 0
+            b.minimumWidth = 0
+            b.setPadding(0, 0, 0, 0)
+            b.setOnClickListener { tapCell(Pat.base() + i) }
+            b.setOnLongClickListener { pickCell(Pat.base() + i); true }
+            cells.add(b)
         }
+        view.addView(barCells.box, ui.fullWidth(6))
         info = ui.text("", 13f, Theme.TEXT, true)
         view.addView(info, ui.fullWidth(4))
 
@@ -362,14 +357,14 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
     }
 
     private fun paint(c: Int) {
-        if (c !in 0 until Pat.BAR) return
+        if (c !in 0 until Pat.spb()) return
         val b = cells[c]
         val i = Pat.base() + c
         val ns = seq.notesAt(i)
         val on = ns.isNotEmpty()
         val base = if (on) {
             Theme.ACCENT
-        } else if ((i / 4) % 2 == 0) {
+        } else if (Pat.beatOf(c) % 2 == 0) {
             Theme.PANEL2
         } else {
             Theme.PANEL
@@ -389,7 +384,8 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
         onBtn.text = if (seq.enabled) "Sequencer: ON" else "Sequencer: OFF"
         ui.styleButton(onBtn, seq.enabled, Theme.GREEN)
         for (i in chordBtns.indices) ui.styleButton(chordBtns[i], seq.chord == i)
-        for (i in 0 until Pat.BAR) paint(i)
+        barCells.layout()
+        for (i in 0 until Pat.spb()) paint(i)
         val ns = seq.notesAt(sel)
         val l = ns.firstOrNull()?.let { seq.lenAt(sel, it) } ?: 1
         info.text = if (ns.isNotEmpty()) {

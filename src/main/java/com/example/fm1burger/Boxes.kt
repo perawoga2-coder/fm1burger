@@ -114,6 +114,18 @@ object Boxes {
         return l
     }
 
+    /** a name the ready-made boxes and kits use (a user's box or kit of that name could not be told from them) */
+    fun reserved(ctx: Context, name: String): Boolean {
+        load(ctx)
+        val n = name.trim()
+        if (n.isEmpty()) return false
+        val titles = ArrayList<String>()
+        titles.addAll(listOf("Synths", "Drum Kits", "Piano · Flute · Sax", "Drum Edits", "My Recordings"))
+        for (k in builtInKits()) titles.add(k.name)
+        synths?.values?.let { titles.addAll(it) }
+        return titles.any { it.equals(n, ignoreCase = true) }
+    }
+
     // ---------------- the user's boxes ----------------
 
     fun userBoxes(): List<String> = user.keys.toList()
@@ -122,7 +134,7 @@ object Boxes {
 
     fun newBox(ctx: Context, name: String): Boolean {
         val n = name.trim()
-        if (n.isEmpty() || user.containsKey(n)) return false
+        if (n.isEmpty() || user.containsKey(n) || reserved(ctx, n)) return false
         user[n] = LinkedHashSet()
         saveBoxes(ctx)
         return true
@@ -130,7 +142,7 @@ object Boxes {
 
     fun renameBox(ctx: Context, old: String, new: String): Boolean {
         val n = new.trim()
-        if (n.isEmpty() || (n != old && user.containsKey(n))) return false
+        if (n.isEmpty() || (n != old && (user.containsKey(n) || reserved(ctx, n)))) return false
         val m = LinkedHashMap<String, LinkedHashSet<String>>()
         for ((k, v) in user) m[if (k == old) n else k] = v
         user.clear(); user.putAll(m)
@@ -168,6 +180,7 @@ object Boxes {
         val n = name.trim()
         if (n.isEmpty()) return false
         val k = kit(n)
+        if (k == null && reserved(ctx, n)) return false       // (a kit that already has such a name can still be saved)
         if (k != null) for (i in 0 until SLOTS) k.slots[i] = slots.getOrElse(i) { "" }
         else kits.add(Kit(n, Array(SLOTS) { slots.getOrElse(it) { "" } }))
         saveKits(ctx)

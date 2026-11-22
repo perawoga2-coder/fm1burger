@@ -405,7 +405,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         AlertDialog.Builder(a).setTitle("New box").setView(edit)
             .setPositiveButton("Make") { _, _ ->
                 val n = edit.text.toString().trim()
-                if (!Boxes.newBox(a, n)) ui.toast("That name is empty or already a box")
+                if (!Boxes.newBox(a, n)) ui.toast("That name is empty, already a box, or the name of a ready-made box")
                 else { then?.invoke(n); refresh() }
             }
             .setNegativeButton("Cancel", null).show()
@@ -419,7 +419,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
                     edit.setText(name)
                     AlertDialog.Builder(a).setTitle("Rename the box").setView(edit)
                         .setPositiveButton("OK") { _, _ ->
-                            if (!Boxes.renameBox(a, name, edit.text.toString())) ui.toast("That name is empty or already a box")
+                            if (!Boxes.renameBox(a, name, edit.text.toString())) ui.toast("That name is empty, already a box, or the name of a ready-made box")
                             else { if (box == name) box = edit.text.toString().trim(); refresh() }
                         }
                         .setNegativeButton("Cancel", null).show()
@@ -524,6 +524,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
                 } else {
                     a.renameRefs(f.name, nf.name)
                     Boxes.rename(a, f.name, nf.name)
+                    DrumEdit.renameSound(a.filesDir, f.name, nf.name)
                     if (sel == f) sel = nf
                     refresh()
                 }
@@ -538,6 +539,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
             .setMessage("Delete ${f.name}? This cannot be undone.")
             .setPositiveButton("Delete") { _, _ ->
                 store.delete(f)
+                DrumEdit.deleteNote(a.filesDir, f.name)
                 refresh()
             }
             .setNegativeButton("Cancel", null)

@@ -33,7 +33,7 @@ interface RollModel {
 }
 
 /**
- * A piano roll of one bar (the bar the bar buttons show): pitch rows against 16 steps.
+ * A piano roll of one bar (the bar the bar buttons show): pitch rows against the steps of the meter's bar (16 in 4/4).
  * Tap an empty cell: a note (the bassline: it replaces the note of that step; the synth: chords are fine). Tap a note: it goes away.
  * Drag a note sideways: its length (analog synth). Hold a note: accent / slide (bassline).
  */
@@ -83,7 +83,7 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
 
     private fun isBlack(n: Int): Boolean = NAMES[((n % 12) + 12) % 12].contains('#')
     private fun rowH(): Float = height.toFloat() / ROWS
-    private fun colW(): Float = (width - keyW) / Pat.BAR
+    private fun colW(): Float = (width - keyW) / Pat.spb()
     private fun rowOf(n: Int): Int = ROWS - 1 - (n - low)
 
     override fun onDraw(c: Canvas) {
@@ -109,11 +109,11 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
                 c.drawText(noteName(n), 4f * density, y + rh * 0.75f, p)
             }
             // the lane
-            for (k in 0 until Pat.BAR) {
+            for (k in 0 until Pat.spb()) {
                 p.color = when {
                     !inRange -> Theme.BG
-                    isBlack(n) -> if ((k / 4) % 2 == 0) Theme.PANEL else Color.parseColor("#17171D")
-                    else -> if ((k / 4) % 2 == 0) Theme.PANEL2 else Theme.PANEL
+                    isBlack(n) -> if (Pat.beatOf(k) % 2 == 0) Theme.PANEL else Color.parseColor("#17171D")
+                    else -> if (Pat.beatOf(k) % 2 == 0) Theme.PANEL2 else Theme.PANEL
                 }
                 c.drawRect(keyW + k * cw + 0.75f, y + 0.75f, keyW + (k + 1) * cw - 0.75f, y + rh - 0.75f, p)
             }
@@ -124,12 +124,12 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
         }
         val base = Pat.base()
         // notes
-        for (k in 0 until Pat.BAR) {
+        for (k in 0 until Pat.spb()) {
           val s = base + k
           for (n in model.lowest..model.highest) {
             val l0 = model.lenAt(s, n)
             if (l0 <= 0) continue
-            val len = if (model.canLength) l0.coerceIn(1, Pat.BAR - k) else 1
+            val len = if (model.canLength) l0.coerceIn(1, Pat.spb() - k) else 1
             val f = model.flags(s)
             val col = when {
                 f and 1 != 0 -> Theme.YELLOW
@@ -160,7 +160,7 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
           }
         }
         val ps = playStep - base
-        if (ps in 0 until Pat.BAR) {
+        if (ps in 0 until Pat.spb()) {
             p.color = Color.argb(55, 255, 255, 255)
             c.drawRect(keyW + ps * cw, 0f, keyW + (ps + 1) * cw, h, p)
         }
@@ -180,7 +180,7 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
                     downStep = -1
                     return true
                 }
-                val col = ((e.x - keyW) / cw).toInt().coerceIn(0, Pat.BAR - 1)
+                val col = ((e.x - keyW) / cw).toInt().coerceIn(0, Pat.spb() - 1)
                 val s = Pat.base() + col
                 downCol = col
                 downStep = s
@@ -203,12 +203,12 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
             MotionEvent.ACTION_MOVE -> {
                 val s = downStep
                 if (s < 0) return true
-                val col = ((e.x - keyW) / cw).toInt().coerceIn(0, Pat.BAR - 1)
+                val col = ((e.x - keyW) / cw).toInt().coerceIn(0, Pat.spb() - 1)
                 if (col != downCol) {
                     moved = true
                     hnd.removeCallbacks(longPress)
                     if (model.canLength && model.lenAt(s, downNote) > 0) {
-                        val l = (col - (s - Pat.base()) + 1).coerceIn(1, Pat.BAR)
+                        val l = (col - (s - Pat.base()) + 1).coerceIn(1, Pat.spb())
                         if (l != model.lenAt(s, downNote)) {
                             model.setLength(s, downNote, l)
                             model.changed()

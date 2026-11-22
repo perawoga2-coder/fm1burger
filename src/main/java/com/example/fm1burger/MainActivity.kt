@@ -616,7 +616,7 @@ class MainActivity : Activity() {
             val made = try {
                 MakerBank.install(
                     this, store,
-                    busy = { engine.playing },
+                    busy = { engine.playing || Live.busy() },      // (also while pads or keys are played by hand)
                     progress = { done, total ->
                         if (done == 0 || (done % 25 == 0 && done < total)) {
                             runOnUiThread {
@@ -1018,12 +1018,48 @@ class MainActivity : Activity() {
     fun setMeter(m: Int) {
         if (m == Pat.meter) return
         val nb = Pat.bars()
+        moveBars(Pat.slot(), Pat.slotOf(m), nb)
         Pat.meter = m
         val ls = Pat.lengths()
         Pat.len = ls.lastOrNull { it / Pat.slot() <= nb } ?: ls[0]
         if (Pat.view >= Pat.bars()) Pat.view = 0
         ui.toast("Meter ${Pat.METERS[m]}: ${Pat.spb()} steps a bar. Steps past the bar are kept (back to a longer meter: they play again).")
         refreshCurrent()
+    }
+
+    /**
+     * The meter's bar slot changes size (16 <-> 32 steps) and the pattern has 2 bars or more: every bar's steps go to
+     * where the bar is stored now (bar b: from b * oldSlot to b * newSlot), in every sequencer. Bar 1 stays.
+     */
+    private fun moveBars(oldSlot: Int, newSlot: Int, bars: Int) {
+        if (oldSlot == newSlot || bars < 2) return
+        val e = engine
+        Pat.moveBars(oldSlot, newSlot, bars) { from, to ->
+            for (t in e.tracks) {
+                val a = t.steps[from]
+                val b = t.steps[to]
+                b.on = a.on
+                b.pitch = a.pitch
+                b.level = a.level
+            }
+            for (p in e.pads) {
+                p.on[to] = p.on[from]
+                p.lvl[to] = p.lvl[from]
+            }
+            val bs = e.bass
+            bs.on[to] = bs.on[from]
+            bs.note[to] = bs.note[from]
+            bs.accent[to] = bs.accent[from]
+            bs.slide[to] = bs.slide[from]
+            e.analogSeq.copyStep(from, to)
+            for (g in arrayOf(e.rhythmGtr, e.riffGtr)) {
+                g.art[to] = g.art[from]
+                g.fret[to] = g.fret[from]
+            }
+            e.ambient.steps[to] = e.ambient.steps[from]
+            for (ps in e.bank.parts) ps.moveStep(from, to)
+            e.auto.moveStep(from, to)
+        }
     }
 
     fun setPatternLength(n: Int) {
@@ -1676,6 +1712,35 @@ class MainActivity : Activity() {
             val d = store.loadEngine(f.name)
             runOnUiThread {
                 if (d == null) ui.toast("Cannot read ${f.name}") else engine.setPad(i, f.name, d)
+                refreshCurrent()
+            }
+        }.start()
+    }
+
+    /**
+     * Several pads at once (a kit): pad idx[n] gets files[n] (null empties it). One background thread reads all the
+     * files, then the pads are set on the UI thread and the page is shown once.
+     */
+    fun assignPads(idx: IntArray, files: List<File?>) {
+        val n = minOf(idx.size, files.size)
+        Thread {
+            val data = arrayOfNulls<FloatArray>(n)
+            for (j in 0 until n) {
+                val f = files[j] ?: continue
+                data[j] = try { store.loadEngine(f.name) } catch (ex: Exception) { null }
+            }
+            runOnUiThread {
+                var bad: String? = null
+                for (j in 0 until n) {
+                    val i = idx[j]
+                    if (i !in 0 until Cfg.PADS) continue
+                    val f = files[j]
+                    val d = data[j]
+                    if (f == null) engine.setPad(i, "", null)
+                    else if (d == null) bad = f.name
+                    else engine.setPad(i, f.name, d)
+                }
+                if (bad != null) ui.toast("Cannot read $bad")
                 refreshCurrent()
             }
         }.start()

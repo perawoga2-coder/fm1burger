@@ -55,7 +55,7 @@ object MidiExport {
         } else {
             secs.add(Section(live, Pat.bars()))
         }
-        val len = Pat.len.coerceIn(Pat.BAR, Cfg.STEPS)
+        val spb = Pat.spb()                          // (3.28: a bar is spb 16ths; the played steps, bar after bar)
 
         val drums = Trk("Drums")
         val samp = Array(Cfg.TRACKS) { Trk("Sampler ${it + 1}" + (e.tracks[it].sampleName.let { n -> if (n.isEmpty()) "" else " ($n)" })) }
@@ -68,9 +68,9 @@ object MidiExport {
         var at = 0                                   // tick of the section start
         for (sec in secs) {
             val sn = sec.snap
-            val steps = sec.bars * Pat.BAR
+            val steps = sec.bars * spb
             for (k in 0 until steps) {
-                val s = k % len
+                val s = Pat.stepAt(k)
                 val t = at + k * T16
                 // drums
                 for (r in 0 until Cfg.PADS) {
@@ -82,14 +82,14 @@ object MidiExport {
                     val tr = e.tracks[i]
                     if (sn.tMute[i] || tr.sampleName.isEmpty()) continue
                     if (tr.loop) {
-                        if (k % Pat.BAR == 0) samp[i].note(i, 60 + tr.pitch, 100, t, Pat.BAR * T16)
+                        if (k % spb == 0) samp[i].note(i, 60 + tr.pitch, 100, t, spb * T16)
                     } else if (sn.tOn[i][s]) {
                         samp[i].note(i, 60 + tr.pitch + sn.tPitch[i][s], (sn.tLvl[i][s] * 120).roundToInt(), t, T16)
                     }
                 }
                 // bassline: slide = the note holds into the next one
                 if (!sn.bMute && sn.bOn[s]) {
-                    val nx = (s + 1) % len
+                    val nx = Pat.stepAt(k + 1)
                     val held = sn.bOn[nx] && sn.bSlide[nx]
                     bass.note(5, bassRoot + sn.bNote[s], if (sn.bAcc[s]) 120 else 90, t, if (held) T16 + T16 / 4 else T16 * 3 / 5)
                 }
@@ -113,12 +113,12 @@ object MidiExport {
             var k = 0
             val steps = total / T16
             while (k < steps) {
-                val s = k % len
+                val s = Pat.stepAt(k)
                 val art = g.art[s]
                 if (art == MetalGuitar.CHUG || art == MetalGuitar.OPEN) {
                     var l = 1
                     if (art == MetalGuitar.OPEN) {
-                        while (k + l < steps && g.art[(k + l) % len] == MetalGuitar.HOLD) l++
+                        while (k + l < steps && g.art[Pat.stepAt(k + l)] == MetalGuitar.HOLD) l++
                     }
                     gtr[gi].note(7 + gi, (root.roundToInt() + g.fret[s] + oct), if (art == MetalGuitar.CHUG) 100 else 115, k * T16,
                         if (art == MetalGuitar.CHUG) T16 / 2 else l * T16)

@@ -328,5 +328,51 @@ object DrumEdit {
         for ((key, v) in n.knobs) k.put(key, v)
         o.put("knobs", k)
         noteFile(dir, name).writeText(o.toString())
+        hasCache.remove(name)
+    }
+
+    /** name -> "it has a note" (the drum sequencer asks for every row each time it is shown: no disk read then) */
+    private val hasCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    /** true when the sound is an edited one (it has a note); remembered, every change of a note goes through here */
+    fun hasNote(dir: File, name: String): Boolean {
+        val c = hasCache[name]
+        if (c != null) return c
+        val h = readNote(dir, name) != null
+        hasCache[name] = h
+        return h
+    }
+
+    /** the sound was deleted from the Maker Bank: its note goes too */
+    fun deleteNote(dir: File, name: String) {
+        try { noteFile(dir, name).delete() } catch (e: Exception) { }
+        hasCache.remove(name)
+    }
+
+    /**
+     * The sound was renamed in the Maker Bank ([old] -> [new], file names): its note follows it, and the notes of the
+     * edits made from it point at the new name (not for the kit's own sounds made in code: their recipe goes by name).
+     */
+    fun renameSound(dir: File, old: String, new: String) {
+        try {
+            val f = noteFile(dir, old)
+            if (f.exists()) {
+                val t = noteFile(dir, new)
+                t.delete()
+                if (!f.renameTo(t)) { t.writeText(f.readText()); f.delete() }
+            }
+            if (kitName(old) == null) {
+                val list = File(dir, "drumedit").listFiles()
+                if (list != null) for (nf in list) {
+                    if (!nf.name.endsWith(".json")) continue
+                    val name = nf.name.removeSuffix(".json")
+                    val n = readNote(dir, name) ?: continue
+                    if (n.src == old) writeNote(dir, name, Note(new, n.knobs))
+                }
+            }
+        } catch (e: Exception) {
+        }
+        hasCache.remove(old)
+        hasCache.remove(new)
     }
 }

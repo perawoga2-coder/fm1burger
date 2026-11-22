@@ -23,6 +23,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
     private val content = ui.col()
     private val kindBtns = ArrayList<Button>()
     private val stepBtns = ArrayList<Button>()
+    private val barCells = BarCells(ui, stepBtns, 40, 2, 3, true)
     private lateinit var about: TextView
     private lateinit var freeBtn: Button
     private lateinit var muteBtn: Button
@@ -91,7 +92,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
         tr.addView(muteBtn, ui.w(0.8f, 3))
         content.addView(tr, ui.fullWidth(10))
         content.addView(prep.view, ui.fullWidth(6))
-        prep.onPage = { if (stepBtns.size == Pat.BAR) paintSteps(true) }
+        prep.onPage = { if (stepBtns.size == BarCells.MAX) paintSteps(true) }
 
         // how it lives
         val p = ui.panel()
@@ -134,31 +135,25 @@ class AmbientScreen(private val a: MainActivity) : Screen {
         // steps
         val sp = ui.panel()
         sp.addView(ui.text("Steps (while the sequencer plays)", 14f, Theme.ACCENT, true))
-        for (half in 0 until 2) {
-            val r = ui.row()
-            for (c in 0 until 8) {
-                val s = half * 8 + c
-                val b = ui.button("${s + 1}") {
-                    val st = Pat.base() + s
-                    amb.steps[st] = !amb.steps[st]
-                    paintSteps(true)
-                }
-                b.textSize = 11f
-                b.setPadding(0, 0, 0, 0)
-                stepBtns.add(b)
-                r.addView(b, LinearLayout.LayoutParams(0, ui.dp(40), 1f).also {
-                    it.setMargins(ui.dp(2), ui.dp(3), if (c == 3) ui.dp(8) else ui.dp(2), ui.dp(3))
-                })
+        // (3.28: as many steps as the meter's bar; BarCells puts them in rows)
+        for (s in 0 until BarCells.MAX) {
+            val b = ui.button("${s + 1}") {
+                val st = Pat.base() + s
+                amb.steps[st] = !amb.steps[st]
+                paintSteps(true)
             }
-            sp.addView(r)
+            b.textSize = 11f
+            b.setPadding(0, 0, 0, 0)
+            stepBtns.add(b)
         }
+        sp.addView(barCells.box)
         val sr = ui.row()
         sr.addView(ui.button("Clear") {
             for (i in 0 until Cfg.STEPS) amb.steps[i] = false
             paintSteps(true)
         }, ui.w(1f, 3))
         sr.addView(ui.button("Every bar") {
-            for (i in 0 until Cfg.STEPS) amb.steps[i] = i % Pat.BAR == 0
+            for (i in 0 until Cfg.STEPS) amb.steps[i] = i % Pat.slot() == 0
             paintSteps(true)
         }, ui.w(1f, 3))
         sr.addView(ui.button("Every beat") {
@@ -184,7 +179,8 @@ class AmbientScreen(private val a: MainActivity) : Screen {
         playStep = ps
         val col = Inst.color(Inst.AMBIENT)
         val base = Pat.base()
-        for (c in 0 until Pat.BAR) {
+        barCells.layout()
+        for (c in 0 until Pat.spb()) {
             val s = base + c
             val b = stepBtns[c]
             b.text = "${s + 1}"

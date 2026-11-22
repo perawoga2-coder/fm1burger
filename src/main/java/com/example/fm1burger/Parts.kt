@@ -73,6 +73,19 @@ class PartSnap {
         }
     }
 
+    /** The meter's bar slot changed size: step [j] goes to step [k] (see MainActivity.moveBars). */
+    fun moveStep(j: Int, k: Int) {
+        if (j !in 0 until Cfg.STEPS || k !in 0 until Cfg.STEPS) return
+        for (i in 0 until Cfg.TRACKS) {
+            tOn[i][k] = tOn[i][j]; tPitch[i][k] = tPitch[i][j]; tLvl[i][k] = tLvl[i][j]
+        }
+        for (i in 0 until Cfg.PADS) {
+            pOn[i][k] = pOn[i][j]; pLvl[i][k] = pLvl[i][j]
+        }
+        bOn[k] = bOn[j]; bNote[k] = bNote[j]; bAcc[k] = bAcc[j]; bSlide[k] = bSlide[j]
+        System.arraycopy(aGrid, j * AnalogSeq.NOTES, aGrid, k * AnalogSeq.NOTES, AnalogSeq.NOTES)
+    }
+
     /** Copy the live patterns of the engine into this part. */
     fun capture(e: Engine) {
         for (i in 0 until Cfg.TRACKS) {
@@ -430,7 +443,7 @@ class PartBank(private val e: Engine) {
         return p.mode == 1 && p.hasClip() && (songOn || layerOn[cur])
     }
 
-    private fun barFrames(bpm: Double): Double = Cfg.SR * 60.0 * 4.0 / bpm
+    private fun barFrames(bpm: Double): Double = Pat.barFrames(bpm)      // (3.28: a bar of the meter)
 
     /** Audio thread, at the first step of every bar (also the very first bar). [f] = frame in this block. */
     fun barStart(f: Int, first: Boolean) {
@@ -496,7 +509,7 @@ class PartBank(private val e: Engine) {
         val c = p.clip
         if (songOn && c != null && p.clipBars > 0 && p.mode != 0) {
             clipData = c
-            clipPos = (s * barFrames(bpm) / Pat.BAR).toInt()
+            clipPos = (s * barFrames(bpm) / Pat.spb()).toInt()
         } else {
             clipData = null
         }

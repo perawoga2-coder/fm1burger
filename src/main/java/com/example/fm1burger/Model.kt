@@ -37,6 +37,12 @@ object Pat {
     fun spb(): Int = SPB[meter.coerceIn(0, SPB.size - 1)]
     fun spbOf(m: Int): Int = SPB[m.coerceIn(0, SPB.size - 1)]
     fun slot(): Int = if (spb() > BAR) 2 * BAR else BAR
+    /** the slot of meter m (see slot()) */
+    fun slotOf(m: Int): Int = if (spbOf(m) > BAR) 2 * BAR else BAR
+    /** audio frames (as a real number) in one bar of the meter at this tempo: a 16th is SR * 15 / bpm frames */
+    fun barFrames(bpm: Double): Double = Cfg.SR * 15.0 / bpm * spb()
+    /** seconds in one bar of the meter at this tempo */
+    fun barSeconds(bpm: Double): Double = 15.0 / bpm * spb()
     /** a beat of the meter starts at step i of the bar (the keys show a mark) */
     fun accent(i: Int): Boolean = i in ACC[meter.coerceIn(0, ACC.size - 1)]
     /** which beat step i of the bar is in (0, 1, 2 ...: the editors shade every other beat) */
@@ -44,9 +50,44 @@ object Pat {
     /** the pattern lengths this meter allows (in stored steps): 1, 2, 4 bars that fit the 64 steps */
     fun lengths(): IntArray = intArrayOf(1, 2, 4).map { it * slot() }.filter { it <= Cfg.STEPS }.toIntArray()
     /** the steps the pattern plays */
-    fun playLen(): Int = bars() * spb()
-    /** pattern position p (0 .. playLen) -> the stored step */
-    fun stepAt(p: Int): Int { val q = Math.floorMod(p, playLen()); return q / spb() * slot() + q % spb() }
+    fun playLen(): Int {
+        // (meter and len are read once: another thread may change them meanwhile)
+        val sp = spb()
+        val sl = if (sp > BAR) 2 * BAR else BAR
+        return maxOf(1, len / sl) * sp
+    }
+    /** pattern position p (0 .. playLen) -> the stored step (always inside 0 .. Cfg.STEPS - 1) */
+    fun stepAt(p: Int): Int {
+        val sp = spb()
+        val sl = if (sp > BAR) 2 * BAR else BAR
+        val q = Math.floorMod(p, maxOf(1, len / sl) * sp)
+        return (q / sp * sl + q % sp).coerceIn(0, Cfg.STEPS - 1)
+    }
+    /** the step played after stored step s: the next one of its bar, or the first step of the next bar (wrapping) */
+    fun nextStep(s: Int): Int {
+        val sp = spb()
+        val sl = if (sp > BAR) 2 * BAR else BAR
+        val nb = maxOf(1, len / sl)
+        val i = s % sl
+        val r = if (i + 1 < sp) s + 1 else ((s / sl + 1) % nb) * sl
+        return r.coerceIn(0, Cfg.STEPS - 1)
+    }
+
+    /**
+     * The bar slot changes from [oldSlot] to [newSlot] steps: calls [mv] (from, to) for every step of bars 2.. that
+     * moves (bar b: b * oldSlot -> b * newSlot, the steps both slots hold), in an order that overwrites nothing still
+     * to be moved (growing: the last bar first; shrinking: the first). Only bars that fit the 64 steps both ways.
+     */
+    fun moveBars(oldSlot: Int, newSlot: Int, bars: Int, mv: (Int, Int) -> Unit) {
+        if (oldSlot == newSlot || oldSlot <= 0 || newSlot <= 0) return
+        val n = minOf(oldSlot, newSlot)
+        val nb = minOf(bars, Cfg.STEPS / oldSlot, Cfg.STEPS / newSlot)
+        if (newSlot > oldSlot) {
+            for (b in nb - 1 downTo 1) for (i in n - 1 downTo 0) mv(b * oldSlot + i, b * newSlot + i)
+        } else {
+            for (b in 1 until nb) for (i in 0 until n) mv(b * oldSlot + i, b * newSlot + i)
+        }
+    }
 
     fun bars(): Int = maxOf(1, len / slot())
     fun viewBar(): Int = view.coerceIn(0, bars() - 1)
@@ -143,4 +184,11 @@ class PadVoice {
     // volume and mute of this drum row
     @Volatile var volume = 1f
     @Volatile var mute = false
+}
+
+/** 3.33: when a note was last played by hand (pads, keys, keyboard): heavy background work waits a little after it. */
+object Live {
+    @Volatile var lastNoteMs = 0L
+    fun touch() { lastNoteMs = android.os.SystemClock.uptimeMillis() }
+    fun busy(): Boolean = android.os.SystemClock.uptimeMillis() - lastNoteMs < 3000L
 }

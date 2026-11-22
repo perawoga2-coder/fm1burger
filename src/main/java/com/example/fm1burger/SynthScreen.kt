@@ -33,6 +33,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
     private lateinit var bassTab: Button
     private lateinit var anaTab: Button
     private val cells = ArrayList<Button>()
+    private val barCells = BarCells(ui, cells, 56, 2, 2, false, 2)
     private val refreshers = ArrayList<() -> Unit>()
     private var mode = 0
     private val voiceBtns = ArrayList<Button>()
@@ -196,25 +197,19 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         }, ui.w(1f, 3))
         bassBox.addView(kr, ui.fullWidth(6))
 
-        for (rr in 0 until 2) {
-            val row = ui.row()
-            for (c in 0 until 8) {
-                val i = rr * 8 + c
-                val b = Button(a)
-                b.isAllCaps = false
-                b.textSize = 14f
-                b.minHeight = 0
-                b.minWidth = 0
-                b.setPadding(0, 0, 0, 0)
-                b.setOnClickListener { tapStep(Pat.base() + i) }
-                b.setOnLongClickListener { pickStep(Pat.base() + i); true }
-                cells.add(b)
-                val lp = LinearLayout.LayoutParams(0, ui.dp(56), 1f)
-                lp.setMargins(ui.dp(2), ui.dp(2), ui.dp(2), ui.dp(2))
-                row.addView(b, lp)
-            }
-            bassBox.addView(row, ui.fullWidth(2))
+        // (3.28: as many steps as the meter's bar; BarCells puts them in rows)
+        for (i in 0 until BarCells.MAX) {
+            val b = Button(a)
+            b.isAllCaps = false
+            b.textSize = 14f
+            b.minHeight = 0
+            b.minWidth = 0
+            b.setPadding(0, 0, 0, 0)
+            b.setOnClickListener { tapStep(Pat.base() + i) }
+            b.setOnLongClickListener { pickStep(Pat.base() + i); true }
+            cells.add(b)
         }
+        bassBox.addView(barCells.box)
 
         editInfo = ui.text("", 13f, Theme.TEXT, true)
         bassBox.addView(editInfo, ui.fullWidth(8))
@@ -408,12 +403,12 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
     }
 
     private fun paint(c: Int) {
-        if (c !in 0 until Pat.BAR) return
+        if (c !in 0 until Pat.spb()) return
         val b = cells[c]
         val i = Pat.base() + c
         val base = if (bs.on[i]) {
             Theme.ACCENT
-        } else if ((i / 4) % 2 == 0) {
+        } else if (Pat.beatOf(c) % 2 == 0) {
             Theme.PANEL2
         } else {
             Theme.PANEL
@@ -433,7 +428,8 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         ui.styleButton(sawBtn, bs.saw)
         ui.styleButton(sqBtn, !bs.saw)
         ui.styleButton(bMuteBtn, bs.mute, Theme.RED)
-        for (i in 0 until Pat.BAR) paint(i)
+        barCells.layout()
+        for (i in 0 until Pat.spb()) paint(i)
         if (::bassRoll.isInitialized) {
             bassRoll.roll.low = bs.rootMidi()
             bassRoll.roll.selStep = selStep

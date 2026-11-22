@@ -114,7 +114,7 @@ class Bassline {
             freq = f
             fenv = if (acc) 1.0 + accentAmt * 0.8 else 1.0
         }
-        val next = (s + 1) % Pat.len.coerceIn(Pat.BAR, Cfg.STEPS)
+        val next = Pat.nextStep(s)          // (the next PLAYED step: the meter may skip the rest of a bar slot)
         val hold = on[next] && slide[next]
         gateLeft = (stepLen * (if (hold) 1.1 else 0.6)).toInt()
     }
@@ -261,6 +261,7 @@ class AnalogSynth {
     }
 
     fun noteOn(n: Int) {
+        Live.touch()
         events.add(n)
     }
 

@@ -40,6 +40,8 @@ object MakerBank {
      * @param progress called on the calling thread, first with (0, total) when there is work to do, then after each
      *                 sound; total counts only the sounds that were missing
      * @param cancel   asked before each sound: true stops the install (it goes on at the next start)
+     * @param only     when given, only the sounds it accepts are installed (it gets the Maker Bank file name,
+     *                 "Studio Kit Kick.wav"); such a partial run never marks the bank as installed
      */
     fun install(
         ctx: Context,
@@ -47,7 +49,8 @@ object MakerBank {
         force: Boolean = false,
         busy: (() -> Boolean)? = null,
         progress: ((done: Int, total: Int) -> Unit)? = null,
-        cancel: (() -> Boolean)? = null
+        cancel: (() -> Boolean)? = null,
+        only: ((String) -> Boolean)? = null
     ): Int {
         val prefs = ctx.getSharedPreferences("makerbank", Context.MODE_PRIVATE)
         if (!force && prefs.getInt("v", 0) >= VERSION) return -1
@@ -65,6 +68,7 @@ object MakerBank {
         val todo = ArrayList<String>()
         for (n in names) {
             if (!n.endsWith(".flac")) continue
+            if (only != null && !only(n.removeSuffix(".flac") + ".wav")) continue
             if (!File(store.dir, n.removeSuffix(".flac") + ".wav").exists()) todo.add(n)
         }
         val total = todo.size
@@ -113,7 +117,11 @@ object MakerBank {
                 }
             }
         }
-        prefs.edit().putInt("v", VERSION).apply()
+        // the bank is done only when the whole of it was looked at and every sound that was missing is there now
+        // (a sound that could not be decoded or written is tried again at the next start)
+        if (only == null && todo.all { File(store.dir, it.removeSuffix(".flac") + ".wav").exists() }) {
+            prefs.edit().putInt("v", VERSION).apply()
+        }
         return made
     }
 

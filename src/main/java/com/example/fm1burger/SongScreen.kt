@@ -407,7 +407,7 @@ class SongScreen(private val a: MainActivity) : Screen {
         }
         val cp = bank.parts[cur]
         if (cp.hasClip()) {
-            val secs = cp.clipBars * 4 * 60.0 / e.bpmF
+            val secs = cp.clipBars * Pat.barSeconds(e.bpmF)
             recInfo.text = String.format(
                 Locale.US, "%s has a recording: %d bars (%.1f s at BPM %d). It plays: %s.",
                 PartNames.NAMES[cur], cp.clipBars, secs, e.bpm, PartBank.MODE_NAMES[cp.mode]
@@ -432,7 +432,7 @@ class SongScreen(private val a: MainActivity) : Screen {
             (if (bank.songOn) "   (song mode is on, tapping a part switches it off)" else "")
 
         val total = bank.songTotalBars()
-        val secs = (total * 4 * 60.0 / e.bpmF).toInt()
+        val secs = (total * Pat.barSeconds(e.bpmF)).toInt()
         songInfo.text = if (bank.songLen == 0) {
             "No parts in the song yet."
         } else {

@@ -131,7 +131,7 @@ class SoundPicker(private val a: MainActivity, private val lane: Int) {
             .setView(root)
             .setNegativeButton("Close", null)
             .create()
-        d.setOnDismissListener { if (!put) a.engine.previewStop() }
+        d.setOnDismissListener { previewGen++; if (!put) a.engine.previewStop() }
         dlg = d
         showGroups()
         paintPicked()
@@ -262,6 +262,7 @@ class SoundPicker(private val a: MainActivity, private val lane: Int) {
 
     /** A tap on a name: it is picked, and plays once. */
     private fun pick(f: File) {
+        previewGen++
         sel = f
         paintRows()
         paintPicked()
@@ -279,10 +280,15 @@ class SoundPicker(private val a: MainActivity, private val lane: Int) {
         ui.styleButton(putBtn, f != null, Theme.GREEN)
     }
 
+    /** counts the picks (and the closing of the window): a sound that finishes loading after a newer one is dropped */
+    private var previewGen = 0
+
     private fun preview(f: File) {
+        val my = previewGen
         Thread {
             val d = store.loadEngine(f.name)
             a.runOnUiThread {
+                if (my != previewGen) return@runOnUiThread
                 if (d == null) ui.toast("Cannot play this file") else a.engine.previewPlay(d)
             }
         }.start()

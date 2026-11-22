@@ -173,7 +173,7 @@ class RecordFlow(private val a: MainActivity) {
             .setPositiveButton("Record") { _, _ ->
                 val dev = devs.getOrNull(src.selectedItemPosition - 1)
                 val bars = intArrayOf(0, 1, 2, 4)[len.selectedItemPosition]
-                val maxSec = if (bars == 0) 60.0 else bars * 4 * 60.0 / a.engine.bpmF
+                val maxSec = if (bars == 0) 60.0 else bars * Pat.barSeconds(a.engine.bpmF)
                 val gate: (() -> Boolean)? =
                     if (wait.isChecked && a.engine.playing) makeBarGate() else null
                 begin(ti, dev, maxSec, gate, auto.isChecked, "Rec", -1, ti < 0)
@@ -232,7 +232,7 @@ class RecordFlow(private val a: MainActivity) {
         var last = a.engine.curStep
         return {
             val c = a.engine.curStep
-            val hit = c >= 0 && c % Pat.BAR == 0 && c != last
+            val hit = c >= 0 && c % Pat.slot() == 0 && c != last
             last = c
             hit
         }
