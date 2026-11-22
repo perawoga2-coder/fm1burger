@@ -27,10 +27,31 @@ object Pat {
     /** The editors jump to the bar that is playing. */
     @Volatile var follow = true
 
-    fun bars(): Int = len / BAR
+    // 3.28 METER: the time signature. A bar is spb() steps (16ths) long; it is stored in a slot of 16 steps (32 for
+    // 5/4 and 12/8), so the steps past a shorter bar are kept, not played, and changing the meter moves no step.
+    val METERS = arrayOf("4/4", "3/4", "2/4", "6/8", "12/8", "5/4", "7/8")
+    private val SPB = intArrayOf(16, 12, 8, 12, 24, 20, 14)
+    private val ACC = arrayOf(intArrayOf(0, 4, 8, 12), intArrayOf(0, 4, 8), intArrayOf(0, 4), intArrayOf(0, 6),
+        intArrayOf(0, 6, 12, 18), intArrayOf(0, 4, 8, 12, 16), intArrayOf(0, 4, 8))
+    @Volatile var meter = 0
+    fun spb(): Int = SPB[meter.coerceIn(0, SPB.size - 1)]
+    fun spbOf(m: Int): Int = SPB[m.coerceIn(0, SPB.size - 1)]
+    fun slot(): Int = if (spb() > BAR) 2 * BAR else BAR
+    /** a beat of the meter starts at step i of the bar (the keys show a mark) */
+    fun accent(i: Int): Boolean = i in ACC[meter.coerceIn(0, ACC.size - 1)]
+    /** which beat step i of the bar is in (0, 1, 2 ...: the editors shade every other beat) */
+    fun beatOf(i: Int): Int = ACC[meter.coerceIn(0, ACC.size - 1)].count { it <= i } - 1
+    /** the pattern lengths this meter allows (in stored steps): 1, 2, 4 bars that fit the 64 steps */
+    fun lengths(): IntArray = intArrayOf(1, 2, 4).map { it * slot() }.filter { it <= Cfg.STEPS }.toIntArray()
+    /** the steps the pattern plays */
+    fun playLen(): Int = bars() * spb()
+    /** pattern position p (0 .. playLen) -> the stored step */
+    fun stepAt(p: Int): Int { val q = Math.floorMod(p, playLen()); return q / spb() * slot() + q % spb() }
+
+    fun bars(): Int = maxOf(1, len / slot())
     fun viewBar(): Int = view.coerceIn(0, bars() - 1)
     /** The first step of the bar shown. */
-    fun base(): Int = viewBar() * BAR
+    fun base(): Int = viewBar() * slot()
 }
 
 class Step {

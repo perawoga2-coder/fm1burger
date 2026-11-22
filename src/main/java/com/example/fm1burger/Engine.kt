@@ -749,7 +749,7 @@ class Engine {
         if (tickCount % 6L == 0L) {
             // b = step inside the bar (parts, cues and songs work in bars),
             // s = step inside the pattern, which can be 1, 2 or 4 bars long
-            val b = ((tickCount / 6L) % Pat.BAR).toInt()
+            val b = ((tickCount / 6L) % Pat.spb()).toInt()       // (3.28: the meter's bar)
             if (tickCount == 0L) patCount = 0L
             if (b == 0) {                                   // 3.19 RESAMPLE armed for bars: it starts on this frame
                 val gp = grabPending
@@ -777,8 +777,7 @@ class Engine {
                 patVersion = v
                 patCount = b.toLong()
             }
-            val len = Pat.len.coerceIn(Pat.BAR, Cfg.STEPS)
-            val s = (patCount % len).toInt()
+            val s = Pat.stepAt((patCount % Pat.playLen()).toInt())
             patCount++
             curStep = s
             auto.step(s, true)

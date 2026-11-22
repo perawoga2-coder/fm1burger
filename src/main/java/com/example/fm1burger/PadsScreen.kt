@@ -14,6 +14,7 @@ import android.widget.SeekBar
  * Every row has its own mute button and volume. Play / Pause / Stop are on this page too.
  */
 class PadsScreen(private val a: MainActivity) : Screen {
+    companion object { const val MAXB = 24 }
 
     private val ui = a.ui
     private val e = a.engine
@@ -25,7 +26,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private var editing = -1                      // the row whose "e" is open (red)
     private val muteBtns = ArrayList<Button>()
     private val volBars = ArrayList<SeekBar>()
-    private val cells = Array(Cfg.PAD_BANK) { arrayOfNulls<View>(Pat.BAR) }
+    private val cells = Array(Cfg.PAD_BANK) { arrayOfNulls<View>(MAXB) }   // (3.28: up to a 12/8 bar; the meter shows spb of them)
+    private var cellMeter = -1
     /** The bank shown: 0 = A (pads 1-16), 1 = B. Rows and pads on screen are the 16 of this bank. */
     private var bank = 0
     private val bankBtns = ArrayList<Button>()
@@ -233,16 +235,14 @@ class PadsScreen(private val a: MainActivity) : Screen {
         editBtns.add(eb)
         row.addView(eb, LinearLayout.LayoutParams(ui.dp(30), ui.dp(46)).also { it.marginStart = ui.dp(2) })
 
-        for (s in 0 until Pat.BAR) {
+        for (s in 0 until MAXB) {
             val v = View(a)
             v.setOnClickListener { cycle(r, Pat.base() + s) }
             v.setOnLongClickListener { level(r, Pat.base() + s); true }
             val lp = LinearLayout.LayoutParams(0, ui.dp(46), 1f)
-            val gap = if (s % 4 == 3 && s < Pat.BAR - 1) ui.dp(6) else ui.dp(1)
-            lp.setMargins(ui.dp(1), ui.dp(2), gap, ui.dp(2))
+            lp.setMargins(ui.dp(1), ui.dp(2), ui.dp(1), ui.dp(2))
             row.addView(v, lp)
             cells[r][s] = v
-            paint(r, s)
         }
 
         val mb = Button(a)
@@ -298,12 +298,12 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
     /** [c] = column 0..15 of the bar shown. */
     private fun paint(r: Int, c: Int) {
-        if (c !in 0 until Pat.BAR) return
+        if (c !in 0 until Pat.spb()) return
         val s = Pat.base() + c
         val p = e.pads[pi(r)]
         val base = if (p.on[s]) {
             alphaColor(Theme.ACCENT, (70 + 185 * p.lvl[s]).toInt())
-        } else if ((s / 4) % 2 == 0) {
+        } else if (Pat.beatOf(c) % 2 == 0) {
             Theme.PANEL2
         } else {
             Theme.PANEL
@@ -337,7 +337,22 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     private fun repaintAll() {
-        for (r in 0 until Cfg.PAD_BANK) for (c in 0 until Pat.BAR) paint(r, c)
+        layoutCells()
+        for (r in 0 until Cfg.PAD_BANK) for (c in 0 until Pat.spb()) paint(r, c)
+    }
+
+    /** 3.28: the meter's bar: spb cells, a gap where each beat ends */
+    private fun layoutCells() {
+        if (cellMeter == Pat.meter) return
+        cellMeter = Pat.meter
+        val n = Pat.spb()
+        for (r in 0 until Cfg.PAD_BANK) for (c in 0 until MAXB) {
+            val v = cells[r][c] ?: continue
+            v.visibility = if (c < n) View.VISIBLE else View.GONE
+            val lp = v.layoutParams as LinearLayout.LayoutParams
+            lp.rightMargin = if (c < n - 1 && Pat.accent(c + 1)) ui.dp(6) else ui.dp(1)
+            v.layoutParams = lp
+        }
     }
 
     private fun bankPads(): List<PadVoice> = (0 until Cfg.PAD_BANK).map { e.pads[pi(it)] }

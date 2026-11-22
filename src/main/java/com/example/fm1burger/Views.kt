@@ -164,17 +164,18 @@ class StepGridView(ctx: Context) : View(ctx) {
         if (w <= 0f || h <= 0f) return
         val t = track
         val base = Pat.base()
-        val cw = w / Pat.BAR
+        val nb = Pat.spb()                                   // (3.28: the meter's bar)
+        val cw = w / nb
         val gh = gridH()
         val rh = gh / ROWS
         paint.style = Paint.Style.FILL
         paint.color = Theme.BG
         c.drawRect(0f, 0f, w, h, paint)
         for (r in 0 until ROWS) {
-            for (s in 0 until Pat.BAR) {
+            for (s in 0 until nb) {
                 paint.color = when {
                     r == ROWS / 2 -> Theme.PANEL3
-                    (s / 4) % 2 == 0 -> Theme.PANEL2
+                    Pat.beatOf(s) % 2 == 0 -> Theme.PANEL2
                     else -> Theme.PANEL
                 }
                 c.drawRect(s * cw + 1.5f, r * rh + 1.5f, (s + 1) * cw - 1.5f, (r + 1) * rh - 1.5f, paint)
@@ -183,7 +184,7 @@ class StepGridView(ctx: Context) : View(ctx) {
         val strip = stripTop()
         val sh = h - strip
         if (t != null) {
-            for (s in 0 until Pat.BAR) {
+            for (s in 0 until nb) {
                 val st = t.steps[base + s]
                 if (st.on) {
                     val row = (ROWS / 2 - st.pitch).coerceIn(0, ROWS - 1)
@@ -196,7 +197,7 @@ class StepGridView(ctx: Context) : View(ctx) {
             }
         }
         val ps = playStep - base
-        if (playStep >= 0 && ps in 0 until Pat.BAR) {
+        if (playStep >= 0 && ps in 0 until nb) {
             paint.color = Color.argb(60, 255, 255, 255)
             c.drawRect(ps * cw, 0f, (ps + 1) * cw, h, paint)
         }
@@ -204,8 +205,8 @@ class StepGridView(ctx: Context) : View(ctx) {
 
     private fun apply(x: Float, y: Float, first: Boolean) {
         val t = track ?: return
-        val cw = width.toFloat() / Pat.BAR
-        val s = Pat.base() + (x / cw).toInt().coerceIn(0, Pat.BAR - 1)
+        val cw = width.toFloat() / Pat.spb()
+        val s = Pat.base() + (x / cw).toInt().coerceIn(0, Pat.spb() - 1)
         val gh = gridH()
         if (y < gh) {
             val row = (y / (gh / ROWS)).toInt().coerceIn(0, ROWS - 1)

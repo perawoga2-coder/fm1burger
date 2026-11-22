@@ -30,6 +30,7 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
 
     // pattern length and the bar shown (one setting for every sequencer page)
     private val lenBtn: Button
+    private val meterBtn: Button
     private val barBtns = ArrayList<Button>()
     private val followBtn: Button
     private var pageKey = ""
@@ -55,6 +56,9 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
         lenBtn = ui.button("1 bar") { a.patternLengthDialog() }
         lenBtn.textSize = 12f
         pr.addView(lenBtn, ui.w(1.2f, 2))
+        meterBtn = ui.button("4/4") { a.meterDialog() }
+        meterBtn.textSize = 12f
+        pr.addView(meterBtn, ui.w(0.9f, 2))
         for (k in 0 until 4) {
             val b = ui.button("${k + 1}") {
                 Pat.view = k
@@ -104,15 +108,17 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
     /** Bar buttons, length and Follow. While playing with Follow on, the page shows the bar that plays. */
     fun refreshPage() {
         if (Pat.follow && e.playing && !e.paused && e.curStep >= 0) {
-            val vb = e.curStep / Pat.BAR
+            val vb = e.curStep / Pat.slot()
             if (vb != Pat.view) Pat.view = vb
         }
         val bars = Pat.bars()
         val vb = Pat.viewBar()
-        val key = "${Pat.len}|$vb|${Pat.follow}"
+        val key = "${Pat.len}|$vb|${Pat.follow}|${Pat.meter}"
         if (key == pageKey) return
         pageKey = key
         lenBtn.text = if (bars == 1) "1 bar" else "$bars bars"
+        meterBtn.text = Pat.METERS[Pat.meter]
+        ui.styleButton(meterBtn, Pat.meter != 0, Theme.TEAL)
         ui.styleButton(lenBtn, bars > 1, Theme.TEAL)
         for (k in barBtns.indices) {
             barBtns[k].visibility = if (k < bars) View.VISIBLE else View.INVISIBLE

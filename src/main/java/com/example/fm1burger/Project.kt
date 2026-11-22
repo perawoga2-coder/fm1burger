@@ -117,6 +117,7 @@ class Project(private val a: MainActivity) {
             o.put("mixBits", e.mixRec.bits)
             o.put("clockIdle", e.clockIdle)
             o.put("patLen", Pat.len)
+            o.put("meter", Pat.meter)
             o.put("latencyMode", e.latencyMode)
             o.put("stemsOn", e.stemsOn)
             o.put("auto", e.auto.toJson())
@@ -134,7 +135,8 @@ class Project(private val a: MainActivity) {
             val mb = o.optInt("mixBits", MixRecorder.BITS_24)
             e.mixRec.bits = if (mb == 16 || mb == 24 || mb == 32) mb else MixRecorder.BITS_24
             e.clockIdle = o.optBoolean("clockIdle", true)
-            Pat.len = o.optInt("patLen", Pat.BAR).let { if (it in Pat.LENGTHS) it else Pat.BAR }
+            Pat.meter = o.optInt("meter", 0).coerceIn(0, Pat.METERS.size - 1)
+            Pat.len = o.optInt("patLen", Pat.slot()).let { if (it in Pat.lengths()) it else Pat.slot() }
             Pat.view = 0
             val lm = o.optInt("latencyMode", 1).coerceIn(0, 2)
             if (lm != e.latencyMode) e.latencyMode = lm

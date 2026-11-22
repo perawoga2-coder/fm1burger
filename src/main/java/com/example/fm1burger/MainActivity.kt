@@ -967,16 +967,35 @@ class MainActivity : Activity() {
 
     /** Pattern length for every sequencer: 1, 2 or 4 bars. A longer pattern starts as copies of the bars it has. */
     fun patternLengthDialog() {
-        val items = arrayOf("1 bar (16 steps)", "2 bars (32 steps)", "4 bars (64 steps)")
+        val ls = Pat.lengths()
+        val items = Array(ls.size) { val b = ls[it] / Pat.slot(); "$b bar${if (b > 1) "s" else ""} (${b * Pat.spb()} steps, ${Pat.METERS[Pat.meter]})" }
         AlertDialog.Builder(this)
             .setTitle("Pattern length (now ${Pat.bars()} bar${if (Pat.bars() > 1) "s" else ""})")
-            .setItems(items) { _, w -> setPatternLength(Pat.LENGTHS[w]) }
+            .setItems(items) { _, w -> setPatternLength(ls[w]) }
             .show()
+    }
+
+    /** 3.28 METER: the time signature of every sequencer (no step is moved: a shorter bar keeps the rest) */
+    fun meterDialog() {
+        val items = Array(Pat.METERS.size) { "${Pat.METERS[it]}   (${Pat.spbOf(it)} steps a bar)" }
+        AlertDialog.Builder(this).setTitle("Meter (now ${Pat.METERS[Pat.meter]})")
+            .setItems(items) { _, w -> setMeter(w) }.show()
+    }
+
+    fun setMeter(m: Int) {
+        if (m == Pat.meter) return
+        val nb = Pat.bars()
+        Pat.meter = m
+        val ls = Pat.lengths()
+        Pat.len = ls.lastOrNull { it / Pat.slot() <= nb } ?: ls[0]
+        if (Pat.view >= Pat.bars()) Pat.view = 0
+        ui.toast("Meter ${Pat.METERS[m]}: ${Pat.spb()} steps a bar. Steps past the bar are kept (back to a longer meter: they play again).")
+        refreshCurrent()
     }
 
     fun setPatternLength(n: Int) {
         val old = Pat.len
-        if (n == old || n !in Pat.LENGTHS) return
+        if (n == old || n !in Pat.lengths()) return
         if (n > old) {
             val e = engine
             fun <T> rep(get: (Int) -> T, set: (Int, T) -> Unit) {
@@ -1008,8 +1027,8 @@ class MainActivity : Activity() {
         }
         Pat.len = n
         if (Pat.view >= Pat.bars()) Pat.view = 0
-        ui.toast(if (n > old) "Pattern: ${n / Pat.BAR} bars. The new bars start as copies; change them with the bar buttons."
-                 else "Pattern: ${n / Pat.BAR} bar${if (n > Pat.BAR) "s" else ""}. The steps after it are kept, not played.")
+        ui.toast(if (n > old) "Pattern: ${n / Pat.slot()} bars. The new bars start as copies; change them with the bar buttons."
+                 else "Pattern: ${n / Pat.slot()} bar${if (n > Pat.slot()) "s" else ""}. The steps after it are kept, not played.")
         refreshCurrent()
     }
 
