@@ -30,6 +30,12 @@ class LibraryScreen(private val a: MainActivity) : Screen {
     private val selInfo = ui.text("", 12f, Theme.DIM)
     private val fnBtns = ArrayList<android.widget.Button>()
     private var cat = "All"
+    // 3.26 BOXES: the box open (and its sub-box), the rows that show them
+    private var box: String? = null
+    private var sub: String? = null
+    private val boxRow = ui.row()
+    private val subRow = ui.row()
+    private val subScroll = android.widget.HorizontalScrollView(a)
     private var sel: File? = null
     private val rowOf = HashMap<String, android.widget.Button>()
 
@@ -60,6 +66,15 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         }
         hs.addView(catRow)
         head.addView(hs, ui.fullWidth(8))
+
+        // 3.26: the boxes (a second row opens with a box's sub-boxes)
+        val bs = android.widget.HorizontalScrollView(a)
+        bs.isHorizontalScrollBarEnabled = false
+        bs.addView(boxRow)
+        head.addView(bs, ui.fullWidth(4))
+        subScroll.isHorizontalScrollBarEnabled = false
+        subScroll.addView(subRow)
+        head.addView(subScroll, ui.fullWidth(2))
 
         search.hint = "Search name or tag..."
         search.setSingleLine(true)
@@ -94,6 +109,11 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         fn(r2, "Devices…", Theme.PURPLE) { deviceMenu(it) }
         fn(r2, "Delete", Theme.RED) { deleteDialog(it) }
         fp.addView(r2, ui.fullWidth(4))
+        val r3 = ui.row()
+        fn(r3, "→ Home lane", Theme.ACCENT) { homeDialog(it) }
+        fn(r3, "→ Kit", Theme.ACCENT) { kitDialog(it) }
+        fn(r3, "→ Box", Theme.BLUE) { boxDialog(it) }
+        fp.addView(r3, ui.fullWidth(4))
         head.addView(fp, ui.fullWidth(6))
 
         listBox.setPadding(ui.dp(12), ui.dp(4), ui.dp(12), ui.dp(88))
@@ -174,11 +194,17 @@ class LibraryScreen(private val a: MainActivity) : Screen {
         }
         listBox.removeAllViews()
         rowOf.clear()
-        val files = store.listCat(cat, search.text.toString())
+        val tree = Boxes.tree(a, store)
+        paintBoxes(tree, all)
+        val top = tree.firstOrNull { it.title == box }
+        val open = top?.children?.firstOrNull { it.title == sub } ?: top
+        if (top == null) { box = null; sub = null }
+        val files = store.listCat(cat, search.text.toString()).filter { open == null || open.has(it.name) }
         if (sel?.exists() != true) sel = null
         if (files.isEmpty()) {
             listBox.addView(ui.text(
                 if (all.isEmpty()) "No sounds yet. Record, sample an instrument, import a WAV, or Add sounds… above."
+                else if (open != null) "Nothing here yet. Pick a sound anywhere and press → Box (or → Kit)."
                 else "Nothing in $cat yet.", 14f, Theme.DIM), ui.fullWidth(8))
         }
         // the names, two in a row: big and easy to tap
@@ -297,6 +323,143 @@ class LibraryScreen(private val a: MainActivity) : Screen {
             .show()
     }
 
+    // ---------------- 3.26 BOXES, → Home lane, → Kit ----------------
+
+    private fun boxButton(row: LinearLayout, label: String, on: Boolean, color: Int, act: () -> Unit): android.widget.Button {
+        val b = ui.button(label) { act() }
+        b.minHeight = ui.dp(36)
+        b.minimumHeight = ui.dp(36)
+        b.textSize = 13f
+        b.setPadding(ui.dp(14), 0, ui.dp(14), 0)
+        ui.styleButton(b, on, color, 18)
+        row.addView(b, ui.w(0f, 3))
+        return b
+    }
+
+    private fun paintBoxes(tree: List<Box>, all: List<File>) {
+        boxRow.removeAllViews()
+        subRow.removeAllViews()
+        boxButton(boxRow, "▣ All boxes", box == null, Theme.TEAL) { box = null; sub = null; refresh() }
+        for (b in tree) {
+            val n = all.count { b.has(it.name) }
+            val btn = boxButton(boxRow, "▣ ${b.title}  $n", b.title == box, if (b.user) Theme.YELLOW else Theme.TEAL) {
+                box = if (box == b.title) null else b.title
+                sub = null
+                refresh()
+                listScroll.scrollTo(0, 0)
+            }
+            if (b.user) btn.setOnLongClickListener { userBoxMenu(b.title); true }
+        }
+        boxButton(boxRow, "+ NEW BOX", false, Theme.YELLOW) { newBoxDialog() }
+        val top = tree.firstOrNull { it.title == box }
+        if (top != null && top.children.isNotEmpty()) {
+            subScroll.visibility = View.VISIBLE
+            boxButton(subRow, "All in ${top.title}", sub == null, Theme.TEAL) { sub = null; refresh() }
+            for (c in top.children) {
+                val n = all.count { c.has(it.name) }
+                val btn = boxButton(subRow, "${c.title}  $n", c.title == sub, Theme.TEAL) { sub = c.title; refresh(); listScroll.scrollTo(0, 0) }
+                if (top.title == "Drum Kits" && Boxes.kit(c.title) != null) btn.setOnLongClickListener { a.showTab(MainActivity.TAB_PADS); true }
+            }
+        } else subScroll.visibility = View.GONE
+    }
+
+    private fun newBoxDialog(then: ((String) -> Unit)? = null) {
+        val edit = EditText(a)
+        edit.hint = "Song 1, best kicks, ..."
+        AlertDialog.Builder(a).setTitle("New box").setView(edit)
+            .setPositiveButton("Make") { _, _ ->
+                val n = edit.text.toString().trim()
+                if (!Boxes.newBox(a, n)) ui.toast("That name is empty or already a box")
+                else { then?.invoke(n); refresh() }
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun userBoxMenu(name: String) {
+        AlertDialog.Builder(a).setTitle("Box: $name")
+            .setItems(arrayOf("Rename", "Delete the box (its sounds stay in the Maker Bank)")) { _, w ->
+                if (w == 0) {
+                    val edit = EditText(a)
+                    edit.setText(name)
+                    AlertDialog.Builder(a).setTitle("Rename the box").setView(edit)
+                        .setPositiveButton("OK") { _, _ ->
+                            if (!Boxes.renameBox(a, name, edit.text.toString())) ui.toast("That name is empty or already a box")
+                            else { if (box == name) box = edit.text.toString().trim(); refresh() }
+                        }
+                        .setNegativeButton("Cancel", null).show()
+                } else {
+                    Boxes.deleteBox(a, name)
+                    if (box == name) box = null
+                    refresh()
+                }
+            }.show()
+    }
+
+    /** → Box: the user's boxes, ticked where the sound is; a new box from here too */
+    private fun boxDialog(f: File) {
+        val names = Boxes.userBoxes()
+        if (names.isEmpty()) {
+            newBoxDialog { n -> Boxes.setIn(a, n, f.name, true); ui.toast("${f.nameWithoutExtension} is in the box $n") }
+            return
+        }
+        val checked = BooleanArray(names.size) { Boxes.inBox(names[it], f.name) }
+        AlertDialog.Builder(a).setTitle("Boxes for ${f.nameWithoutExtension}")
+            .setMultiChoiceItems(names.toTypedArray(), checked) { _, w, on -> checked[w] = on }
+            .setPositiveButton("OK") { _, _ ->
+                for (i in names.indices) Boxes.setIn(a, names[i], f.name, checked[i])
+                refresh()
+            }
+            .setNeutralButton("+ New box") { _, _ -> newBoxDialog { n -> Boxes.setIn(a, n, f.name, true); refresh() } }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    /** → Home lane: straight onto a Home lane that plays sounds (a sampler track, or a drum pad) */
+    private fun homeDialog(f: File) {
+        val l = a.lanes
+        val lanes = (0 until LaneSetup.N).filter { l.type[it] == Inst.SAMPLE || l.type[it] == Inst.DRUM }
+        if (lanes.isEmpty()) { ui.toast("No Sampler or Drum lane on Home. Tap a lane number on Home to choose one."); return }
+        val items = lanes.map { i ->
+            val k = l.idx[i]
+            val now = if (l.type[i] == Inst.DRUM) a.engine.pads[k].name else a.engine.tracks[k].sampleName
+            "${i + 1}.  ${l.label(i)}   " + now.removeSuffix(".wav").ifEmpty { "(empty)" }
+        }.toTypedArray()
+        AlertDialog.Builder(a).setTitle("Put ${f.nameWithoutExtension} on which Home lane?")
+            .setItems(items) { _, w ->
+                val i = lanes[w]
+                val k = l.idx[i]
+                if (l.type[i] == Inst.DRUM) a.assignPad(k, f) else a.assignTrack(k, f)
+                ui.toast("Lane ${i + 1} (${l.label(i)}): ${f.nameWithoutExtension}")
+            }.show()
+    }
+
+    /** → Kit: into a slot of the pads now (bank A / B) or of one of your kits */
+    private fun kitDialog(f: File) {
+        Boxes.load(a)
+        val targets = listOf("Pads now, bank A", "Pads now, bank B") + Boxes.kits.map { "Kit: ${it.name}" }
+        AlertDialog.Builder(a).setTitle("Put ${f.nameWithoutExtension} into which kit?")
+            .setItems(targets.toTypedArray()) { _, w ->
+                val kit = if (w >= 2) Boxes.kits[w - 2] else null
+                val slots = Array(Boxes.SLOTS) { s ->
+                    val now = if (kit != null) kit.slots[s] else a.engine.pads[w * Cfg.PAD_BANK + s].name
+                    "${s + 1}.  " + now.removeSuffix(".wav").removePrefix("Drum_").ifEmpty { "(empty)" }
+                }
+                AlertDialog.Builder(a).setTitle("Which slot? (${targets[w]})")
+                    .setItems(slots) { _, s ->
+                        if (kit != null) {
+                            kit.slots[s] = f.name
+                            Boxes.saveKits(a)
+                            ui.toast("${kit.name}, slot ${s + 1}: ${f.nameWithoutExtension}")
+                            refresh()
+                        } else {
+                            a.assignPad(w * Cfg.PAD_BANK + s, f)
+                            ui.toast("Pad ${Cfg.padName(w * Cfg.PAD_BANK + s)}: ${f.nameWithoutExtension}")
+                        }
+                    }.show()
+            }
+            .setNeutralButton("Make a kit in the drum sequencer") { _, _ -> a.showTab(MainActivity.TAB_PADS) }
+            .show()
+    }
+
     private fun tagsDialog(f: File) {
         val edit = EditText(a)
         edit.setText(store.getTags(f.name))
@@ -324,6 +487,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
                     ui.toast("That name is empty or already used")
                 } else {
                     a.renameRefs(f.name, nf.name)
+                    Boxes.rename(a, f.name, nf.name)
                     if (sel == f) sel = nf
                     refresh()
                 }

@@ -21,6 +21,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     private val content = ui.col()
     private val labels = ArrayList<Button>()
     private val editBtns = ArrayList<Button>()
+    private val kitBox = ui.col()
     private var editing = -1                      // the row whose "e" is open (red)
     private val muteBtns = ArrayList<Button>()
     private val volBars = ArrayList<SeekBar>()
@@ -99,6 +100,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
         val rk = ui.row()
         for (kit in MakerBank.kits) rk.addView(ui.button("$kit → pads") { makerKit(kit) }, ui.w(1f, 3))
         content.addView(rk, ui.fullWidth(4))
+        // 3.26: your own kits (16 slots: the 16 rows of a bank), and saving the rows as one
+        content.addView(kitBox, ui.fullWidth(4))
 
         for (r in 0 until Cfg.PAD_BANK) content.addView(buildRow(r), ui.fullWidth(2))
 
@@ -356,6 +359,72 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     /** Makes the drum sounds (if they are not in the library yet) and puts 8 of them on the pads. */
+    // ---------------- 3.26 your own kits ----------------
+
+    private fun buildKits() {
+        Boxes.load(a)
+        kitBox.removeAllViews()
+        var r: LinearLayout? = null
+        val items = Boxes.kits.map { it.name } + listOf("")
+        items.forEachIndexed { i, n ->
+            if (i % 4 == 0) { r = ui.row(); kitBox.addView(r, ui.fullWidth(2)) }
+            val b = if (n.isEmpty()) ui.button("+ Save these rows as a kit") { saveKitDialog() }
+                else ui.button("★ $n → pads") { loadKit(n) }.also { it.setOnLongClickListener { kitMenu(n); true } }
+            if (n.isNotEmpty()) ui.styleButton(b, true, Theme.YELLOW)
+            r!!.addView(b, ui.w(1f, 3))
+        }
+        if (Boxes.kits.isNotEmpty()) kitBox.addView(ui.text("Long press one of your kits: save the rows into it, rename, delete. " +
+            "Change any row with a long press on its name, → Kit in the Maker Bank, or its e.", 11f, Theme.FAINT), ui.fullWidth(2))
+    }
+
+    private fun rowsNow(): Array<String> = Array(Boxes.SLOTS) { e.pads[pi(it)].name }
+
+    private fun saveKitDialog(name: String = "") {
+        val edit = android.widget.EditText(a)
+        edit.setText(name)
+        edit.hint = "My Kit 1"
+        android.app.AlertDialog.Builder(a).setTitle("Save the ${Cfg.PAD_BANK} rows of bank ${"AB"[bank]} as a kit").setView(edit)
+            .setPositiveButton("Save") { _, _ ->
+                val n = edit.text.toString().trim()
+                if (n.isEmpty()) { ui.toast("Give the kit a name"); return@setPositiveButton }
+                val over = Boxes.kit(n) != null
+                Boxes.saveKit(a, n, rowsNow())
+                buildKits()
+                a.libraryScreen.refresh()
+                ui.toast(if (over) "Kit $n saved again" else "Kit $n saved (also a box in the Maker Bank: Drum Kits)")
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun loadKit(n: String) {
+        val k = Boxes.kit(n) ?: return
+        for (i in 0 until Boxes.SLOTS) {
+            val f = k.slots[i]
+            a.assignPad(pi(i), if (f.isEmpty() || !a.store.file(f).exists()) null else a.store.file(f))
+        }
+        ui.toast("$n on the pads (bank ${"AB"[bank]})")
+    }
+
+    private fun kitMenu(n: String) {
+        android.app.AlertDialog.Builder(a).setTitle("Kit: $n")
+            .setItems(arrayOf("Save the rows now into $n", "Rename", "Delete the kit (its sounds stay in the Maker Bank)")) { _, w ->
+                when (w) {
+                    0 -> { Boxes.saveKit(a, n, rowsNow()); ui.toast("Kit $n saved again") }
+                    1 -> {
+                        val edit = android.widget.EditText(a)
+                        edit.setText(n)
+                        android.app.AlertDialog.Builder(a).setTitle("Rename the kit").setView(edit)
+                            .setPositiveButton("OK") { _, _ ->
+                                val nn = edit.text.toString().trim()
+                                if (nn.isEmpty() || (nn != n && Boxes.kit(nn) != null)) ui.toast("That name is empty or already a kit")
+                                else { Boxes.kit(n)?.name = nn; Boxes.saveKits(a); buildKits(); a.libraryScreen.refresh() }
+                            }.setNegativeButton("Cancel", null).show()
+                    }
+                    else -> { Boxes.deleteKit(a, n); buildKits(); a.libraryScreen.refresh() }
+                }
+            }.show()
+    }
+
     private fun makerKit(kit: String) {
         val files = MakerBank.pieces.map { a.store.file(MakerBank.fileName(kit, it)) }
         if (files.none { it.exists() }) {
@@ -628,6 +697,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     override fun onShow() {
+        buildKits()
         for (i in 0 until Cfg.PAD_BANK) {
             val q = pi(i)
             val n = e.pads[q].name
