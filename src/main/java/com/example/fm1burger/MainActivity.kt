@@ -600,10 +600,12 @@ class MainActivity : Activity() {
                 FmBank.install(this, store)
             } catch (ex: Exception) {
             }
+            val made = try { MakerBank.install(this, store) } catch (ex: Exception) { -1 }
             runOnUiThread {
-                if (ok && !isFinishing) {
+                if ((ok || made > 0) && !isFinishing) {
                     libraryScreen.refresh()
                 }
+                if (made > 0 && !isFinishing) ui.toast("Maker Bank: $made new sounds (synths, drum kits, piano, flute, sax)")
             }
         }.start()
     }

@@ -195,7 +195,10 @@ class SetupScreen(private val a: MainActivity) : Screen {
             "This is the experimental 3.x line. It is a separate app with its own projects and sounds, " +
                 "so Burger Studio 2.x and FM1 Burger stay as they are on the same device.\n\n" +
                 "The FM renderer follows the open DX7 engine of Google's Music Synthesizer for Android (Apache License 2.0). " +
-                "The drum kit, the FM bank, the guitars and the New Ambient creatures are made for this app.",
+                "The drum kit, the FM bank, the guitars and the New Ambient creatures are made for this app.\n\n" +
+                "The Maker Bank's synths and drum kits are rendered from the Burger Studio FM-1 firmware (GPL-3.0, " +
+                "built on Felucca by Leo Kuroshita / Hügelton Instruments). Piano, flute and tenor sax: Versilian Studios " +
+                "(VSCO-2 CE, VCSL), CC0 1.0.",
             11f, Theme.DIM), ui.fullWidth(4))
         content.addView(ab, ui.fullWidth(10))
     }

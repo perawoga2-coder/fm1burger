@@ -95,6 +95,10 @@ class PadsScreen(private val a: MainActivity) : Screen {
         r0.addView(ui.button("Electronic kit → pads") { drumKit() }, ui.w(1.3f, 3))
         r0.addView(ui.button("Clear bank") { clearAll() }, ui.w(1f, 3))
         content.addView(r0, ui.fullWidth(6))
+        // 3.25: the Maker Bank's four drum kits (the same as the FM-1's DRUM kits)
+        val rk = ui.row()
+        for (kit in MakerBank.kits) rk.addView(ui.button("$kit → pads") { makerKit(kit) }, ui.w(1f, 3))
+        content.addView(rk, ui.fullWidth(4))
 
         for (r in 0 until Cfg.PAD_BANK) content.addView(buildRow(r), ui.fullWidth(2))
 
@@ -352,6 +356,23 @@ class PadsScreen(private val a: MainActivity) : Screen {
     }
 
     /** Makes the drum sounds (if they are not in the library yet) and puts 8 of them on the pads. */
+    private fun makerKit(kit: String) {
+        val files = MakerBank.pieces.map { a.store.file(MakerBank.fileName(kit, it)) }
+        if (files.none { it.exists() }) {
+            ui.toast("Getting the Maker Bank ready...")
+            Thread {
+                try { MakerBank.install(a, a.store, true) } catch (ex: Exception) {}
+                a.runOnUiThread {
+                    if (files.any { it.exists() }) { a.libraryScreen.refresh(); makerKit(kit) }
+                    else ui.toast("Could not load $kit")
+                }
+            }.start()
+            return
+        }
+        for (i in files.indices) if (files[i].exists()) a.assignPad(pi(i), files[i])
+        ui.toast("$kit on the pads: " + MakerBank.pieces.joinToString(", ") + ". Edit any of them with e.")
+    }
+
     private fun drumKit() {
         ui.toast("Making the drum kit...")
         Thread {
