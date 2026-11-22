@@ -526,7 +526,7 @@ class MainActivity : Activity() {
                 navBtns[k].setTextColor(Theme.DIM)
             }
         }
-        cueRow?.visibility = if (sec == 0 || sec == 3) View.VISIBLE else View.GONE
+        cueRow?.visibility = if (sec == 3) View.VISIBLE else View.GONE      // (3.39: not on Home any more: Song page only)
         homeFab.visibility = if (i == TAB_HOME) View.GONE else View.VISIBLE
         homeBar?.visibility = if (i == TAB_HOME) View.VISIBLE else View.GONE   // (3.23: Home's line in the bar)
         takeBtn.visibility = if (i == TAB_HOME) View.VISIBLE else View.GONE
