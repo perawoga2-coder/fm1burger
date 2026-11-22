@@ -600,12 +600,45 @@ class MainActivity : Activity() {
                 FmBank.install(this, store)
             } catch (ex: Exception) {
             }
-            val made = try { MakerBank.install(this, store) } catch (ex: Exception) { -1 }
             runOnUiThread {
-                if ((ok || made > 0) && !isFinishing) {
+                if (ok && !isFinishing) {
                     libraryScreen.refresh()
                 }
-                if (made > 0 && !isFinishing) ui.toast("Maker Bank: $made new sounds (synths, drum kits, piano, flute, sax)")
+            }
+        }.start()
+        // the Maker Bank's 112 sounds on their own thread, behind everything else (they made the audio stutter):
+        // lowest priority, waits while music plays, and tells how far it is
+        Thread {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
+            } catch (ex: Exception) {
+            }
+            val made = try {
+                MakerBank.install(
+                    this, store,
+                    busy = { engine.playing },
+                    progress = { done, total ->
+                        if (done == 0 || (done % 25 == 0 && done < total)) {
+                            runOnUiThread {
+                                if (!isFinishing && !isDestroyed) {
+                                    ui.toast(
+                                        if (done == 0) "Preparing the Maker Bank's sounds…"
+                                        else "Preparing sounds $done/$total"
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    cancel = { isDestroyed }
+                )
+            } catch (ex: Exception) {
+                -1
+            }
+            runOnUiThread {
+                if (made > 0 && !isFinishing && !isDestroyed) {
+                    libraryScreen.refresh()
+                    ui.toast("Maker Bank: $made new sounds (synths, drum kits, piano, flute, sax)")
+                }
             }
         }.start()
     }
