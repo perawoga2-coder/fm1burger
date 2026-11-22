@@ -20,6 +20,8 @@ class PadsScreen(private val a: MainActivity) : Screen {
     override val root = ScrollView(a)
     private val content = ui.col()
     private val labels = ArrayList<Button>()
+    private val editBtns = ArrayList<Button>()
+    private var editing = -1                      // the row whose "e" is open (red)
     private val muteBtns = ArrayList<Button>()
     private val volBars = ArrayList<SeekBar>()
     private val cells = Array(Cfg.PAD_BANK) { arrayOfNulls<View>(Pat.BAR) }
@@ -208,6 +210,21 @@ class PadsScreen(private val a: MainActivity) : Screen {
         }
         labels.add(lb)
         row.addView(lb, LinearLayout.LayoutParams(ui.dp(140), ui.dp(46)))
+        // 3.24 EDIT DRUM: a small "e" right after the name; red while its edit window is open
+        val eb = Button(a)
+        eb.isAllCaps = false
+        eb.text = "e"
+        eb.textSize = 15f
+        eb.typeface = Ui.BOLD
+        eb.minHeight = 0
+        eb.minWidth = 0
+        eb.minimumHeight = 0
+        eb.minimumWidth = 0
+        eb.setPadding(0, 0, 0, 0)
+        eb.stateListAnimator = null
+        eb.setOnClickListener { editDrum(r) }
+        editBtns.add(eb)
+        row.addView(eb, LinearLayout.LayoutParams(ui.dp(30), ui.dp(46)).also { it.marginStart = ui.dp(2) })
 
         for (s in 0 until Pat.BAR) {
             val v = View(a)
@@ -459,12 +476,143 @@ class PadsScreen(private val a: MainActivity) : Screen {
         if (missing) ui.toast("Tip: press \"Drum kit → pads\" first so the rows have drum sounds.")
     }
 
+    // ---------------- 3.24 EDIT DRUM ----------------
+
+    /** "e": red while open, orange when the row's sound is an edited one, dim otherwise */
+    private fun paintEdit(r: Int) {
+        val b = editBtns[r]
+        val n = e.pads[pi(r)].name
+        val edited = n.isNotEmpty() && DrumEdit.readNote(a.filesDir, n) != null
+        b.background = ui.bg(if (r == editing) Theme.RED else Theme.PANEL2, 8)
+        b.setTextColor(if (r == editing) Theme.BG else if (edited) Theme.ACCENT else Theme.DIM)
+    }
+
+    private fun editDrum(r: Int) {
+        val q = pi(r)
+        val pad = e.pads[q]
+        val cur = pad.name
+        if (cur.isEmpty() || pad.data == null) {
+            ui.toast("This row has no sound yet: long press its name to choose one.")
+            return
+        }
+        val note = DrumEdit.readNote(a.filesDir, cur)
+        val src = note?.src ?: cur
+        if (!a.store.file(src).exists() && DrumEdit.kitName(src) == null) {
+            ui.toast("The original sound ($src) is no longer in the Maker Bank.")
+            return
+        }
+        val knobs = DrumEdit.knobs(src)
+        val k = DrumEdit.defaults(src)
+        note?.knobs?.forEach { (id, v) -> if (k.containsKey(id)) k[id] = v }
+        val start = HashMap(k)
+        var audio: FloatArray? = null                 // the original's samples (sounds edited as audio)
+        var last: FloatArray? = pad.data
+        var gen = 0
+        var changed = false
+
+        editing = r
+        paintEdit(r)
+        val box = ui.col()
+        box.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6))
+        val kindText = when (DrumEdit.kindOf(src)) {
+            DrumEdit.Kind.AUDIO -> "Edited as audio. The original stays in the Maker Bank."
+            else -> "Made again from the kit's recipe. The original stays in the Maker Bank."
+        }
+        box.addView(ui.text(kindText, 12f, Theme.DIM))
+
+        fun rebuild(play: Boolean) {
+            val my = ++gen
+            val kk = HashMap(k)
+            val aud = audio
+            Thread {
+                val d = try { DrumEdit.render(src, kk, aud) } catch (ex: Exception) { null }
+                a.runOnUiThread {
+                    if (my != gen || d == null) return@runOnUiThread
+                    last = d
+                    e.setPad(q, pad.name, d)
+                    if (play) e.padHit(q, 1f)
+                }
+            }.start()
+        }
+
+        val rows = ArrayList<Pair<DrumEdit.Knob, SliderRow>>()
+        for (kn in knobs) {
+            val sr = ui.slider(kn.label, kn.max - kn.min, k[kn.id]!! - kn.min, { kn.fmt(it + kn.min) }) { v ->
+                k[kn.id] = v + kn.min
+                changed = true
+                rebuild(false)
+            }
+            rows.add(Pair(kn, sr))
+            box.addView(sr.view, ui.fullWidth(2))
+        }
+        val br = ui.row()
+        br.addView(ui.button("▶ PREVIEW", true) { e.padHit(q, 1f) }, ui.w(1.3f))
+        br.addView(ui.button("RESET") {
+            for ((kn, sr) in rows) { k[kn.id] = kn.def; sr.set(kn.def - kn.min) }
+            changed = true
+            rebuild(true)
+        }, ui.w(1f))
+        box.addView(br, ui.fullWidth(10))
+        box.addView(ui.text("Moves are heard at once (also while the pattern plays). DONE keeps the sound on this row and " +
+            "saves it in the Maker Bank as \"" + src.removeSuffix(".wav").removePrefix("Drum_").replace('_', ' ') +
+            " edit\" (send it to the FM-1 like any sample).", 11f, Theme.FAINT), ui.fullWidth(8))
+
+        val sv = ScrollView(a)
+        sv.addView(box)
+        val title = Cfg.padName(q) + "  ·  EDIT  " + src.removeSuffix(".wav").removePrefix("Drum_").replace('_', ' ')
+        val dlg = android.app.AlertDialog.Builder(a).setTitle(title).setView(sv)
+            .setPositiveButton("DONE", null)
+            .create()
+        dlg.setOnDismissListener {
+            gen++
+            editing = -1
+            finishEdit(q, src, k, start, changed, last)
+            paintEdit(r)
+        }
+        dlg.window?.setDimAmount(0.25f)              // (the rows stay visible behind it)
+        dlg.show()
+
+        if (DrumEdit.kindOf(src) == DrumEdit.Kind.AUDIO) {
+            Thread {
+                val d = a.store.loadEngine(src)
+                a.runOnUiThread { audio = d; if (note != null && d != null) rebuild(false) }
+            }.start()
+        }
+    }
+
+    /** DONE: unchanged -> as it was; back at the original's knobs -> the original; else saved as "<name> edit" */
+    private fun finishEdit(q: Int, src: String, k: Map<String, Int>, start: Map<String, Int>, changed: Boolean, data: FloatArray?) {
+        val pad = e.pads[q]
+        val cur = pad.name
+        if (!changed || k == start) {
+            a.assignPad(q, a.store.file(cur))          // (what was heard while editing goes back to the file)
+            return
+        }
+        if (k == DrumEdit.defaults(src)) {
+            a.assignPad(q, a.store.file(src))
+            onShow()
+            return
+        }
+        val d = data ?: return
+        Thread {
+            val f = if (cur != src && DrumEdit.readNote(a.filesDir, cur)?.src == src) a.store.file(cur).also { a.store.overwrite(it, d, Cfg.SR) }
+                else a.store.saveNew(src.removeSuffix(".wav") + " edit", d, Cfg.SR)
+            DrumEdit.writeNote(a.filesDir, f.name, DrumEdit.Note(src, HashMap(k)))
+            a.runOnUiThread {
+                e.setPad(q, f.name, d)
+                onShow()
+                ui.toast("Saved as ${f.name.removeSuffix(".wav").removePrefix("Drum_").replace('_', ' ')} (on ${Cfg.padName(q)}, and in the Maker Bank)")
+            }
+        }.start()
+    }
+
     override fun onShow() {
         for (i in 0 until Cfg.PAD_BANK) {
             val q = pi(i)
             val n = e.pads[q].name
             val shortName = n.removeSuffix(".wav").removePrefix("Drum_").replace('_', ' ')
             labels[i].text = Cfg.padName(q) + "  " + (if (n.isEmpty()) "(empty)" else shortName)
+            paintEdit(i)
             volBars[i].progress = (e.pads[q].volume * 100f).toInt().coerceIn(0, 100)
         }
         for (k in bankBtns.indices) ui.styleButton(bankBtns[k], k == bank, Theme.RED)
