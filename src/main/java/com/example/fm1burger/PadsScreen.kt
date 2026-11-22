@@ -18,7 +18,7 @@ class PadsScreen(private val a: MainActivity) : Screen {
 
     private val ui = a.ui
     private val e = a.engine
-    override val root = ScrollView(a)
+    override val root = LockableScrollView(a)
     private val content = ui.col()
     private val labels = ArrayList<Button>()
     private val editBtns = ArrayList<Button>()
@@ -105,7 +105,15 @@ class PadsScreen(private val a: MainActivity) : Screen {
         // 3.26: your own kits (16 slots: the 16 rows of a bank), and saving the rows as one
         content.addView(kitBox, ui.fullWidth(4))
 
-        for (r in 0 until Cfg.PAD_BANK) content.addView(buildRow(r), ui.fullWidth(2))
+        // 3.37: the rows in their dock (EDIT lock, PLAY, P); a row's name, e, M and volume are not steps
+        val gridBox = ui.col()
+        for (r in 0 until Cfg.PAD_BANK) gridBox.addView(buildRow(r), ui.fullWidth(2))
+        val dock = StepDock(a, prep, gridBox)
+        dock.passThrough(labels)
+        dock.passThrough(editBtns)
+        dock.passThrough(muteBtns)
+        dock.passThrough(volBars)
+        content.addView(dock.view, ui.fullWidth(4))
 
         buildEffects()
 

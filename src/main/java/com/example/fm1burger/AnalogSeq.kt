@@ -180,7 +180,7 @@ class AnalogSeq(private val syn: AnalogSynth) {
 }
 
 /** The screen part of the analog synth sequencer. */
-class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
+class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq, prep: PrepareBar? = null) {
 
     private val ui = a.ui
     private val e = a.engine
@@ -242,7 +242,7 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq) {
             b.setOnLongClickListener { pickCell(Pat.base() + i); true }
             cells.add(b)
         }
-        view.addView(barCells.box, ui.fullWidth(6))
+        view.addView(StepDock(a, prep, barCells.box).view, ui.fullWidth(6))      // 3.37
         info = ui.text("", 13f, Theme.TEXT, true)
         view.addView(info, ui.fullWidth(4))
 

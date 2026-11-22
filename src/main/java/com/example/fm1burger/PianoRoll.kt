@@ -234,7 +234,7 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
 
 /** A piano roll with its octave buttons and a help line. */
 class PianoRollPanel(a: MainActivity, title: String, model: RollModel, help: String, octaves: Boolean = true,
-                     expand: (() -> Unit)? = null) {
+                     prep: PrepareBar? = null, expand: (() -> Unit)? = null) {
     private val ui = a.ui
     val view: LinearLayout = ui.panel()
     val roll = PianoRollView(a, model)
@@ -260,9 +260,8 @@ class PianoRollPanel(a: MainActivity, title: String, model: RollModel, help: Str
         view.addView(r, ui.fullWidth(6))
         if (!octaves) r.visibility = View.GONE
         roll.low = model.lowest
-        view.addView(roll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(PianoRollView.ROWS * 19)).also {
-            it.topMargin = ui.dp(4)
-        })
+        // 3.37: the roll in its dock (EDIT lock, PLAY, P)
+        view.addView(StepDock(a, prep, roll, ui.dp(PianoRollView.ROWS * 19)).view, ui.fullWidth(4))
         label()
     }
 

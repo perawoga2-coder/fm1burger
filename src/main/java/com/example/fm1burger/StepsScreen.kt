@@ -1,8 +1,6 @@
 package com.example.fm1burger
 
 import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import kotlin.random.Random
 
@@ -10,7 +8,7 @@ class StepsScreen(private val a: MainActivity) : Screen {
 
     private val ui = a.ui
     private val e = a.engine
-    override val root = ScrollView(a)
+    override val root = LockableScrollView(a)
     private val content = ui.col()
     private val trackBtns = ArrayList<Button>()
     private lateinit var grid: StepGridView
@@ -36,12 +34,8 @@ class StepsScreen(private val a: MainActivity) : Screen {
 
         grid = StepGridView(a)
         grid.onEdit = { }
-        content.addView(
-            grid,
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(330)).also {
-                it.topMargin = ui.dp(6)
-            }
-        )
+        // 3.37: the grid in its dock (EDIT lock, PLAY, P)
+        content.addView(StepDock(a, prep, grid, ui.dp(330)).view, ui.fullWidth(6))
         content.addView(
             ui.text(
                 "The grid shows one bar (pick it with the bar buttons above). Top grid: tap a cell to set the pitch of a step (middle row = original pitch, " +

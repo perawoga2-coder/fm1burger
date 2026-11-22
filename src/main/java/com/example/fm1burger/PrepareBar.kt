@@ -83,7 +83,8 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
         refresh()
     }
 
-    private fun toggle() {
+    /** P on / off (also from the step dock's P: one state). */
+    fun toggle() {
         on = !on
         // leaving PREPARE while this part is playing alone: stop it
         if (!on && e.playing && e.prepare == part()) e.stop()

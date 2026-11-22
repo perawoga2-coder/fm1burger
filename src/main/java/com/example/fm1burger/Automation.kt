@@ -8,7 +8,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import org.json.JSONArray
@@ -242,7 +241,7 @@ class AutomationScreen(private val a: MainActivity) : Screen {
     private val ui = a.ui
     private val e = a.engine
     private val auto = e.auto
-    override val root = ScrollView(a)
+    override val root = LockableScrollView(a)
     private val content = ui.col()
     private val prep = PrepareBar(a, true) { Engine.PREP_NONE }
     private val laneView = AutoLaneView(a, auto)
@@ -273,9 +272,8 @@ class AutomationScreen(private val a: MainActivity) : Screen {
         content.addView(info, ui.fullWidth(4))
 
         laneView.onEdit = { refreshInfo() }
-        content.addView(laneView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(200)).also {
-            it.topMargin = ui.dp(6)
-        })
+        // 3.37: the lane in its dock (EDIT lock, PLAY; this page has no P)
+        content.addView(StepDock(a, prep, laneView, ui.dp(200), false).view, ui.fullWidth(6))
 
         val r = ui.row()
         recBtn = ui.button("● REC") {

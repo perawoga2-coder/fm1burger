@@ -6,7 +6,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 
 /**
@@ -26,7 +25,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
     private lateinit var seqPanel: AnalogSeqPanel
     private lateinit var bassRoll: PianoRollPanel
     private lateinit var synthRoll: PianoRollPanel
-    override val root = ScrollView(a)
+    override val root = LockableScrollView(a)
     private val content = ui.col()
     private val bassBox = ui.col()
     private val anaBox = ui.col()
@@ -209,7 +208,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
             b.setOnLongClickListener { pickStep(Pat.base() + i); true }
             cells.add(b)
         }
-        bassBox.addView(barCells.box)
+        bassBox.addView(StepDock(a, prep, barCells.box).view, ui.fullWidth(4))      // 3.37
 
         editInfo = ui.text("", 13f, Theme.TEXT, true)
         bassBox.addView(editInfo, ui.fullWidth(8))
@@ -277,7 +276,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         }
         bassRoll = PianoRollPanel(a, "Piano roll", bassModel,
             "Tap a cell for a note, tap the note again to remove it. Hold a note: accent (yellow) → slide (teal line) → both → none. " +
-                "It shows the bar picked with the bar buttons at the top.", false) { bigKeys(true) }
+                "It shows the bar picked with the bar buttons at the top.", false, prep) { bigKeys(true) }
         bassRoll.roll.onSelect = { st -> selStep = st }
         bassBox.addView(bassRoll.view, ui.fullWidth(10))
 
@@ -513,7 +512,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
             kb.addView(b, lp)
         }
         anaBox.addView(kb, ui.fullWidth(4))
-        seqPanel = AnalogSeqPanel(a, e.analogSeq)
+        seqPanel = AnalogSeqPanel(a, e.analogSeq, prep)
         anaBox.addView(seqPanel.view, ui.fullWidth(8))
         val sq = e.analogSeq
         val synthModel = object : RollModel {
@@ -539,7 +538,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         synthRoll = PianoRollPanel(a, "Piano roll", synthModel,
             "Tap cells for notes: several on one step make a chord. Tap a note again to remove it. Drag a note sideways to make it longer. " +
                 "The chord type above is added to every note (use Single for your own chords). It shows the bar picked with the bar buttons at the top.",
-            true) { bigKeys(false) }
+            true, prep) { bigKeys(false) }
         synthRoll.roll.onSelect = { st -> seqPanel.selected = st }
         synthRoll.fitTo(48)
         anaBox.addView(synthRoll.view, ui.fullWidth(8))

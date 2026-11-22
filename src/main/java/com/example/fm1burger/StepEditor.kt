@@ -13,7 +13,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.ScrollView
 
 /**
  * 3.27: a Home lane's steps, the FM-1 way. A tap on the lane's picture on Home opens it over the page: the 16 steps
@@ -40,6 +39,8 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
     private val h = Handler(Looper.getMainLooper())
     private var lastPlay = -2
     private val color = if (drum) Theme.RED else Theme.ACCENT
+    // 3.37: the P of this window's step dock (the drums, or this lane's sampler track, alone)
+    private val prep = PrepareBar(a, false) { if (drum) Engine.PREP_PADS else k }
 
     // the piano keys: two octaves from the C of octave [oct] (C4 = the sample's own pitch, as the NOTE slider shows it)
     private var oct = 3
@@ -97,7 +98,8 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         box.addView(br, ui.fullWidth(4))
 
         // the keys (as many as the meter's bar has: 16 for 4/4, two rows of 8 as the FM-1's keys)
-        box.addView(keyBox, ui.fullWidth(6))
+        // 3.37: the keys in their dock (EDIT lock, PLAY, P: only this lane's instrument)
+        box.addView(StepDock(a, prep, keyBox, bottomDp = 4).view, ui.fullWidth(6))
         for (s in 0 until 24) {
             run {
                 val b = Button(a)
@@ -188,7 +190,7 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
             "; STEP INPUT writes it in the picked step and moves on, REC writes it in the step that is playing. " +
             "⤢: the keys full-screen (hit harder = louder).", 11f, Theme.FAINT), ui.fullWidth(8))
 
-        val sv = ScrollView(a)
+        val sv = LockableScrollView(a)
         sv.addView(box)
         val dlg = AlertDialog.Builder(a).setTitle("LANE ${lane + 1}  ·  ${a.lanes.label(lane)}  ·  STEPS")
             .setView(sv)

@@ -7,7 +7,6 @@ import android.graphics.RectF
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import kotlin.math.max
 
@@ -19,7 +18,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
 
     private val ui = a.ui
     private val amb = a.engine.ambient
-    override val root = ScrollView(a)
+    override val root = LockableScrollView(a)
     private val content = ui.col()
     private val kindBtns = ArrayList<Button>()
     private val stepBtns = ArrayList<Button>()
@@ -146,7 +145,7 @@ class AmbientScreen(private val a: MainActivity) : Screen {
             b.setPadding(0, 0, 0, 0)
             stepBtns.add(b)
         }
-        sp.addView(barCells.box)
+        sp.addView(StepDock(a, prep, barCells.box).view, ui.fullWidth(4))      // 3.37
         val sr = ui.row()
         sr.addView(ui.button("Clear") {
             for (i in 0 until Cfg.STEPS) amb.steps[i] = false

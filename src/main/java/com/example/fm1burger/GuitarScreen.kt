@@ -3,7 +3,6 @@ package com.example.fm1burger
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 
 /**
@@ -15,7 +14,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
 
     private val ui = a.ui
     private val e = a.engine
-    override val root = ScrollView(a)
+    override val root = LockableScrollView(a)
     private val content = ui.col()
     private var mode = 0           // 0 rhythm, 1 riff
     private val prep = PrepareBar(a, true) { if (mode == 0) Engine.PREP_RHYTHM else Engine.PREP_RIFF }
@@ -73,7 +72,7 @@ class GuitarScreen(private val a: MainActivity) : Screen {
             b.maxLines = 2
             cells.add(b)
         }
-        sp.addView(barCells.box)
+        sp.addView(StepDock(a, prep, barCells.box).view, ui.fullWidth(4))      // 3.37
         info = ui.text("", 12f, Theme.DIM)
         sp.addView(info, ui.fullWidth(6))
 
