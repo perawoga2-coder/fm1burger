@@ -43,6 +43,16 @@ class MixerScreen(private val a: MainActivity) : Screen {
     private lateinit var riffMuteBtn: Button
     private lateinit var ambMuteBtn: Button
     private var muteKey = ""
+
+    // 3.38: one strip for each drum pad a Home lane shows (in Home's lane order), on pads[k].volume
+    private val lanes = a.lanes
+    private val padRow = ui.row()
+    private val padFaders = ArrayList<FaderView>()
+    private val padMuteBtns = ArrayList<Button>()
+    private val padIdx = IntArray(LaneSetup.N)                 // the pad of each strip
+    private val padSeenName = arrayOfNulls<String>(LaneSetup.N)   // the sound name each strip's label was made from
+    private var padCount = -1                                  // -1: not built yet
+    private val padScratch = IntArray(LaneSetup.N)
     private lateinit var outSpinner: Spinner
     private var outDevs: List<AudioDeviceInfo> = emptyList()
     private var lastOut = 0
@@ -113,12 +123,12 @@ class MixerScreen(private val a: MainActivity) : Screen {
         }
 
         val pcol = ui.panel()
-        pcol.addView(ui.text("Drums", 13f, Theme.GREEN, true))
+        pcol.addView(ui.text("All drums", 13f, Theme.GREEN, true))
         padFader = FaderView(a)
         padFader.color = Theme.GREEN
         padFader.onChange = { v -> e.padVol = v }
         pcol.addView(padFader, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
-        pcol.addView(ui.text("All 32 drum pads together (banks A and B)", 11f, Theme.DIM))
+        pcol.addView(ui.text("Drum bus: all 32 drum pads together (banks A and B)", 11f, Theme.DIM))
         drumMuteBtn = ui.button("Mute") {
             val anyOn = e.pads.any { !it.mute }
             for (p in e.pads) p.mute = anyOn
@@ -126,6 +136,9 @@ class MixerScreen(private val a: MainActivity) : Screen {
         }
         pcol.addView(drumMuteBtn, ui.fullWidth(4))
         row.addView(pcol, colLp())
+        // 3.38: the strips of the drum lanes on Home (filled by syncPadStrips)
+        padRow.gravity = android.view.Gravity.TOP
+        row.addView(padRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         val bcol = ui.panel()
         bcol.addView(ui.text("Bassline", 13f, Theme.ACCENT, true))
@@ -233,6 +246,88 @@ class MixerScreen(private val a: MainActivity) : Screen {
         return lp
     }
 
+    /** The drum pads Home's lanes show, in lane order, each once, into [out]; returns how many. */
+    private fun homePads(out: IntArray): Int {
+        var n = 0
+        for (i in 0 until LaneSetup.N) {
+            if (lanes.type[i] != Inst.DRUM) continue
+            val k = lanes.idx[i]
+            if (k !in e.pads.indices) continue
+            var dup = false
+            for (j in 0 until n) if (out[j] == k) { dup = true; break }
+            if (!dup) out[n++] = k
+        }
+        return n
+    }
+
+    /** "A1 Kick": the pad and its sound, as the Home lane names it. */
+    private fun padLabel(k: Int): String {
+        val n = e.pads[k].name
+        val sn = n.removeSuffix(".wav").removePrefix("Drum_").replace('_', ' ')
+        return if (sn.isEmpty()) Cfg.padName(k) else "${Cfg.padName(k)} $sn"
+    }
+
+    /** 3.38: rebuilds the drum lanes' strips when Home's lanes (or a pad's sound) changed; cheap when nothing did. */
+    private fun syncPadStrips() {
+        val n = homePads(padScratch)
+        var same = n == padCount
+        if (same) for (j in 0 until n) {
+            if (padScratch[j] != padIdx[j] || e.pads[padScratch[j]].name != padSeenName[j]) { same = false; break }
+        }
+        if (same) return
+        // a finger on one of these faders: wait until it lifts
+        for (f in padFaders) if (f.touching) return
+        padRow.removeAllViews()
+        padFaders.clear()
+        padMuteBtns.clear()
+        padCount = n
+        val col = Inst.color(Inst.DRUM)
+        for (j in 0 until n) {
+            val k = padScratch[j]
+            padIdx[j] = k
+            padSeenName[j] = e.pads[k].name
+            val c = ui.panel()
+            val t = ui.text(padLabel(k), 13f, col, true)
+            t.maxLines = 1
+            t.ellipsize = android.text.TextUtils.TruncateAt.END
+            c.addView(t)
+            val f = FaderView(a)
+            f.color = col
+            f.value = e.pads[k].volume
+            f.onChange = { v -> e.pads[k].volume = v }
+            c.addView(f, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(240)))
+            c.addView(ui.text("Drum lane on Home (this pad only)", 11f, Theme.DIM))
+            val m = ui.button("Mute") {
+                e.pads[k].mute = !e.pads[k].mute
+                refreshMutes()
+            }
+            c.addView(m, ui.fullWidth(4))
+            padFaders.add(f)
+            padMuteBtns.add(m)
+            padRow.addView(c, colLp())
+        }
+        refreshMutes()
+    }
+
+    /** 3.38: a fader follows its value when it changed somewhere else (Home, automation, MIDI...) and no finger is on it. */
+    private fun follow(f: FaderView, v: Float) {
+        if (!f.touching && f.value != v) f.value = v
+    }
+
+    private fun syncFaders() {
+        for (i in 0 until Cfg.TRACKS) follow(faders[i], e.tracks[i].volume)
+        follow(padFader, e.padVol)
+        for (j in 0 until padFaders.size) follow(padFaders[j], e.pads[padIdx[j]].volume)
+        follow(bassFader, e.bass.volume)
+        follow(synthFader, e.analog.volume)
+        follow(voiceFader, e.vocal.volume)
+        follow(songFader, e.bank.clipVol)
+        follow(rhythmFader, e.rhythmGtr.volume)
+        follow(riffFader, e.riffGtr.volume)
+        follow(ambFader, e.ambient.volume)
+        follow(masterFader, e.masterVol)
+    }
+
     private fun panText(v: Int): String = when {
         v == 100 -> "C"
         v < 100 -> "L${100 - v}"
@@ -268,6 +363,7 @@ class MixerScreen(private val a: MainActivity) : Screen {
             ui.styleButton(muteBtns[i], e.tracks[i].mute, Theme.RED)
         }
         ui.styleButton(drumMuteBtn, e.pads.all { it.mute }, Theme.RED)
+        for (j in 0 until padMuteBtns.size) ui.styleButton(padMuteBtns[j], e.pads[padIdx[j]].mute, Theme.RED)
         ui.styleButton(bassMuteBtn, e.bass.mute, Theme.RED)
         ui.styleButton(synthMuteBtn, e.analog.mute, Theme.RED)
         ui.styleButton(voiceMuteBtn, e.vocal.mute, Theme.RED)
@@ -284,6 +380,8 @@ class MixerScreen(private val a: MainActivity) : Screen {
             "${e.bass.mute}${e.analog.mute}${e.vocal.mute}${e.bank.clipMute}${e.rhythmGtr.mute}${e.riffGtr.mute}${e.ambient.mute}"
 
     override fun onShow() {
+        syncPadStrips()
+        for (j in 0 until padFaders.size) padFaders[j].value = e.pads[padIdx[j]].volume
         for (i in 0 until Cfg.TRACKS) {
             faders[i].value = e.tracks[i].volume
             pans[i].set(((e.tracks[i].pan * 100).toInt() + 100).coerceIn(0, 200))
@@ -301,6 +399,8 @@ class MixerScreen(private val a: MainActivity) : Screen {
     }
 
     override fun onTick() {
+        syncPadStrips()
+        syncFaders()
         if (currentMuteKey() != muteKey) refreshMutes()
         for (i in 0 until Cfg.TRACKS) faders[i].meter = e.tracks[i].peak
         masterFader.meter = e.masterPeak

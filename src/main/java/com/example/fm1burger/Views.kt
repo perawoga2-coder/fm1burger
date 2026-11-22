@@ -265,6 +265,9 @@ class FaderView(ctx: Context) : View(ctx) {
         }
     var color = Theme.ACCENT
     var onChange: ((Float) -> Unit)? = null
+    /** 3.38: a finger is on the fader now (the Mixer does not move it under the finger) */
+    var touching = false
+        private set
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     override fun onDraw(c: Canvas) {
@@ -299,11 +302,13 @@ class FaderView(ctx: Context) : View(ctx) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
+                touching = true
                 val pad = 16f
                 val v = 1f - ((e.y - pad) / max(1f, height - 2 * pad))
                 value = v.coerceIn(0f, 1f)
                 onChange?.invoke(value)
             }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> touching = false
         }
         return true
     }
