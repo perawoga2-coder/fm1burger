@@ -282,7 +282,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         }
         bassRoll = PianoRollPanel(a, "Piano roll", bassModel,
             "Tap a cell for a note, tap the note again to remove it. Hold a note: accent (yellow) → slide (teal line) → both → none. " +
-                "It shows the bar picked with the bar buttons at the top.", false)
+                "It shows the bar picked with the bar buttons at the top.", false) { bigKeys(true) }
         bassRoll.roll.onSelect = { st -> selStep = st }
         bassBox.addView(bassRoll.view, ui.fullWidth(10))
 
@@ -351,6 +351,22 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         bs.note[s] = n
         bs.accent[s] = ac
         bs.slide[s] = sl
+    }
+
+    /** 3.32: the full-screen keyboard on the Bassline (one note at a time, as its piano roll's keys) or the Analog synth */
+    private fun bigKeys(bass: Boolean) {
+        if (bass) {
+            BigKeyboard(a, object : KeyLane("Bassline") {
+                override fun on(note: Int, vel: Int) {
+                    bs.previewReq = (note - bs.rootMidi()).coerceIn(0, 24)
+                }
+            }, (bs.rootMidi() / 12 - 1).coerceAtLeast(0)).show()
+        } else {
+            BigKeyboard(a, object : KeyLane("Analog synth") {
+                override fun on(note: Int, vel: Int) = an.noteOn(note)
+                override fun off(note: Int) = an.noteOff(note)
+            }, kbOct).show()
+        }
     }
 
     private fun preset(k: Int) {
@@ -462,6 +478,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
             refreshAnalog()
         }
         octRow.addView(aMuteBtn, ui.w(1f, 3))
+        octRow.addView(ui.button("⤢") { bigKeys(false) }, ui.w(0.6f, 3))       // 3.32: the keys full-screen
         anaBox.addView(octRow, ui.fullWidth(6))
 
         val kb = ui.row()
@@ -525,7 +542,8 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         }
         synthRoll = PianoRollPanel(a, "Piano roll", synthModel,
             "Tap cells for notes: several on one step make a chord. Tap a note again to remove it. Drag a note sideways to make it longer. " +
-                "The chord type above is added to every note (use Single for your own chords). It shows the bar picked with the bar buttons at the top.")
+                "The chord type above is added to every note (use Single for your own chords). It shows the bar picked with the bar buttons at the top.",
+            true) { bigKeys(false) }
         synthRoll.roll.onSelect = { st -> seqPanel.selected = st }
         synthRoll.fitTo(48)
         anaBox.addView(synthRoll.view, ui.fullWidth(8))

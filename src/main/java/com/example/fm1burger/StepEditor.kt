@@ -134,6 +134,8 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
             paint()
         }
         pr.addView(recBtn, ui.w(1f, 3))
+        // 3.32: the same keys, full-screen (touch velocity, chords); STEP INPUT / REC go on writing from there
+        pr.addView(ui.button("⤢") { bigKeys(sound) }, ui.w(0.6f, 3))
         box.addView(pr, ui.fullWidth(10))
         piano.limit = !drum
         piano.onKey = { key, vel -> pianoKey(key, vel) }
@@ -183,7 +185,8 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         box.addView(ui.text("Tap a key: the step on (and picked). Tap the picked step again: off. Long press: pick it " +
             "without changing it. These are the same steps as the Steps / Drum sequencer pages. " +
             (if (drum) "The piano keys play the pad (low on a key = louder)" else "The piano keys play the sample at that note") +
-            "; STEP INPUT writes it in the picked step and moves on, REC writes it in the step that is playing.", 11f, Theme.FAINT), ui.fullWidth(8))
+            "; STEP INPUT writes it in the picked step and moves on, REC writes it in the step that is playing. " +
+            "⤢: the keys full-screen (hit harder = louder).", 11f, Theme.FAINT), ui.fullWidth(8))
 
         val sv = ScrollView(a)
         sv.addView(box)
@@ -214,6 +217,11 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         if (!drum && (p < -24 || p > 24)) return
         val v = vel.coerceIn(0.3f, 1f)
         if (drum) e.padHit(k, v) else e.auditionNote(k, p)
+        writeKey(p, v)
+    }
+
+    /** a key's note (STEP INPUT: in the picked step, which moves on; REC: in the step playing) */
+    private fun writeKey(p: Int, v: Float) {
         if (stepInput) {
             if (picked >= Pat.spb()) picked = 0
             writeNote(Pat.base() + picked, p, v)
@@ -222,6 +230,27 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
             writeNote(e.curStep, p, v)
         }
         paint()
+    }
+
+    /** 3.32: the full-screen keyboard on this lane; its keys write in the steps as the keys here do */
+    private fun bigKeys(sound: String) {
+        BigKeyboard(a, object : KeyLane(sound) {
+            override val isSample = true
+            override fun sample(): FloatArray? = if (drum) e.pads[k].data else e.tracks[k].data
+            override fun semis(): Int = if (drum) 0 else e.tracks[k].pitch
+            override fun from(n: Int): Int = if (drum) 0 else (e.tracks[k].start * n).toInt()
+            override fun to(n: Int): Int = if (drum) n else (e.tracks[k].end * n).toInt()
+            override fun keyDown(note: Int, vel: Int) {
+                val p = note - 60
+                if (!drum && (p < -24 || p > 24)) return
+                writeKey(p, (vel / 127f).coerceIn(0.05f, 1f))
+            }
+            override fun info(): String = when {
+                stepInput -> "STEP INPUT: step ${picked + 1}"
+                rec -> if (e.playing) "REC" else "REC (press PLAY)"
+                else -> ""
+            }
+        }, oct).show { paint() }
     }
 
     private fun writeNote(s: Int, p: Int, v: Float) {

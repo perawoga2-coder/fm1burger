@@ -28,6 +28,13 @@ class Engine {
         const val BLOCK = 256
         const val GRAIN = 2048          // time stretch grain length (samples)
 
+        // 3.32: the full-screen keyboard's own voices
+        const val KEY_VOICES = 8
+        /** the keyboard's level in the mix (the preview voice sits at 0.8; chords add up, so a little under it) */
+        const val KEYS_LEVEL = 0.6f
+        private const val KQ = 64                       // the request queue (a power of two)
+        private const val KEY_ATTACK = 1f / 88f         // 2 ms
+
         // PREPARE mode: what plays alone (0-3 = sample track 1-4)
         const val PREP_NONE = -1
         const val PREP_PADS = 10
@@ -272,6 +279,236 @@ class Engine {
         if (i in tracks.indices) tracks[i].noteReq = semis.coerceIn(-24, 24)
     }
 
+    // ---------------- 3.32: the full-screen keyboard's voices (a small pool, mixed where the preview voice is) ----------------
+
+    /** One voice of the keyboard. Only the audio thread touches it. */
+    private class KeyVoice {
+        var data: FloatArray? = null
+        var id = 0
+        var age = 0L
+        var stage = 0           // 0 idle, 1 attack, 2 held, 3 release
+        var pos = 0.0
+        var rate = 1.0
+        var end = 0             // the sample ends here
+        var la = 0              // loop (lb > 0): la .. lb, the last xf samples before lb fade into la
+        var lb = 0
+        var xf = 0
+        var gain = 0f
+        var lp = 0f             // one-pole low-pass (brightness)
+        var lpK = 1f
+        var env = 0f
+        var relInc = 0f
+    }
+
+    private val keyVoices = Array(KEY_VOICES) { KeyVoice() }
+    private val keyBuf = FloatArray(BLOCK)
+    private var keysOn = false          // (audio thread) keyBuf holds sound for this block
+    private var keyAge = 0L
+
+    // the requests: the UI thread writes (under keyLock), the audio thread reads at the start of a block. Nothing is
+    // allocated: every slot is made here.
+    private val keyLock = Any()
+    private val kqType = IntArray(KQ)                   // 1 note on, 2 note off, 3 all off
+    private val kqId = IntArray(KQ)
+    private val kqData = arrayOfNulls<FloatArray>(KQ)
+    private val kqRate = DoubleArray(KQ)
+    private val kqGain = FloatArray(KQ)
+    private val kqLp = FloatArray(KQ)
+    private val kqRel = FloatArray(KQ)
+    private val kqFrom = IntArray(KQ)
+    private val kqTo = IntArray(KQ)
+    private val kqLa = IntArray(KQ)
+    private val kqLb = IntArray(KQ)
+    private val kqXf = IntArray(KQ)
+    @Volatile private var kqHead = 0
+    @Volatile private var kqTail = 0
+
+    /**
+     * The keyboard: a note starts. [id] names it for [keyOff]; [d] is played from [from] to [to] at [rate] (1 = as it is),
+     * at [gain] (0..1) through a low-pass of coefficient [lp] (0..1, 1 = open); it fades out in [releaseMs] at the note off.
+     * With [loopB] > [loopA] it loops loopA..loopB while it sounds, the last [xfade] samples crossfaded into the loop start.
+     */
+    fun keyOn(id: Int, d: FloatArray, rate: Double, gain: Float, lp: Float, releaseMs: Float,
+              from: Int, to: Int, loopA: Int, loopB: Int, xfade: Int) {
+        synchronized(keyLock) {
+            val h = kqHead
+            val next = (h + 1) and (KQ - 1)
+            if (next == kqTail) return          // full (the audio thread is not running): drop
+            kqType[h] = 1
+            kqId[h] = id
+            kqData[h] = d
+            kqRate[h] = rate
+            kqGain[h] = gain
+            kqLp[h] = lp
+            kqRel[h] = releaseMs
+            kqFrom[h] = from
+            kqTo[h] = to
+            kqLa[h] = loopA
+            kqLb[h] = loopB
+            kqXf[h] = xfade
+            kqHead = next
+        }
+    }
+
+    /** The keyboard: the note [id] is released. */
+    fun keyOff(id: Int) {
+        synchronized(keyLock) {
+            val h = kqHead
+            val next = (h + 1) and (KQ - 1)
+            if (next == kqTail) return
+            kqType[h] = 2
+            kqId[h] = id
+            kqData[h] = null
+            kqHead = next
+        }
+    }
+
+    /** The keyboard: every note is released. */
+    fun keysAllOff() {
+        synchronized(keyLock) {
+            val h = kqHead
+            val next = (h + 1) and (KQ - 1)
+            if (next == kqTail) return
+            kqType[h] = 3
+            kqId[h] = 0
+            kqData[h] = null
+            kqHead = next
+        }
+    }
+
+    /** Audio thread, at the start of a block: the keyboard's requests. */
+    private fun drainKeys() {
+        while (kqTail != kqHead) {
+            val i = kqTail
+            when (kqType[i]) {
+                1 -> keyStart(i)
+                2 -> {
+                    val id = kqId[i]
+                    for (v in keyVoices) if (v.stage != 0 && v.id == id) v.stage = 3
+                }
+                else -> for (v in keyVoices) if (v.stage != 0) v.stage = 3
+            }
+            kqData[i] = null
+            kqTail = (i + 1) and (KQ - 1)
+        }
+    }
+
+    private fun keyStart(i: Int) {
+        val d = kqData[i] ?: return
+        val n = d.size
+        if (n < 2) return
+        // a free voice, else the oldest
+        var v = keyVoices[0]
+        var found = false
+        for (k in keyVoices) {
+            if (k.stage == 0) {
+                v = k
+                found = true
+                break
+            }
+        }
+        if (!found) for (k in keyVoices) if (k.age < v.age) v = k
+        val a = kqFrom[i].coerceIn(0, n - 2)
+        val e = kqTo[i].coerceIn(a + 1, n)
+        var la = kqLa[i]
+        var lb = kqLb[i]
+        var xf = kqXf[i]
+        if (la < a || lb > e || lb - la < 64) {
+            la = 0
+            lb = 0
+            xf = 0
+        } else {
+            xf = xf.coerceIn(0, minOf(la - a, (lb - la) / 2))
+        }
+        v.data = d
+        v.id = kqId[i]
+        v.age = ++keyAge
+        v.pos = a.toDouble()
+        v.rate = kqRate[i].coerceIn(0.03, 32.0)
+        v.end = e
+        v.la = la
+        v.lb = lb
+        v.xf = xf
+        v.gain = kqGain[i].coerceIn(0f, 1f)
+        v.lpK = kqLp[i].coerceIn(0.01f, 1f)
+        v.lp = 0f
+        v.env = 0f
+        v.relInc = 1f / (kqRel[i].coerceIn(2f, 5000f) * 0.001f * Cfg.SR)
+        v.stage = 1
+    }
+
+    /** Audio thread: the keyboard's voices of this block into keyBuf (keysOn says whether there is any). */
+    private fun renderKeys() {
+        var any = false
+        for (v in keyVoices) if (v.stage != 0) any = true
+        if (!any) {
+            keysOn = false
+            return
+        }
+        java.util.Arrays.fill(keyBuf, 0f)
+        for (v in keyVoices) {
+            if (v.stage == 0) continue
+            val d = v.data
+            if (d == null) {
+                v.stage = 0
+                continue
+            }
+            val n = d.size
+            val looped = v.lb > 0
+            val span = (v.lb - v.la).toDouble()
+            for (f in 0 until BLOCK) {
+                var p = v.pos
+                if (looped && p >= v.lb) {
+                    p -= span
+                    if (p >= v.lb || p < v.la) p = v.la.toDouble()
+                }
+                val i = p.toInt()
+                if (i < 0 || i >= v.end || i >= n) {
+                    v.stage = 0
+                    break
+                }
+                val fr = (p - i).toFloat()
+                val s0 = d[i]
+                val s1 = if (i + 1 < n) d[i + 1] else 0f
+                var s = s0 + (s1 - s0) * fr
+                if (looped) {
+                    // the end of the loop fades into its start
+                    if (v.xf > 0 && p >= v.lb - v.xf) {
+                        val q = p - span
+                        val j = q.toInt()
+                        if (j >= 0 && j + 1 < n) {
+                            val k = ((p - (v.lb - v.xf)) / v.xf).toFloat().coerceIn(0f, 1f)
+                            val t0 = d[j]
+                            s = s * (1f - k) + (t0 + (d[j + 1] - t0) * (q - j).toFloat()) * k
+                        }
+                    }
+                } else if (p >= v.end - v.rate * 230.0) {
+                    // the sample runs out: a 5 ms fade instead of a click
+                    v.stage = 3
+                    if (v.relInc < 0.005f) v.relInc = 0.005f
+                }
+                v.lp += v.lpK * (s - v.lp)
+                if (v.stage == 1) {
+                    v.env += KEY_ATTACK
+                    if (v.env >= 1f) {
+                        v.env = 1f
+                        v.stage = 2
+                    }
+                } else if (v.stage == 3) {
+                    v.env -= v.relInc
+                    if (v.env <= 0f) {
+                        v.env = 0f
+                        v.stage = 0
+                        break
+                    }
+                }
+                keyBuf[f] += v.lp * v.gain * v.env
+                v.pos = p + v.rate
+            }
+        }
+        keysOn = true
+    }
+
     fun setSample(i: Int, name: String, d: FloatArray?) {
         val t = tracks[i]
         t.playing = false
@@ -467,6 +704,8 @@ class Engine {
     /** Mixes one block of audio into out. Runs on the audio thread. */
     private fun renderBlock(t0: Long, out: ShortArray, tl: FloatArray, tr: FloatArray, tpk: FloatArray) {
             handleRequests(t0)
+            drainKeys()
+            renderKeys()
             auto.block()
 
             for (i in 0 until Cfg.TRACKS) {
@@ -602,6 +841,11 @@ class Engine {
                 val pr = renderPad(preview) * 0.8f
                 l += pr
                 r += pr
+                if (keysOn) {                      // 3.32: the full-screen keyboard, where the preview voice is
+                    val kv = keyBuf[f] * KEYS_LEVEL
+                    l += kv
+                    r += kv
+                }
                 val preMono = (l + r) * 0.5f       // (3.19 RESAMPLE: caught before MASTER, at full level)
                 l = softClip(l * mv)
                 r = softClip(r * mv)

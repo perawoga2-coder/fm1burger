@@ -233,14 +233,23 @@ class PianoRollView(ctx: Context, private val model: RollModel) : View(ctx) {
 }
 
 /** A piano roll with its octave buttons and a help line. */
-class PianoRollPanel(a: MainActivity, title: String, model: RollModel, help: String, octaves: Boolean = true) {
+class PianoRollPanel(a: MainActivity, title: String, model: RollModel, help: String, octaves: Boolean = true,
+                     expand: (() -> Unit)? = null) {
     private val ui = a.ui
     val view: LinearLayout = ui.panel()
     val roll = PianoRollView(a, model)
     private val range: TextView
 
     init {
-        view.addView(ui.text(title, 14f, Theme.ACCENT, true))
+        if (expand != null) {
+            // 3.32: ⤢ opens the full-screen keyboard on this instrument
+            val tr = ui.row()
+            tr.addView(ui.text(title, 14f, Theme.ACCENT, true), ui.w(1f, 0))
+            tr.addView(ui.button("⤢") { expand() }, ui.w(0f, 0))
+            view.addView(tr)
+        } else {
+            view.addView(ui.text(title, 14f, Theme.ACCENT, true))
+        }
         view.addView(ui.text(help, 12f, Theme.DIM), ui.fullWidth(2))
         val r = ui.row()
         r.addView(ui.button("▼ Octave") { roll.low = roll.low - 12; label() }, ui.w(1f, 3))
