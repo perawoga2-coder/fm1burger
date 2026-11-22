@@ -233,7 +233,7 @@ class SongScreen(private val a: MainActivity) : Screen {
             .setTitle("Copy ${PartNames.NAMES[from]} to")
             .setItems(items) { _, which ->
                 val k = targets[which]
-                bank.parts[from].capture(e)
+                bank.keep()      // (3.34: a screen that belongs to no part does not go into this one)
                 bank.parts[k].copyFrom(bank.parts[from])
                 lastKey = ""
                 ui.toast("${PartNames.NAMES[from]} copied to ${PartNames.NAMES[k]}")

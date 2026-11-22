@@ -21,6 +21,10 @@ import org.json.JSONObject
  *
  * A part can also hold a live recording (the whole mix, recorded in time with the bars).
  * Then the part can play its patterns, its recording, or both.
+ *
+ * 3.34 TAKE ALL: the 6 parts are also the queue slots Q1..Q6 of the Home page. A slot filled by SEND is "full":
+ * besides the patterns it holds the guitars' and the New Ambient's steps, the sound of every Sampler track and drum
+ * pad, the volumes and all the mutes. A part made the old way (not full) leaves those alone, as before.
  */
 object PartNames {
     val NAMES = arrayOf("Intro", "Verse", "Pre-Chorus", "Hook", "Break", "Outro")
@@ -57,6 +61,29 @@ class PartSnap {
     var aEnabled = true
     var aMute = false
 
+    // ---- 3.34 TAKE ALL: what a full slot holds besides the patterns above ----
+    /** true: this part was sent by TAKE ALL (or copied from one): the fields below count. */
+    @Volatile var full = false
+    /** how many Home lanes were in use when it was sent (-1: not known) */
+    var lanes = -1
+    /** the guitars' steps, volume and mute: [0] rhythm, [1] riff */
+    val gArt = Array(2) { IntArray(Cfg.STEPS) }
+    val gFret = Array(2) { IntArray(Cfg.STEPS) }
+    val gMute = BooleanArray(2)
+    val gVol = floatArrayOf(0.75f, 0.6f)
+    val amb = BooleanArray(Cfg.STEPS)
+    var ambMute = false
+    var ambVol = 0.7f
+    /** the sound (file name) of every Sampler track and drum pad; "" = no sound */
+    val tName = Array(Cfg.TRACKS) { "" }
+    val pName = Array(Cfg.PADS) { "" }
+    val tVol = FloatArray(Cfg.TRACKS) { 0.8f }
+    val pVol = FloatArray(Cfg.PADS) { 1f }
+    var bVol = 0.85f
+    var aVol = 0.85f
+    var cVol = 0.9f
+    var cMute = false
+
     /** The pattern got longer: the new steps start as copies of the old ones (old until n). */
     fun extend(old: Int, n: Int) {
         if (old <= 0) return
@@ -70,6 +97,8 @@ class PartSnap {
             }
             bOn[k] = bOn[j]; bNote[k] = bNote[j]; bAcc[k] = bAcc[j]; bSlide[k] = bSlide[j]
             System.arraycopy(aGrid, j * AnalogSeq.NOTES, aGrid, k * AnalogSeq.NOTES, AnalogSeq.NOTES)
+            for (g in 0 until 2) { gArt[g][k] = gArt[g][j]; gFret[g][k] = gFret[g][j] }
+            amb[k] = amb[j]
         }
     }
 
@@ -84,6 +113,8 @@ class PartSnap {
         }
         bOn[k] = bOn[j]; bNote[k] = bNote[j]; bAcc[k] = bAcc[j]; bSlide[k] = bSlide[j]
         System.arraycopy(aGrid, j * AnalogSeq.NOTES, aGrid, k * AnalogSeq.NOTES, AnalogSeq.NOTES)
+        for (g in 0 until 2) { gArt[g][k] = gArt[g][j]; gFret[g][k] = gFret[g][j] }
+        amb[k] = amb[j]
     }
 
     /** Copy the live patterns of the engine into this part. */
@@ -117,7 +148,128 @@ class PartSnap {
         s.grid.copyInto(aGrid)
         aEnabled = s.enabled
         aMute = e.analog.mute
+        if (full) captureMix(e)
         used = true
+    }
+
+    /** 3.34: the rest of a full slot (guitars, ambient, sounds, volumes). Runs on the audio thread too: no allocation. */
+    private fun captureMix(e: Engine) {
+        // while this slot still waits for one of its sounds (see applyMix) the engine holds another sound in its
+        // place: the slot keeps its own names
+        val names = e.bank.soundsPending !== this
+        for (i in 0 until Cfg.TRACKS) {
+            if (names) tName[i] = e.tracks[i].sampleName
+            tVol[i] = e.tracks[i].volume
+        }
+        for (i in 0 until Cfg.PADS) {
+            if (names) pName[i] = e.pads[i].name
+            pVol[i] = e.pads[i].volume
+        }
+        bVol = e.bass.volume
+        aVol = e.analog.volume
+        cVol = e.bank.clipVol
+        cMute = e.bank.clipMute
+        for (g in 0 until 2) {
+            val gt = if (g == 0) e.rhythmGtr else e.riffGtr
+            gt.art.copyInto(gArt[g])
+            gt.fret.copyInto(gFret[g])
+            gMute[g] = gt.mute
+            gVol[g] = gt.volume
+        }
+        e.ambient.steps.copyInto(amb)
+        ambMute = e.ambient.mute
+        ambVol = e.ambient.volume
+    }
+
+    /** 3.34: everything on screen goes into this slot, whatever it held (the whole capture, as a full slot). */
+    fun grab(e: Engine) {
+        if (e.bank.soundsPending === this) e.bank.soundsPending = null
+        full = true
+        lanes = -1
+        capture(e)
+    }
+
+    /**
+     * 3.34 TAKE ALL -> SEND: everything that is in use goes into this slot. What is muted now is stored silent
+     * (its mute on, no steps) instead of with its pattern. [n] = the Home lanes in use (shown in the panel).
+     */
+    fun takeAll(e: Engine, n: Int) {
+        grab(e)
+        lanes = n
+        for (i in 0 until Cfg.TRACKS) if (tMute[i]) tOn[i].fill(false)
+        for (i in 0 until Cfg.PADS) if (pMute[i]) pOn[i].fill(false)
+        if (bMute) bOn.fill(false)
+        if (aMute) aGrid.fill(0)
+        for (g in 0 until 2) if (gMute[g]) {
+            gArt[g].fill(MetalGuitar.OFF)
+            gFret[g].fill(0)
+        }
+        if (ambMute) amb.fill(false)
+    }
+
+    /**
+     * 3.34: the rest of a full slot into the engine. Runs on the audio thread too, so no file is read and nothing
+     * is allocated: a sound comes from the bank's cache (PartBank.sounds); one that is not there yet stays as it is
+     * and ([request]) a background load is asked for (the slot's sounds are set again when it is done). A sound
+     * whose file is gone never gets into the cache, so the current sound stays.
+     */
+    fun applyMix(e: Engine, request: Boolean) {
+        val bk = e.bank
+        val c = bk.sounds
+        var miss = false
+        for (i in 0 until Cfg.TRACKS) {
+            val t = e.tracks[i]
+            t.volume = tVol[i]
+            val n = tName[i]
+            if (n != t.sampleName) {
+                if (n.isEmpty()) e.setSample(i, "", null)
+                else {
+                    val d = c[n]
+                    if (d != null) e.setSample(i, n, d) else miss = true
+                }
+            }
+        }
+        for (i in 0 until Cfg.PADS) {
+            val p = e.pads[i]
+            p.volume = pVol[i]
+            val n = pName[i]
+            if (n != p.name) {
+                if (n.isEmpty()) e.setPad(i, "", null)
+                else {
+                    val d = c[n]
+                    if (d != null) e.setPad(i, n, d) else miss = true
+                }
+            }
+        }
+        e.bass.volume = bVol
+        e.analog.volume = aVol
+        bk.clipVol = cVol
+        bk.clipMute = cMute
+        for (g in 0 until 2) {
+            val gt = if (g == 0) e.rhythmGtr else e.riffGtr
+            gArt[g].copyInto(gt.art)
+            gFret[g].copyInto(gt.fret)
+            gt.mute = gMute[g]
+            gt.volume = gVol[g]
+        }
+        amb.copyInto(e.ambient.steps)
+        e.ambient.mute = ambMute
+        e.ambient.volume = ambVol
+        bk.soundsPending = if (miss) this else null
+        if (miss && request) bk.wantSounds = true
+    }
+
+    /** 3.34: the sound names a full slot uses, into [out]. */
+    fun soundNames(out: MutableSet<String>) {
+        if (!full || !used) return
+        for (n in tName) if (n.isNotEmpty()) out.add(n)
+        for (n in pName) if (n.isNotEmpty()) out.add(n)
+    }
+
+    /** 3.34: a sound file got another name. */
+    fun renameSound(old: String, new: String) {
+        for (i in tName.indices) if (tName[i] == old) tName[i] = new
+        for (i in pName.indices) if (pName[i] == old) pName[i] = new
     }
 
     /** Put this part into the live patterns of the engine. */
@@ -151,6 +303,7 @@ class PartSnap {
         aGrid.copyInto(s.grid)
         s.enabled = aEnabled
         e.analog.mute = aMute
+        if (full) applyMix(e, true)
     }
 
     fun copyFrom(o: PartSnap) {
@@ -173,6 +326,25 @@ class PartSnap {
         o.aGrid.copyInto(aGrid)
         aEnabled = o.aEnabled
         aMute = o.aMute
+        full = o.full
+        lanes = o.lanes
+        for (g in 0 until 2) {
+            o.gArt[g].copyInto(gArt[g])
+            o.gFret[g].copyInto(gFret[g])
+        }
+        o.gMute.copyInto(gMute)
+        o.gVol.copyInto(gVol)
+        o.amb.copyInto(amb)
+        ambMute = o.ambMute
+        ambVol = o.ambVol
+        o.tName.copyInto(tName)
+        o.pName.copyInto(pName)
+        o.tVol.copyInto(tVol)
+        o.pVol.copyInto(pVol)
+        bVol = o.bVol
+        aVol = o.aVol
+        cVol = o.cVol
+        cMute = o.cMute
         used = o.used
     }
 
@@ -197,6 +369,9 @@ class PartSnap {
         aGrid.fill(0)
         aEnabled = true
         aMute = false
+        // (3.34) an old-style part again: the guitars, sounds and volumes are left alone
+        full = false
+        lanes = -1
         used = true
     }
 
@@ -207,6 +382,10 @@ class PartSnap {
         for (r in pOn) for (x in r) if (x) n++
         for (x in bOn) if (x) n++
         for (x in aGrid) if (x > 0) n++
+        if (full) {
+            for (r in gArt) for (x in r) if (x == MetalGuitar.CHUG || x == MetalGuitar.OPEN) n++
+            for (x in amb) if (x) n++
+        }
         return n
     }
 
@@ -232,6 +411,26 @@ class PartSnap {
         o.put("aNotes", AnalogSeq.gridToJson(aGrid))
         o.put("aEnabled", aEnabled)
         o.put("aMute", aMute)
+        if (full) {
+            // 3.34 TAKE ALL (a part without "full" is an old-style part)
+            o.put("full", true)
+            o.put("lanes", lanes)
+            o.put("gArt", gridI(gArt))
+            o.put("gFret", gridI(gFret))
+            o.put("gMute", arrB(gMute))
+            o.put("gVol", arrF(gVol))
+            o.put("amb", arrB(amb))
+            o.put("ambMute", ambMute)
+            o.put("ambVol", ambVol.toDouble())
+            o.put("tName", arrS(tName))
+            o.put("pName", arrS(pName))
+            o.put("tVol", arrF(tVol))
+            o.put("pVol", arrF(pVol))
+            o.put("bVol", bVol.toDouble())
+            o.put("aVol", aVol.toDouble())
+            o.put("cVol", cVol.toDouble())
+            o.put("cMute", cMute)
+        }
         return o
     }
 
@@ -266,6 +465,37 @@ class PartSnap {
         }
         aEnabled = o.optBoolean("aEnabled", true)
         aMute = o.optBoolean("aMute", false)
+        // 3.34: an old parts.json has none of these: the part stays an old-style part
+        full = o.optBoolean("full", false)
+        lanes = o.optInt("lanes", -1)
+        if (full) {
+            readGridI(o.optJSONArray("gArt"), gArt, 0)
+            readGridI(o.optJSONArray("gFret"), gFret, 0)
+            readB(o.optJSONArray("gMute"), gMute)
+            readF(o.optJSONArray("gVol"), gVol)
+            readB(o.optJSONArray("amb"), amb)
+            ambMute = o.optBoolean("ambMute", false)
+            ambVol = o.optDouble("ambVol", 0.7).toFloat().coerceIn(0f, 1f)
+            readS(o.optJSONArray("tName"), tName)
+            readS(o.optJSONArray("pName"), pName)
+            readF(o.optJSONArray("tVol"), tVol)
+            readF(o.optJSONArray("pVol"), pVol)
+            bVol = o.optDouble("bVol", 0.85).toFloat()
+            aVol = o.optDouble("aVol", 0.85).toFloat()
+            cVol = o.optDouble("cVol", 0.9).toFloat()
+            cMute = o.optBoolean("cMute", false)
+        }
+    }
+
+    private fun arrS(a: Array<String>): JSONArray {
+        val j = JSONArray()
+        for (x in a) j.put(x)
+        return j
+    }
+
+    private fun readS(j: JSONArray?, a: Array<String>) {
+        if (j == null) return
+        for (k in 0 until minOf(j.length(), a.size)) a[k] = j.optString(k, "")
     }
 
     private fun arrB(a: BooleanArray): JSONArray {
@@ -352,6 +582,134 @@ class PartBank(private val e: Engine) {
 
     val parts = Array(N) { PartSnap() }
 
+    // ---- 3.34 TAKE ALL: the parts are the queue slots Q1..Q6 ----
+    /**
+     * true: what is on screen belongs to no part (after SEND into the playing part, or RECALL), so nothing that is
+     * edited now changes a slot until it is sent. A part switch keeps the screen in [last] and ends this.
+     */
+    @Volatile var loose = false
+    /** the screen while [loose], kept across restarts */
+    val work = PartSnap()
+    /** the screen as it was before a RECALL or a part switch last replaced it (it can be recalled) */
+    val last = PartSnap()
+
+    /**
+     * The sounds of the full slots, ready in memory (file name -> samples), so the audio thread only swaps
+     * references. Never changed in place: a new map replaces it (made on a background thread).
+     */
+    @Volatile var sounds: HashMap<String, FloatArray> = HashMap()
+    /** set by the audio thread: a slot wanted a sound that is not in [sounds] yet (the UI thread starts the load) */
+    @Volatile var wantSounds = false
+    /** the slot that was put on screen last and still misses a sound */
+    @Volatile var soundsPending: PartSnap? = null
+    /** reads a sound file as the engine wants it (set by MainActivity); null: the file is gone */
+    @Volatile var soundLoader: ((String) -> FloatArray?)? = null
+    private val soundLock = Any()
+    private val staleSounds = HashSet<String>()      // files that changed: read again, whatever is in memory
+
+    /**
+     * UI thread: every sound a slot names gets into [sounds], on a background thread (the sounds that are loaded
+     * in the engine now are taken as they are, the others are read from their files). [done] runs on that thread.
+     */
+    fun preloadSounds(done: (() -> Unit)? = null) {
+        wantSounds = false
+        val load = soundLoader ?: return
+        val names = HashSet<String>()
+        for (p in parts) p.soundNames(names)
+        work.soundNames(names)
+        last.soundNames(names)
+        val live = HashMap<String, FloatArray>()
+        for (t in e.tracks) {
+            val d = t.data
+            val n = t.sampleName
+            if (d != null && n.isNotEmpty()) live[n] = d
+        }
+        for (p in e.pads) {
+            val d = p.data
+            val n = p.name
+            if (d != null && n.isNotEmpty()) live[n] = d
+        }
+        Thread {
+            try {
+                synchronized(soundLock) {
+                    val old = sounds
+                    val m = HashMap<String, FloatArray>()
+                    for (n in names) {
+                        val d = (if (staleSounds.remove(n)) null else live[n] ?: old[n])
+                            ?: try { load(n) } catch (ex: Throwable) { null }
+                        if (d != null) m[n] = d
+                    }
+                    sounds = m
+                }
+                done?.invoke()
+            } catch (ex: Throwable) {
+            }
+        }.start()
+    }
+
+    /** UI thread: the file of this sound changed: it is read again the next time. */
+    fun forgetSound(name: String) {
+        synchronized(soundLock) {
+            staleSounds.add(name)
+            if (!sounds.containsKey(name)) return
+            val m = HashMap(sounds)
+            m.remove(name)
+            sounds = m
+        }
+    }
+
+    /** UI thread: a sound file got another name. */
+    fun renameSound(old: String, new: String) {
+        for (p in parts) p.renameSound(old, new)
+        work.renameSound(old, new)
+        last.renameSound(old, new)
+        synchronized(soundLock) {
+            val d = sounds[old] ?: return
+            val m = HashMap(sounds)
+            m.remove(old)
+            m[new] = d
+            sounds = m
+        }
+    }
+
+    /** UI thread: keep what is on screen where it belongs (its part, or nowhere but [work] while it is loose). */
+    fun keep() {
+        if (loose) {
+            work.grab(e)
+        } else {
+            parts[cur].capture(e)
+        }
+    }
+
+    /**
+     * UI thread, TAKE ALL -> SEND: everything in use goes into slot i. The screen and the playing part stay as
+     * they are; when i is the playing part, the screen no longer belongs to it (so the slot stays as it was sent).
+     */
+    fun send(i: Int, lanes: Int) {
+        if (i !in 0 until N) return
+        parts[i].takeAll(e, lanes)
+        if (i == cur) loose = true
+    }
+
+    /**
+     * UI thread, TAKE ALL -> RECALL: [src] (a slot, or [last]) replaces everything on screen. The playing part does
+     * not change. What was on screen is kept first (in its part, and in [last]); after it the screen belongs to no
+     * part, so editing it changes no slot until it is sent.
+     */
+    fun recall(src: PartSnap) {
+        if (!src.used) return
+        var from = src
+        if (src === last) {
+            from = PartSnap()
+            from.copyFrom(last)
+        }
+        if (!loose) parts[cur].capture(e)
+        last.grab(e)
+        from.apply(e)
+        loose = true
+        version++
+    }
+
     // cue slots 1-6 at the top of the app: which part each slot plays
     val slot = IntArray(N) { it }
 
@@ -426,10 +784,18 @@ class PartBank(private val e: Engine) {
     /** Audio thread: switch the live pattern to part i, keeping the current pattern first. */
     fun switchTo(i: Int) {
         if (i !in 0 until N) return
-        if (i == cur) return
-        parts[cur].capture(e)
+        // (3.34) a loose screen belongs to no part: it is kept in [last], and the part is put on screen even when
+        // it is the one that plays
+        val wasLoose = loose
+        if (i == cur && !wasLoose) return
+        if (wasLoose) {
+            last.grab(e)
+            loose = false
+        } else {
+            parts[cur].capture(e)
+        }
         val p = parts[i]
-        if (!p.used) p.copyFrom(parts[cur])
+        if (!p.used) p.copyFrom(if (wasLoose) last else parts[cur])
         p.apply(e)
         cur = i
         partChanged = true
@@ -823,9 +1189,13 @@ class PartBank(private val e: Engine) {
     /** UI thread: keep the live pattern in its part and write everything to disk. */
     fun save(f: File) {
         try {
-            parts[cur].capture(e)
+            keep()
             val o = JSONObject()
             o.put("cur", cur)
+            // 3.34
+            o.put("loose", loose)
+            if (loose) o.put("work", work.toJson())
+            if (last.used) o.put("last", last.toJson())
             o.put("jumpNow", jumpNow)
             o.put("songLoop", songLoop)
             o.put("clipVol", clipVol.toDouble())
@@ -847,6 +1217,7 @@ class PartBank(private val e: Engine) {
             SafeIo.writeText(f, o.toString())
         } catch (ex: Exception) {
         }
+        preloadSounds()
     }
 
     /** UI thread at start-up, after the project is loaded. */
@@ -885,10 +1256,19 @@ class PartBank(private val e: Engine) {
                 }
             }
             cur = o.optInt("cur", 0).coerceIn(0, N - 1)
-            if (parts[cur].used) parts[cur].apply(e) else parts[cur].capture(e)
+            // 3.34: the screen that belonged to no part, and the screen kept before the last recall
+            val wj = o.optJSONObject("work")
+            val lj = o.optJSONObject("last")
+            if (lj != null) last.fromJson(lj)
+            loose = o.optBoolean("loose", false) && wj != null
+            if (loose && wj != null) {
+                work.fromJson(wj)
+                work.apply(e)
+            } else if (parts[cur].used) parts[cur].apply(e) else parts[cur].capture(e)
             version++
         } catch (ex: Exception) {
             cur = 0
+            loose = false
             parts[0].capture(e)
         }
     }

@@ -308,6 +308,30 @@ class HomeScreen(private val a: MainActivity) : Screen {
         }
     }
 
+    /**
+     * 3.34 TAKE ALL: how many lanes are in use now: not muted, and with something to play (a step that is on; a
+     * Sampler track that loops its sound). The Song rec lane is not counted: a part's recording stays in its part.
+     */
+    fun lanesInUse(): Int {
+        var n = 0
+        for (i in 0 until LaneSetup.N) {
+            if (isMuted(i)) continue
+            val k = lanes.idx[i]
+            val on = when (lanes.type[i]) {
+                Inst.SAMPLE -> e.tracks[k].data != null && (e.tracks[k].loop || e.tracks[k].steps.any { it.on })
+                Inst.DRUM -> e.pads[k].data != null && e.pads[k].on.any { it }
+                Inst.BASS -> e.bass.on.any { it }
+                Inst.SYNTH -> e.analogSeq.enabled && e.analogSeq.grid.any { it > 0 }
+                Inst.AMBIENT -> e.ambient.steps.any { it }
+                Inst.RHYTHM -> e.rhythmGtr.art.any { it == MetalGuitar.CHUG || it == MetalGuitar.OPEN }
+                Inst.RIFF -> e.riffGtr.art.any { it == MetalGuitar.CHUG || it == MetalGuitar.OPEN }
+                else -> false
+            }
+            if (on) n++
+        }
+        return n
+    }
+
     private fun toggleMute(i: Int) {
         val k = lanes.idx[i]
         val m = !isMuted(i)

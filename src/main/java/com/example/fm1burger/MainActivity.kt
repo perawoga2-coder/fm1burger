@@ -95,6 +95,7 @@ class MainActivity : Activity() {
     private lateinit var screens: List<Screen>
     private lateinit var tabBtns: List<Button>
     private lateinit var playBtn: Button
+    private lateinit var takeBtn: Button             // 3.34: TAKE ALL, next to PLAY on the Home page
     private var homeBar: View? = null
     private lateinit var syncBtn: Button
     private lateinit var muteAllBtn: Button
@@ -148,7 +149,9 @@ class MainActivity : Activity() {
         AmbientSave.load(File(filesDir, "ambient.json"), engine.ambient)
         GuitarSave.load(File(filesDir, "guitars.json"), engine.rhythmGtr, engine.riffGtr, engine.drumHeavy)
         Fm1SampleLink.loud = getSharedPreferences("fm1", MODE_PRIVATE).getInt("loud", 1).coerceIn(0, 2)
+        engine.bank.soundLoader = { name -> store.loadEngine(name) }      // (3.34: the slots' sounds, off the audio thread)
         engine.bank.load(File(filesDir, "parts.json"))
+        preloadBank()
         engine.bank.loadClips(filesDir)
         lastPartVersion = engine.bank.version
         installRockKit()
@@ -252,6 +255,13 @@ class MainActivity : Activity() {
         playBtn.setPadding(0, 0, 0, 0)
         ui.styleButton(playBtn, true, Theme.GREEN, 30)
         r1.addView(playBtn, LinearLayout.LayoutParams(ui.dp(72), ui.dp(72)).also { it.marginEnd = ui.dp(10) })
+        // 3.34: TAKE ALL (Home page only): everything in use goes to a queue slot Q1..Q6, or a slot comes back
+        takeBtn = ui.button("TAKE\nALL") { TakeAllPanel(this).show() }
+        takeBtn.textSize = 15f
+        takeBtn.typeface = Ui.BOLD
+        takeBtn.setPadding(0, 0, 0, 0)
+        ui.styleButton(takeBtn, true, Theme.ACCENT, 16)
+        r1.addView(takeBtn, LinearLayout.LayoutParams(ui.dp(84), ui.dp(72)).also { it.marginEnd = ui.dp(10) })
 
         // tempo block: − [ BPM 120 ] +
         val tempo = ui.row()
@@ -519,6 +529,7 @@ class MainActivity : Activity() {
         cueRow?.visibility = if (sec == 0 || sec == 3) View.VISIBLE else View.GONE
         homeFab.visibility = if (i == TAB_HOME) View.GONE else View.VISIBLE
         homeBar?.visibility = if (i == TAB_HOME) View.VISIBLE else View.GONE   // (3.23: Home's line in the bar)
+        takeBtn.visibility = if (i == TAB_HOME) View.VISIBLE else View.GONE
         screens.forEachIndexed { idx, s -> s.root.visibility = if (idx == i) View.VISIBLE else View.GONE }
         paintTabs()
         // keep the open tab visible in the scrolling tab bar
@@ -674,7 +685,7 @@ class MainActivity : Activity() {
             b.songOn = false
             ui.toast("Song mode is off now, you are playing the parts by hand")
         }
-        if (i == b.cur && b.cueReq < 0) return
+        if (i == b.cur && !b.loose && b.cueReq < 0) return      // (3.34: a loose screen is not the part: the tap puts the part on)
         b.cue(i)
     }
 
@@ -1248,7 +1259,26 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * 3.34: the sounds the queue slots name get into memory on a background thread (the audio thread never reads a
+     * file); when they are there, a slot that is on screen and still missed one gets its sounds.
+     */
+    fun preloadBank() {
+        val b = engine.bank
+        b.preloadSounds {
+            runOnUiThread {
+                val p = b.soundsPending
+                if (p != null) {
+                    p.applyMix(engine, false)
+                    b.soundsPending = null          // (a sound still missing has no file: the slot takes what is there)
+                    refreshCurrent()
+                }
+            }
+        }
+    }
+
     private fun tick() {
+        if (engine.bank.wantSounds) preloadBank()
         if (syncState != 0 && !midi.connected) {
             syncOff()
             syncNote = "MIDI device disconnected"
@@ -1749,11 +1779,14 @@ class MainActivity : Activity() {
     fun reloadByName(name: String) {
         for (i in 0 until Cfg.TRACKS) if (engine.tracks[i].sampleName == name) assignTrack(i, store.file(name))
         for (i in 0 until Cfg.PADS) if (engine.pads[i].name == name) assignPad(i, store.file(name))
+        engine.bank.forgetSound(name)       // (3.34: the queue slots read the changed file again)
+        engine.bank.wantSounds = true
     }
 
     fun renameRefs(old: String, new: String) {
         for (t in engine.tracks) if (t.sampleName == old) t.sampleName = new
         for (p in engine.pads) if (p.name == old) p.name = new
+        engine.bank.renameSound(old, new)
     }
 
     /** 3.19: a sound to work on goes onto the selected SAMPLING track (the Edit page is part of SAMPLING now). */

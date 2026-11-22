@@ -44,7 +44,7 @@ object MidiExport {
             for (i in 0 until bank.songLen) {
                 val p = bank.songPart[i].coerceIn(0, PartBank.N - 1)
                 val real = bank.parts[p]
-                val snap = if (p == bank.cur || !real.used) live else real
+                val snap = if ((p == bank.cur && !bank.loose) || !real.used) live else real   // (3.34: a loose screen is no part)
                 // a part that plays only its recording has no notes
                 if (real.mode == 1 && real.hasClip()) {
                     secs.add(Section(PartSnap(), bank.songBars[i].coerceAtLeast(1)))
