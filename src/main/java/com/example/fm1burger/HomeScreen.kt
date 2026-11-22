@@ -140,7 +140,8 @@ class LaneSetup {
  * Home: one page with all 17 lanes.
  * Left: the lane number (tap again and again to choose the instrument; the color follows it),
  * then the instrument icon (tap it to open that instrument's own page),
- * then a picture of what the lane holds (waveform or pattern), and a mute button.
+ * then a picture of what the lane holds (waveform or pattern; 3.27: tap a Sampler / Drum lane's to edit its steps,
+ * long press to hear it), and a mute button.
  */
 class HomeScreen(private val a: MainActivity) : Screen {
 
@@ -222,7 +223,11 @@ class HomeScreen(private val a: MainActivity) : Screen {
         row.addView(icon, LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)).also { it.marginEnd = ui.dp(5) })
 
         val lv = LaneView(a, e, lanes, i)
-        lv.setOnClickListener { hearLane(i) }
+        // 3.27: a tap on a Sampler / Drum lane's picture opens its steps (the FM-1 way); long press: hear it
+        lv.setOnClickListener {
+            if (lanes.type[i] == Inst.SAMPLE || lanes.type[i] == Inst.DRUM) StepEditor(a, i).show() else hearLane(i)
+        }
+        lv.setOnLongClickListener { hearLane(i); true }
         row.addView(lv, LinearLayout.LayoutParams(0, ui.dp(48), 1f))
 
         val m = ui.button("M") { toggleMute(i) }
