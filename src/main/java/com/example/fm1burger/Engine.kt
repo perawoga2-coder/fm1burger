@@ -267,6 +267,11 @@ class Engine {
         tracks[i].auditionReq = true
     }
 
+    /** Plays track [i]'s sample once at [semis] semitones from its pitch (the piano keys of the STEPS window). The audio thread starts it. */
+    fun auditionNote(i: Int, semis: Int) {
+        if (i in tracks.indices) tracks[i].noteReq = semis.coerceIn(-24, 24)
+    }
+
     fun setSample(i: Int, name: String, d: FloatArray?) {
         val t = tracks[i]
         t.playing = false
@@ -706,6 +711,11 @@ class Engine {
             if (t.auditionReq) {
                 t.auditionReq = false
                 if (t.playing) t.playing = false else trigger(t, 0, 1f)
+            }
+            val nr = t.noteReq
+            if (nr != Track.NOTE_NONE) {
+                t.noteReq = Track.NOTE_NONE
+                trigger(t, nr, 1f)
             }
         }
         for (p in pads) padRequest(p)

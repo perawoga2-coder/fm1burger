@@ -98,6 +98,8 @@ class Track(val index: Int) {
 
     // state used by the audio thread
     @Volatile var auditionReq = false
+    /** STEPS window piano keys: play the sample at this many semitones from its pitch (NOTE_NONE = nothing asked). */
+    @Volatile var noteReq = NOTE_NONE
     @Volatile var playing = false
     var pos = 0.0
     var rate = 1.0
@@ -106,6 +108,10 @@ class Track(val index: Int) {
     var vStart = 0.0
     var vEnd = 0.0
     @Volatile var peak = 0f
+
+    companion object {
+        const val NOTE_NONE = Int.MIN_VALUE
+    }
 
     fun clearSteps() {
         for (s in steps) {

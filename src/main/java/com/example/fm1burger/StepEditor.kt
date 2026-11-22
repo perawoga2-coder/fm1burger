@@ -1,10 +1,16 @@
 package com.example.fm1burger
 
 import android.app.AlertDialog
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -34,6 +40,15 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
     private val h = Handler(Looper.getMainLooper())
     private var lastPlay = -2
     private val color = if (drum) Theme.RED else Theme.ACCENT
+
+    // the piano keys: two octaves from the C of octave [oct] (C4 = the sample's own pitch, as the NOTE slider shows it)
+    private var oct = 3
+    private var stepInput = false
+    private var rec = false
+    private val piano = PianoKeysView(a)
+    private val octText = ui.text("", 12f, Theme.DIM)
+    private lateinit var stepInBtn: Button
+    private lateinit var recBtn: Button
 
     private fun on(s: Int): Boolean = if (drum) e.pads[k].on[s] else e.tracks[k].steps[s].on
     private fun level(s: Int): Float = if (drum) e.pads[k].lvl[s] else e.tracks[k].steps[s].level
@@ -100,6 +115,30 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
             }
         }
 
+        // the piano keys: hear the lane at a note, STEP INPUT writes it in the picked step, REC in the step playing
+        val pr = ui.row()
+        pr.gravity = Gravity.CENTER_VERTICAL
+        pr.addView(ui.button("OCT −") { if (oct > OCT_MIN) { oct--; paint() } }, ui.w(1f, 3))
+        octText.gravity = Gravity.CENTER
+        pr.addView(octText, ui.w(1f, 3))
+        pr.addView(ui.button("OCT +") { if (oct < OCT_MAX) { oct++; paint() } }, ui.w(1f, 3))
+        stepInBtn = ui.button("STEP INPUT") {
+            stepInput = !stepInput
+            if (stepInput) rec = false
+            paint()
+        }
+        pr.addView(stepInBtn, ui.w(1.5f, 3))
+        recBtn = ui.button("● REC") {
+            rec = !rec
+            if (rec) stepInput = false
+            paint()
+        }
+        pr.addView(recBtn, ui.w(1f, 3))
+        box.addView(pr, ui.fullWidth(10))
+        piano.limit = !drum
+        piano.onKey = { key, vel -> pianoKey(key, vel) }
+        box.addView(piano, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(104)).also { it.topMargin = ui.dp(4) })
+
         // the step picked
         box.addView(stepText, ui.fullWidth(12))
         if (!drum) {
@@ -142,7 +181,9 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         }, ui.w(1f))
         box.addView(r1, ui.fullWidth(12))
         box.addView(ui.text("Tap a key: the step on (and picked). Tap the picked step again: off. Long press: pick it " +
-            "without changing it. These are the same steps as the Steps / Drum sequencer pages.", 11f, Theme.FAINT), ui.fullWidth(8))
+            "without changing it. These are the same steps as the Steps / Drum sequencer pages. " +
+            (if (drum) "The piano keys play the pad (low on a key = louder)" else "The piano keys play the sample at that note") +
+            "; STEP INPUT writes it in the picked step and moves on, REC writes it in the step that is playing.", 11f, Theme.FAINT), ui.fullWidth(8))
 
         val sv = ScrollView(a)
         sv.addView(box)
@@ -165,6 +206,28 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
             if (drum) e.padHit(k, level(s)) else e.audition(k)
         }
         paint()
+    }
+
+    /** a piano key (0..23 from the lower C) was touched: hear it, and write it (STEP INPUT: the picked step, REC: the step playing) */
+    private fun pianoKey(key: Int, vel: Float) {
+        val p = (oct - 4) * 12 + key
+        if (!drum && (p < -24 || p > 24)) return
+        val v = vel.coerceIn(0.3f, 1f)
+        if (drum) e.padHit(k, v) else e.auditionNote(k, p)
+        if (stepInput) {
+            if (picked >= Pat.spb()) picked = 0
+            writeNote(Pat.base() + picked, p, v)
+            picked = (picked + 1) % Pat.spb()
+        } else if (rec && e.playing) {
+            writeNote(e.curStep, p, v)
+        }
+        paint()
+    }
+
+    private fun writeNote(s: Int, p: Int, v: Float) {
+        if (s < 0 || s >= Cfg.STEPS) return
+        setOn(s, true)
+        if (drum) setLevel(s, v) else e.tracks[k].steps[s].pitch = p
     }
 
     private val tick = object : Runnable {
@@ -230,7 +293,128 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         stepText.text = "STEP ${picked + 1}  of bar ${Pat.viewBar() + 1}" + if (on(s)) "" else "   (off)"
         if (!drum) noteS.set(pitch(s) + 24)
         levelS.set((level(s) * 100).toInt())
+        piano.octave = oct
+        piano.low = (oct - 4) * 12
+        octText.text = "C$oct – B${oct + 1}"
+        ui.styleButton(stepInBtn, stepInput, Theme.YELLOW)
+        ui.styleButton(recBtn, rec, Theme.RED)
         playBtn.text = if (e.playing) "■ STOP" else "▶ PLAY"
         ui.styleButton(playBtn, true, if (e.playing) Theme.RED else Theme.GREEN)
+    }
+
+    private companion object {
+        // the lower C of the keys: C2 (pitch -24) .. C5 (pitch +12, so the keys reach +24)
+        const val OCT_MIN = 2
+        const val OCT_MAX = 5
+    }
+}
+
+/**
+ * Two octaves of piano keys (C to B, twice), drawn. A touch on a key calls [onKey] with the key (0..23 from the lower C)
+ * and how low on the key it was touched (0.3 at the top .. 1.0 at the bottom). One finger.
+ */
+class PianoKeysView(ctx: Context) : View(ctx) {
+    /** the octave written on the lower C (the upper C shows the next one) */
+    var octave = 3
+        set(v) {
+            if (field != v) { field = v; invalidate() }
+        }
+    /** the pitch of the lower C; with [limit] the keys outside -24..+24 are dim and do nothing */
+    var low = -12
+        set(v) {
+            if (field != v) { field = v; invalidate() }
+        }
+    var limit = false
+    var onKey: ((Int, Float) -> Unit)? = null
+
+    private var lit = -1
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val r = RectF()
+    private val d = resources.displayMetrics.density
+
+    private fun usable(key: Int): Boolean = !limit || (low + key) in -24..24
+
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat()
+        val hh = height.toFloat()
+        if (w <= 0f || hh <= 0f) return
+        val ww = w / WHITES
+        val rad = 4f * d
+        // the white keys
+        for (i in 0 until WHITES) {
+            val key = i / 7 * 12 + WHITE_SEMI[i % 7]
+            r.set(i * ww + d, 0f, (i + 1) * ww - d, hh - d)
+            p.style = Paint.Style.FILL
+            p.color = if (key == lit) Theme.YELLOW else if (usable(key)) Theme.TEXT else Theme.FAINT
+            c.drawRoundRect(r, rad, rad, p)
+            if (i % 7 == 0) {
+                p.color = Theme.BG
+                p.textSize = 11f * d
+                p.textAlign = Paint.Align.CENTER
+                p.typeface = Typeface.DEFAULT_BOLD
+                c.drawText("C${octave + i / 7}", (i + 0.5f) * ww, hh - 7f * d, p)
+            }
+        }
+        // the black keys, over them
+        val bw = ww * BLACK_W
+        val bh = hh * BLACK_H
+        for (i in 0 until WHITES) {
+            if (!HAS_BLACK[i % 7]) continue
+            val key = i / 7 * 12 + WHITE_SEMI[i % 7] + 1
+            val cx = (i + 1) * ww
+            r.set(cx - bw / 2f, 0f, cx + bw / 2f, bh)
+            p.style = Paint.Style.FILL
+            p.color = if (key == lit) Theme.YELLOW else if (usable(key)) Theme.BG else Theme.PANEL3
+            c.drawRoundRect(r, rad, rad, p)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = d
+            p.color = Theme.LINE
+            c.drawRoundRect(r, rad, rad, p)
+        }
+        p.style = Paint.Style.FILL
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                val w = width.toFloat()
+                val hh = height.toFloat()
+                if (w <= 0f || hh <= 0f) return true
+                val ww = w / WHITES
+                val x = ev.x.coerceIn(0f, w - 1f)
+                val y = ev.y.coerceIn(0f, hh)
+                var key = -1
+                var keyH = hh
+                if (y < hh * BLACK_H) {
+                    // a black key sits on the line after white key i
+                    val i = ((x + ww / 2f) / ww).toInt() - 1
+                    if (i in 0 until WHITES && HAS_BLACK[i % 7] && Math.abs(x - (i + 1) * ww) <= ww * BLACK_W / 2f) {
+                        key = i / 7 * 12 + WHITE_SEMI[i % 7] + 1
+                        keyH = hh * BLACK_H
+                    }
+                }
+                if (key < 0) {
+                    val i = (x / ww).toInt().coerceIn(0, WHITES - 1)
+                    key = i / 7 * 12 + WHITE_SEMI[i % 7]
+                }
+                if (!usable(key)) return true
+                lit = key
+                invalidate()
+                onKey?.invoke(key, (0.3f + 0.7f * (y / keyH)).coerceIn(0.3f, 1f))
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (lit != -1) { lit = -1; invalidate() }
+            }
+        }
+        return true
+    }
+
+    private companion object {
+        const val WHITES = 14
+        const val BLACK_W = 0.6f
+        const val BLACK_H = 0.6f
+        val WHITE_SEMI = intArrayOf(0, 2, 4, 5, 7, 9, 11)
+        val HAS_BLACK = booleanArrayOf(true, true, false, true, true, true, false)
     }
 }
