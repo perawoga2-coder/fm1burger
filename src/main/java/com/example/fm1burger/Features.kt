@@ -22,7 +22,7 @@ import java.util.zip.CRC32
 object Features {
 
     /** Build switches: the early-access page; the free / Pro split (off: everything is open). */
-    const val GATE = true
+    const val GATE = false                 // 3.52: off: anyone who downloads the app can use it at once
     const val SELLING = false
 
     // Pro features (gated only when SELLING, or in the owner's store preview)
