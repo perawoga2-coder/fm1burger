@@ -37,7 +37,14 @@ jobs:
             echo "::error::Add the RELEASE_KEYSTORE_B64 and RELEASE_PASSWORD secrets (Settings > Secrets and variables > Actions)"
             exit 1
           fi
-          echo "$RELEASE_KEYSTORE_B64" | base64 -d > release.jks
+          # (spaces or line breaks picked up when the text was copied are dropped)
+          printf '%s' "$RELEASE_KEYSTORE_B64" | tr -d ' \t\r\n' > key.b64
+          echo "key text: $(wc -c < key.b64) characters (5756 expected)"
+          base64 -d key.b64 > release.jks || { echo "::error::RELEASE_KEYSTORE_B64 is not the whole key text: paste it again"; exit 1; }
+          rm -f key.b64
+          echo "key file: $(sha256sum release.jks | cut -c1-16) (597c33147274f446 expected)"
+          keytool -list -keystore release.jks -storepass "$RELEASE_PASSWORD" -alias makerhip > /dev/null \
+            || { echo "::error::RELEASE_PASSWORD does not open the key: paste it again"; exit 1; }
 
       - name: Read the app version
         id: ver
