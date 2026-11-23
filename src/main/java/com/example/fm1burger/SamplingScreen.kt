@@ -302,7 +302,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         val f1 = ui.row()
         addSlider(f1, "Volume", { (t().volume * 100).toInt() }, 100, { "$it%" }) { t().volume = it / 100f }
         addSlider(f1, "Pan", { ((t().pan + 1f) * 50).toInt() }, 100, { if (it == 50) "centre" else if (it < 50) "L ${50 - it}" else "R ${it - 50}" }) { t().pan = it / 50f - 1f }
-        addSlider(f1, "Pitch", { t().pitch + 12 }, 24, { val p = it - 12; if (p > 0) "+$p" else "$p" }) { t().pitch = it - 12 }
+        addSlider(f1, "Pitch", { t().pitch + 24 }, 48, { val p = it - 24; if (p > 0) "+$p" else "$p" }) { t().pitch = it - 24 }   // 3.49: −24 .. +24
         fp.addView(f1, ui.fullWidth(4))
         val f2 = ui.row()
         addSlider(f2, "Low-pass", { fxv(0, 100) }, 100, { if (it >= 99) "open" else "$it%" }) { setFx(0, it / 100f, it < 99) }
