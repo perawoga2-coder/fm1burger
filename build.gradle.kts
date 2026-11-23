@@ -12,8 +12,8 @@ android {
         applicationId = "com.makerhip.burger"           // 3.41: the Maker Hip release (Lab 3.x was com.example.burgerstudio.lab)
         minSdk = 23
         targetSdk = 34
-        versionCode = 71
-        versionName = "3.41"
+        versionCode = 72
+        versionName = "3.42"
     }
 
     // Same signing key for every build, so a new APK can be installed over the old one
