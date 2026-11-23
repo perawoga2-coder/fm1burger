@@ -266,6 +266,8 @@ object MixSend {
         sb.accent.copyInto(db.accent)
         sb.slide.copyInto(db.slide)
         db.saw = sb.saw
+        db.sound = sb.sound
+        db.smp = sb.smp
         db.cutoff = sb.cutoff
         db.res = sb.res
         db.envMod = sb.envMod

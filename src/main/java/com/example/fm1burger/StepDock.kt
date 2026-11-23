@@ -43,7 +43,11 @@ class LockableScrollView(ctx: Context) : ScrollView(ctx) {
  */
 class StepDock(
     private val a: MainActivity, private val prep: PrepareBar?, private val grid: View,
-    private val gridH: Int = ViewGroup.LayoutParams.WRAP_CONTENT, showP: Boolean = true, private val bottomDp: Int = 72
+    private val gridH: Int = ViewGroup.LayoutParams.WRAP_CONTENT, showP: Boolean = true, private val bottomDp: Int = 72,
+    /** 3.50: false = the grid keeps its own size when EDIT locks (what is under it stays on the screen) */
+    private val fill: Boolean = true,
+    /** 3.50: one more button in the dock's bar (the Analog synth's CLEAR) */
+    extra: View? = null
 ) {
     private val ui = a.ui
     private val e = a.engine
@@ -111,6 +115,7 @@ class StepDock(
         bar.addView(pBtn, LinearLayout.LayoutParams(ui.dp(60), hgt).also { it.setMargins(m, m, m, m) })
         bar.addView(upBtn, LinearLayout.LayoutParams(ui.dp(52), hgt).also { it.setMargins(m, m, m, m) })
         bar.addView(downBtn, LinearLayout.LayoutParams(ui.dp(52), hgt).also { it.setMargins(m, m, m, m) })
+        if (extra != null) bar.addView(extra, LinearLayout.LayoutParams(0, hgt, 1.1f).also { it.setMargins(m, m, m, m) })
         if (!showP || prep == null) pBtn.visibility = View.GONE
         upBtn.visibility = View.GONE
         downBtn.visibility = View.GONE
@@ -203,6 +208,10 @@ class StepDock(
             avail = max(sv.height - sv.paddingTop - sv.paddingBottom - bar.height - ui.dp(bottomDp), ui.dp(120))
             // the whole grid in the room there is; a grid far taller than it keeps its size (▲ ▼ page through it)
             h = if (avail >= natural * 0.7f) avail else natural
+        }
+        if (!fill) {                                           // 3.50: its own size; the rows under it stay in view
+            h = natural
+            avail = max(avail, natural)
         }
         if (h <= 0) return
         val frame = min(h, avail)

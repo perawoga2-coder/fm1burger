@@ -147,6 +147,7 @@ class MainActivity : Activity() {
         engine.start()
         project.load()
         SynthSave.load(File(filesDir, "synth.json"), engine.bass, engine.analog)
+        BassBank.restore(this)                                  // 3.50
         VocalSave.load(File(filesDir, "vocal.json"), engine.vocal)
         AmbientSave.load(File(filesDir, "ambient.json"), engine.ambient)
         GuitarSave.load(File(filesDir, "guitars.json"), engine.rhythmGtr, engine.riffGtr, engine.drumHeavy)

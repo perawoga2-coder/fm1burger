@@ -195,6 +195,8 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq, pr
     private lateinit var info: TextView
     private var sel = 0
     private var playStep = -1
+    /** 3.50: CLEAR emptied the part (the page redraws its piano roll) */
+    var onCleared: (() -> Unit)? = null
     val view: LinearLayout = ui.panel()
 
     init {
@@ -242,7 +244,16 @@ class AnalogSeqPanel(private val a: MainActivity, private val seq: AnalogSeq, pr
             b.setOnLongClickListener { pickCell(Pat.base() + i); true }
             cells.add(b)
         }
-        view.addView(StepDock(a, prep, barCells.box).view, ui.fullWidth(6))      // 3.37
+        // 3.50: CLEAR in the dock (the whole part, steps and piano roll, at once); the grid keeps its size when
+        // EDIT locks, so the rows under it (notes, Clear step, patterns) stay on the screen
+        val clearBtn = ui.button("CLEAR") {
+            preset(3)
+            onCleared?.invoke()
+        }
+        clearBtn.textSize = 15f
+        clearBtn.typeface = Ui.BOLD
+        ui.styleButton(clearBtn, true, Theme.RED)
+        view.addView(StepDock(a, prep, barCells.box, fill = false, extra = clearBtn).view, ui.fullWidth(6))      // 3.37
         info = ui.text("", 13f, Theme.TEXT, true)
         view.addView(info, ui.fullWidth(4))
 

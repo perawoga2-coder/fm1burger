@@ -68,6 +68,9 @@ private class Svf {
  * Saw or square wave into a resonant low-pass filter that "plucks" on every note.
  */
 class Bassline {
+    companion object {
+        private val C3_HZ = 440.0 * 2.0.pow((48 - 69) / 12.0)
+    }
     val on = BooleanArray(Cfg.STEPS)
     val note = IntArray(Cfg.STEPS)
     val accent = BooleanArray(Cfg.STEPS)
@@ -86,6 +89,10 @@ class Bassline {
     @Volatile var key = 0
     @Volatile var octave = 1
     @Volatile var previewReq = -1
+    // 3.50: the Bass Bank: the sound's name, and an FM-1 bass from the Maker Bank (null: the synth plays)
+    @Volatile var sound = "Acid"
+    @Volatile var smp: FloatArray? = null
+    private var spos = 0.0
 
     private var phase = 0.0
     private var freq = 55.0
@@ -113,6 +120,7 @@ class Bassline {
         if (!sliding) {
             freq = f
             fenv = if (acc) 1.0 + accentAmt * 0.8 else 1.0
+            spos = 0.0
         }
         val next = Pat.nextStep(s)          // (the next PLAYED step: the meter may skip the rest of a bar slot)
         val hold = on[next] && slide[next]
@@ -128,6 +136,7 @@ class Bassline {
             target = f
             fenv = 1.0
             acc = false
+            spos = 0.0
             gateLeft = (Cfg.SR * 0.3).toInt()
         }
         if (gateLeft > 0) {
@@ -153,7 +162,14 @@ class Bassline {
         val dt = freq / Cfg.SR
         phase += dt
         if (phase >= 1.0) phase -= 1.0
-        val o = if (saw) {
+        val sm = smp
+        val o = if (sm != null) {
+            // 3.50: an FM-1 bass (recorded at C3), read at the note's speed
+            val i = spos.toInt()
+            val v = if (i + 1 >= sm.size) 0.0 else (sm[i] + (sm[i + 1] - sm[i]) * (spos - i).toFloat()).toDouble()
+            spos += freq / C3_HZ
+            v
+        } else if (saw) {
             2.0 * phase - 1.0 - polyBlep(phase, dt)
         } else {
             var q = if (phase < 0.5) 1.0 else -1.0
@@ -493,6 +509,7 @@ object SynthSave {
             bo.put("accent", arrB(b.accent))
             bo.put("slide", arrB(b.slide))
             bo.put("saw", b.saw)
+            bo.put("sound", b.sound)
             bo.put("cutoff", b.cutoff.toDouble())
             bo.put("res", b.res.toDouble())
             bo.put("envMod", b.envMod.toDouble())
@@ -563,6 +580,7 @@ object SynthSave {
                     if (sl != null && i < sl.length()) b.slide[i] = sl.optBoolean(i, false)
                 }
                 b.saw = bo.optBoolean("saw", true)
+                b.sound = bo.optString("sound", "Acid")
                 b.cutoff = bo.optDouble("cutoff", 0.35).toFloat()
                 b.res = bo.optDouble("res", 0.55).toFloat()
                 b.envMod = bo.optDouble("envMod", 0.6).toFloat()

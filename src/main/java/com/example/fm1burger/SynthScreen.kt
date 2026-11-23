@@ -34,6 +34,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
     private val cells = ArrayList<Button>()
     private val barCells = BarCells(ui, cells, 56, 2, 2, false, 2)
     private val refreshers = ArrayList<() -> Unit>()
+    private val bankBtns = ArrayList<Pair<String, android.widget.Button>>()     // 3.50: the Bass Bank
     private var mode = 0
     private val voiceBtns = ArrayList<Button>()
     private val lfoBtns = ArrayList<Button>()
@@ -282,6 +283,15 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
 
         val panel = ui.panel()
         panel.addView(ui.text("Bass sound", 14f, Theme.ACCENT, true))
+        // 3.50: the Bass Bank: pick a sound (you hear it), then shape it with the sliders below
+        panel.addView(ui.text("Bass Bank · Synth", 12f, Theme.DIM), ui.fullWidth(4))
+        val bb1 = ui.row()
+        for (n in BassBank.SYNTH) { val b = ui.button(n) { pickBass(n) }; b.isAllCaps = false; bankBtns.add(Pair(n, b)); bb1.addView(b, ui.w(1f, 2)) }
+        panel.addView(bb1)
+        panel.addView(ui.text("Bass Bank · FM-1", 12f, Theme.DIM), ui.fullWidth(4))
+        val bb2 = ui.row()
+        for (n in BassBank.FM1) { val b = ui.button(n) { pickBass(n) }; b.isAllCaps = false; bankBtns.add(Pair(n, b)); bb2.addView(b, ui.w(1f, 2)) }
+        panel.addView(bb2)
         val wr = ui.row()
         sawBtn = ui.button("Saw wave") {
             bs.saw = true
@@ -316,6 +326,15 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
             )
         )
         bassBox.addView(panel, ui.fullWidth(8))
+    }
+
+    /** 3.50: a Bass Bank sound: in place, its settings on the sliders, and you hear it */
+    private fun pickBass(n: String) {
+        BassBank.choose(a, n) {
+            for (r in refreshers) r()
+            refreshBass()
+            bs.previewReq = 0
+        }
     }
 
     /** A tap: on / off (and the step is picked for the note buttons). */
@@ -426,6 +445,11 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         keyText.text = "${noteNames[bs.key]}${bs.octave}"
         ui.styleButton(sawBtn, bs.saw)
         ui.styleButton(sqBtn, !bs.saw)
+        // 3.50: the sound picked in the Bass Bank; Saw / Square only shape the synth (faint with an FM-1 bass)
+        for ((n, b) in bankBtns) ui.styleButton(b, bs.sound == n)
+        val syn = bs.smp == null
+        sawBtn.alpha = if (syn) 1f else 0.35f
+        sqBtn.alpha = if (syn) 1f else 0.35f
         ui.styleButton(bMuteBtn, bs.mute, Theme.RED)
         barCells.layout()
         for (i in 0 until Pat.spb()) paint(i)
@@ -513,6 +537,7 @@ class SynthScreen(private val a: MainActivity, private val fixed: Int = -1) : Sc
         }
         anaBox.addView(kb, ui.fullWidth(4))
         seqPanel = AnalogSeqPanel(a, e.analogSeq, prep)
+        seqPanel.onCleared = { if (::synthRoll.isInitialized) synthRoll.refresh() }
         anaBox.addView(seqPanel.view, ui.fullWidth(8))
         val sq = e.analogSeq
         val synthModel = object : RollModel {
