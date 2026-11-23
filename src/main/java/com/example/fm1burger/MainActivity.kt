@@ -1720,13 +1720,15 @@ class MainActivity : Activity() {
                         importFiles(false)
                     }
                     1 -> assignTrack(i, null)
-                    else -> assignTrack(i, files[which - 2])
+                    else -> assignTrack(i, files[which - 2], fresh = true)
                 }
             }
             .show()
     }
 
-    fun assignTrack(i: Int, f: File?) {
+    /** [fresh]: a new sound for the track (recorded, loaded, picked): the track starts clean (Track.freshSound). */
+    fun assignTrack(i: Int, f: File?, fresh: Boolean = false) {
+        if (fresh && f != null && i in engine.tracks.indices) engine.tracks[i].freshSound()
         if (f == null) {
             engine.setSample(i, "", null)
             refreshCurrent()
@@ -1912,7 +1914,7 @@ class MainActivity : Activity() {
                 }
                 runOnUiThread {
                     if (isFinishing) return@runOnUiThread
-                    if (target >= 0 && imported.isNotEmpty()) assignTrack(target, imported[0])
+                    if (target >= 0 && imported.isNotEmpty()) assignTrack(target, imported[0], fresh = true)
                     if (cb != null && imported.isNotEmpty()) cb(imported[0])
                     libraryScreen.refresh()
                     if (imported.size > 1) ui.toast("Imported ${imported.size} files")

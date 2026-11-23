@@ -345,7 +345,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
     private fun chooseTrack(f: File) {
         AlertDialog.Builder(a)
             .setTitle("Load into which track?")
-            .setItems(Array(Cfg.TRACKS) { "Track ${it + 1}" }) { _, which -> a.assignTrack(which, f) }
+            .setItems(Array(Cfg.TRACKS) { "Track ${it + 1}" }) { _, which -> a.assignTrack(which, f, fresh = true) }
             .show()
     }
 
@@ -463,7 +463,7 @@ class LibraryScreen(private val a: MainActivity) : Screen {
             .setItems(items) { _, w ->
                 val i = lanes[w]
                 val k = l.idx[i]
-                if (l.type[i] == Inst.DRUM) a.assignPad(k, f) else a.assignTrack(k, f)
+                if (l.type[i] == Inst.DRUM) a.assignPad(k, f) else a.assignTrack(k, f, fresh = true)
                 ui.toast("Lane ${i + 1} (${l.label(i)}): ${f.nameWithoutExtension}")
             }.show()
     }

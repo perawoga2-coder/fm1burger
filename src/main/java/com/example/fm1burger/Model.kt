@@ -130,6 +130,17 @@ class Track(val index: Int) {
     @Volatile var robot = 0f
     @Volatile var robotAmt = 0.6f         // what the ROBOT button turns back on
     val robotFx = RobotFx()               // (audio thread)
+
+    /**
+     * 3.45: a new sound (recorded, loaded, picked) starts clean, so it sounds as recorded: no pitch, no ROBOT,
+     * no effects, no loop or slices, the whole sound. Volume and pan stay.
+     */
+    fun freshSound() {
+        pitch = 0; robot = 0f; micro = 0; loop = false; reverse = false; boostDb = 0f
+        start = 0f; end = 1f
+        pingPong = false; loopA = 0f; loopB = 1f; xfadeMs = 0f; fitBars = 0; keepPitch = false; slices = 0
+        for (k in 0 until FxChain.N) { fx.on[k] = false; fx.a[k] = FxChain.DEF_A[k]; fx.b[k] = FxChain.DEF_B[k] }
+    }
     var microLen = 0.0                    // (audio thread) the loop's length in source samples
     var microLeft = 0.0                   // (audio thread) source samples left before the sound ends
 

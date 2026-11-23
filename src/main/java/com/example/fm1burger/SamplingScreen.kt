@@ -443,7 +443,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             a.runOnUiThread {
                 if (f == null) ui.toast("Could not save it") else {
                     val tt = e.tracks[ti]
-                    tt.start = 0f; tt.end = 1f; tt.reverse = false; tt.boostDb = 0f
+                    tt.freshSound()                             // (3.45: a new take sounds as recorded)
                     if (loopIt) tt.loop = true                  // (bars: a loop that fits the pattern)
                     a.assignTrack(ti, f)
                     a.libraryScreen.refresh()
@@ -457,7 +457,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
 
     private fun load() {
         val ti = a.sel
-        a.pickSound("Load into track ${ti + 1}", "(empty this track)") { f -> a.assignTrack(ti, f) }
+        a.pickSound("Load into track ${ti + 1}", "(empty this track)") { f -> a.assignTrack(ti, f, fresh = true) }
     }
 
     /** Louder: the part kept, up to full level (the track's boost, 0 .. +12 dB). */
@@ -681,6 +681,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         ui.styleButton(revBtn, tt.reverse, Theme.BLUE)
         refreshEcho()
         ui.styleButton(muteBtn, tt.mute, Theme.RED)
+        if (!tt.fx.on[2]) room[sel] = 0                 // (3.45: reverb off, e.g. a fresh sound: Dry)
         for ((k, b) in roomBtns.withIndex()) ui.styleButton(b, room[sel] == k && (k > 0 || !tt.fx.on[2]), c)
         for ((k, b) in srcBtns.withIndex()) ui.styleButton(b, k == src, Theme.RED)
         resBox.visibility = if (src == 2) View.VISIBLE else View.GONE

@@ -474,7 +474,7 @@ class RecordFlow(private val a: MainActivity) {
         fadeEdges(d, res.rate)
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val f = a.store.saveNew("${base}_$stamp", d, res.rate)
-        if (ti >= 0) a.assignTrack(ti, f)
+        if (ti >= 0) a.assignTrack(ti, f, fresh = true)
         val secs = d.size.toDouble() / res.rate
         var clipNote = ""
         if (res.rawPeak >= 0.98f) {

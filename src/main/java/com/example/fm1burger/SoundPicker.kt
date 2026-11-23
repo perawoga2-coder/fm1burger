@@ -304,7 +304,7 @@ class SoundPicker(private val a: MainActivity, private val lane: Int) {
         val t = lanes.type[lane]
         val k = lanes.idx[lane]
         if (t == Inst.DRUM) a.assignPad(k, f)
-        else if (t == Inst.SAMPLE) a.assignTrack(k, f)
+        else if (t == Inst.SAMPLE) a.assignTrack(k, f, fresh = true)
         else return
         put = true
         ui.toast("Lane ${lane + 1} (${lanes.label(lane)}): ${f.nameWithoutExtension}")
