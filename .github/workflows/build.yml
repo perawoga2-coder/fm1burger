@@ -31,6 +31,8 @@ jobs:
       - name: The Maker Hip release key (from the repository's secrets)
         env:
           RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_B64_2: ${{ secrets.RELEASE_KEYSTORE_B64_2 }}
+          RELEASE_KEYSTORE_B64_3: ${{ secrets.RELEASE_KEYSTORE_B64_3 }}
           RELEASE_PASSWORD: ${{ secrets.RELEASE_PASSWORD }}
         run: |
           if [ -z "$RELEASE_KEYSTORE_B64" ] || [ -z "$RELEASE_PASSWORD" ]; then
@@ -38,7 +40,8 @@ jobs:
             exit 1
           fi
           # (spaces or line breaks picked up when the text was copied are dropped)
-          printf '%s' "$RELEASE_KEYSTORE_B64" | tr -d ' \t\r\n' > key.b64
+          # the key text may be split in 3 secrets (_2, _3) so that each part is short enough to copy on a phone
+          printf '%s%s%s' "$RELEASE_KEYSTORE_B64" "$RELEASE_KEYSTORE_B64_2" "$RELEASE_KEYSTORE_B64_3" | tr -d ' \t\r\n' > key.b64
           echo "key text: $(wc -c < key.b64) characters (5756 expected)"
           base64 -d key.b64 > release.jks || { echo "::error::RELEASE_KEYSTORE_B64 is not the whole key text: paste it again"; exit 1; }
           rm -f key.b64
