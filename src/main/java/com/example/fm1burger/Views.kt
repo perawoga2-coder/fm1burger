@@ -16,11 +16,8 @@ class WaveformView(ctx: Context) : View(ctx) {
 
     var editable = false
     var onSelect: ((Float, Float) -> Unit)? = null
-    /** 3.46: when set, a drag that starts inside the part kept slides that part (same length) and reports it live */
-    var onSlide: ((Float, Float) -> Unit)? = null
-    private var sliding = false
-    private var slideFrom = 0f
-    private var slideA = 0f
+    /** 3.47: when set, the part being selected is reported while the finger moves (it becomes the part kept at once) */
+    var onLive: ((Float, Float) -> Unit)? = null
     var color = Theme.ACCENT
     var playhead = -1f
         set(v) {
@@ -128,34 +125,25 @@ class WaveformView(ctx: Context) : View(ctx) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
-                // 3.46: inside the part kept: slide it; outside: select a new part (the grey frame), as before
-                sliding = onSlide != null && f >= regA && f <= regB && regB - regA < 0.999f
-                if (sliding) {
-                    slideFrom = f
-                    slideA = regA
-                } else {
-                    anchor = f
-                    selA = f
-                    selB = f
-                }
+                anchor = f
+                selA = f
+                selB = f
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
-                if (sliding) {
-                    val len = regB - regA
-                    val a = (slideA + (f - slideFrom)).coerceIn(0f, 1f - len)
-                    regA = a
-                    regB = a + len
-                    onSlide?.invoke(regA, regB)
-                } else {
-                    selA = min(anchor, f)
-                    selB = max(anchor, f)
+                selA = min(anchor, f)
+                selB = max(anchor, f)
+                // 3.47: the frame is the part kept at once (in colour), and what plays follows it
+                val live = onLive
+                if (live != null && selB - selA > 0.01f) {
+                    regA = selA
+                    regB = selB
+                    live(selA, selB)
                 }
                 invalidate()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (!sliding) onSelect?.invoke(selA, selB)
-                sliding = false
+                onSelect?.invoke(selA, selB)
             }
         }
         return true

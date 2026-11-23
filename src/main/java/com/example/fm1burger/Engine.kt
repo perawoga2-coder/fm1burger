@@ -22,6 +22,8 @@ import kotlin.math.tanh
 class Engine {
 
     companion object {
+        /** 3.47: samples of crossfade when what plays jumps (the live selection on the SAMPLING waveform) */
+        const val XF_JUMP = 256
         // 3.16: the synths sat well under the samples; a fixed lift (the master soft clip catches the peaks)
         const val SYNTH_LIFT_BASS = 1.6f      // +4 dB
         const val SYNTH_LIFT_ANALOG = 1.75f   // +5 dB
@@ -1794,19 +1796,25 @@ class Engine {
             t.playing = false
             return 0f
         }
-        // 3.46: the part kept slid under the finger: move the playing sound with it (no restart)
+        // 3.47: the part kept changed under the finger while it plays: follow it without a restart. Inside the
+        // new part it goes on where it is; outside it jumps to the part's start (its end when reversed), with a
+        // short crossfade from where it was (no click)
         if (t.slideReq) {
             t.slideReq = false
             if (t.slices == 0 && d.size > 2) {
                 val n = d.size
                 val na = (t.start * n).toDouble().coerceIn(0.0, n - 2.0)
                 val ne = (t.end * n).toDouble().coerceIn(na + 1.0, n.toDouble())
-                val dl = na - t.vStart
                 t.vStart = na
                 t.vEnd = ne
-                t.tl = (t.tl + dl).coerceIn(na, ne - 1.0)
-                t.gPos[0] = (t.gPos[0] + dl).coerceIn(0.0, n - 1.0)
-                t.gPos[1] = (t.gPos[1] + dl).coerceIn(0.0, n - 1.0)
+                if (t.tl < na || t.tl > ne - 1.0) {
+                    t.xfPos = t.tl
+                    t.xfLeft = XF_JUMP
+                    t.tl = if (t.dir < 0) ne - 1.0 else na
+                    t.gPos[0] = t.tl
+                    t.gPos[1] = t.tl
+                }
+                if (t.micro > 0) t.microLeft = ne - na
             }
         }
         if (t.tl < 0.0 || t.tl.toInt() >= d.size) {
@@ -1829,6 +1837,13 @@ class Engine {
             if (!advance(t, t.tlRate)) t.playing = false
         } else {
             s = sampleAt(d, t.tl)
+            // 3.47: fade out the old place after a jump
+            if (t.xfLeft > 0) {
+                val k = t.xfLeft / XF_JUMP.toFloat()
+                s = s * (1f - k) + sampleAt(d, t.xfPos) * k
+                t.xfPos += t.dir * t.rate
+                t.xfLeft--
+            }
             // crossfade into the loop start just before the loop end (forward loops)
             if (t.loop && t.xfadeMs > 0.5f && t.dir > 0 && !t.pingPong) {
                 val la = t.vStart + t.loopA * (t.vEnd - t.vStart)

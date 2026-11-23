@@ -131,16 +131,19 @@ class SamplingScreen(private val a: MainActivity) : Screen {
                 tt.end = s1
                 wave.setSelection(0f, 0f)
                 refresh()
-                play()
+                // 3.47: still playing (it followed the finger): it goes on; otherwise it plays
+                if (tt.playing) tt.slideReq = true else play()
             }
         }
-        // 3.46: a drag inside the part kept slides it, and what plays follows the finger
-        wave.onSlide = { s0, s1 ->
+        // 3.47: while the finger selects, the selection is what plays, and the sound follows the finger
+        wave.onLive = { s0, s1 ->
             val tt = t()
-            tt.start = s0
-            tt.end = s1
-            tt.slideReq = true
-            for ((sl, get) in sliders) sl.set(get())
+            if (tt.data != null) {
+                tt.start = s0
+                tt.end = s1
+                if (tt.playing) tt.slideReq = true else e.audition(a.sel)
+                for ((sl, get) in sliders) sl.set(get())
+            }
         }
         wp.addView(wave, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(150)).also { it.topMargin = ui.dp(6) })
         val trimRow = ui.row()
