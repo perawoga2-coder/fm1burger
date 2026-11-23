@@ -17,7 +17,7 @@
 
     <application
         android:icon="@mipmap/ic_launcher"
-        android:label="Burger TEST"
+        android:label="Burger Studio Lab"
         android:theme="@style/BurgerTheme">
         <activity
             android:name=".MainActivity"
@@ -33,7 +33,7 @@
         <!-- 3.36 → MIX: the boxes of stems that 16 Track reads (InboxProvider.kt) -->
         <provider
             android:name=".InboxProvider"
-            android:authorities="com.example.burgerstudio.test.inbox"
+            android:authorities="com.makerhip.burger.inbox"
             android:exported="true"
             android:readPermission="com.makerhip.permission.INBOX"
             android:writePermission="com.makerhip.permission.INBOX" />

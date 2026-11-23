@@ -26,7 +26,7 @@ import org.json.JSONObject
 class InboxProvider : ContentProvider() {
 
     companion object {
-        const val AUTH = "com.example.burgerstudio.test.inbox"
+        const val AUTH = "com.makerhip.burger.inbox"
         val BOX_COLS = arrayOf("_id", "title", "kind", "bpm", "bars", "meter", "rate", "created", "tracks")
         val TRACK_COLS = arrayOf("idx", "name", "color", "gain", "pan")
         private val ID_OK = Regex("[A-Za-z0-9_-]{1,40}")
