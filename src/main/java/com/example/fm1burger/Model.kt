@@ -130,6 +130,7 @@ class Track(val index: Int) {
     @Volatile var robot = 0f
     /** 3.46: start / end moved while it plays (the waveform slide): the audio thread follows without restarting */
     @Volatile var slideReq = false
+    var semis = 0                         // (audio thread) the note it was started at (3.48: pitch follows live)
     var xfPos = 0.0                       // (audio thread) the old position faded out after a jump (no click)
     var xfLeft = 0
     @Volatile var robotAmt = 0.6f         // what the ROBOT button turns back on

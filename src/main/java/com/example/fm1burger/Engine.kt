@@ -1697,6 +1697,7 @@ class Engine {
         t.vStart = a.toDouble()
         t.vEnd = e.toDouble()
         t.rate = 2.0.pow((t.pitch + semis) / 12.0)
+        t.semis = semis
         t.gain = level
         // fit the loop to N bars of the tempo
         t.stretch = false
@@ -1799,6 +1800,8 @@ class Engine {
         // 3.47: the part kept changed under the finger while it plays: follow it without a restart. Inside the
         // new part it goes on where it is; outside it jumps to the part's start (its end when reversed), with a
         // short crossfade from where it was (no click)
+        // 3.48: any change on the SAMPLING page reaches the sound that plays (pitch, reverse, LOOP and its length,
+        // the fit), without a restart
         if (t.slideReq) {
             t.slideReq = false
             if (t.slices == 0 && d.size > 2) {
@@ -1807,6 +1810,8 @@ class Engine {
                 val ne = (t.end * n).toDouble().coerceIn(na + 1.0, n.toDouble())
                 t.vStart = na
                 t.vEnd = ne
+                val wantDir = if (t.reverse) -1 else 1
+                if (t.dir != wantDir) t.dir = wantDir
                 if (t.tl < na || t.tl > ne - 1.0) {
                     t.xfPos = t.tl
                     t.xfLeft = XF_JUMP
@@ -1814,8 +1819,18 @@ class Engine {
                     t.gPos[0] = t.tl
                     t.gPos[1] = t.tl
                 }
-                if (t.micro > 0) t.microLeft = ne - na
             }
+            t.rate = 2.0.pow((t.pitch + t.semis) / 12.0)
+            t.stretch = false
+            t.tlRate = 1.0
+            if (t.loop && t.fitBars > 0) {
+                val fit = (t.vEnd - t.vStart) / (t.fitBars * Pat.barFrames(bpmF))
+                if (t.keepPitch) { t.stretch = true; t.tlRate = fit } else t.rate = fit * 2.0.pow(t.pitch / 12.0)
+            }
+            if (t.micro > 0) {
+                t.microLen = Pat.barFrames(bpmF) / t.micro * (if (t.stretch) t.tlRate else t.rate)
+                t.microLeft = t.vEnd - t.vStart
+            } else t.microLen = 0.0
         }
         if (t.tl < 0.0 || t.tl.toInt() >= d.size) {
             t.playing = false

@@ -160,7 +160,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         microBtn = ui.button("LOOP") {
             val tt = t()
             tt.micro = if (tt.micro > 0) 0 else tt.microLast
-            refresh(); play()
+            refresh(); hear()
         }
         microBtn.textSize = 14f
         ml.addView(microBtn, ui.w(1.3f, 3))
@@ -169,7 +169,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
                 val tt = t()
                 tt.micro = dv
                 tt.microLast = dv
-                refresh(); play()
+                refresh(); hear()
             }
             b.textSize = 13f
             b.isAllCaps = false
@@ -188,7 +188,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             fx.on[k] = on
             for ((sl, get) in sliders) sl.set(get())
         }
-        graph.onRelease = { play() }
+        graph.onRelease = { hear() }
         wp.addView(graph, ui.fullWidth(8))
         wp.addView(ui.text("Drag across the waveform to keep only that part. Long press a track number: mute.", 11f, Theme.DIM))
 
@@ -278,7 +278,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         robotBtn = ui.button("ROBOT") {
             val tt = t()
             tt.robot = if (tt.robot > 0f) 0f else tt.robotAmt
-            refresh(); play()
+            refresh(); hear()
         }
         robotBtn.textSize = 15f
         rbr.addView(robotBtn, ui.w(0f, 3))
@@ -294,7 +294,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         val f0 = ui.row()
         loopBtn = colored("Loop", Theme.BLUE) { t().loop = !t().loop; refresh() }
         f0.addView(loopBtn, ui.w(1f, 3))
-        revBtn = colored("Reverse", Theme.BLUE) { t().reverse = !t().reverse; refresh(); play() }
+        revBtn = colored("Reverse", Theme.BLUE) { t().reverse = !t().reverse; refresh(); hear() }
         f0.addView(revBtn, ui.w(1f, 3))
         echoBtn = colored("Echo", Theme.BLUE) { toggleEcho() }
         f0.addView(echoBtn, ui.w(1f, 3))
@@ -345,7 +345,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     }
 
     private fun addSlider(parent: LinearLayout, name: String, get: () -> Int, maxV: Int, fmt: (Int) -> String, set: (Int) -> Unit) {
-        val s = ui.slider(name, maxV, get(), fmt) { v -> set(v); graph.set(t().fx) }
+        val s = ui.slider(name, maxV, get(), fmt) { v -> set(v); graph.set(t().fx); t().let { if (it.playing) it.slideReq = true } }
         sliders.add(Pair(s, get))
         parent.addView(s.view, ui.w(1f, 4))
     }
@@ -367,7 +367,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             fx.on[k] = true
         }
         refresh()
-        play()
+        hear()
     }
 
     private fun refreshEcho() { ui.styleButton(echoBtn, t().fx.on[FxChain.ECHO], Theme.BLUE) }
@@ -385,7 +385,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         }
         if (k != 4 && was == 4) fx.on[3] = false
         refresh()
-        play()
+        hear()
     }
 
     private fun select(i: Int) {
@@ -395,6 +395,15 @@ class SamplingScreen(private val a: MainActivity) : Screen {
 
     private fun play() {
         if (t().data == null) ui.toast("Track ${a.sel + 1} is empty: record or load a sound") else e.audition(a.sel)
+    }
+
+    /**
+     * 3.48: after a change: if the track is sounding, the change reaches it at once (it goes on, no restart);
+     * if not, it plays. (play() is ▶, which stops a sound that plays: the buttons used it and stopped the sound.)
+     */
+    private fun hear() {
+        val tt = t()
+        if (tt.playing) tt.slideReq = true else play()
     }
 
     // ---------------- REC ----------------
@@ -483,7 +492,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         val db = (-20.0 * log10(pk.toDouble() / 0.98)).toFloat().coerceIn(0f, 12f)
         tt.boostDb = db
         ui.toast(if (db < 0.2f) "It is already at full level" else String.format(java.util.Locale.US, "+%.1f dB", db))
-        play()
+        hear()
     }
 
     private fun clear() {
