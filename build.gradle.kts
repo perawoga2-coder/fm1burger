@@ -9,11 +9,11 @@ android {
 
     defaultConfig {
         // Burger Studio is its own app, so it installs next to the old FM1 Burger (1.0) instead of over it
-        applicationId = "com.example.burgerstudio.lab"   // 3.0 Lab: its own app, next to Burger Studio 2.x (3.43: back on it; the release app waits)
+        applicationId = "com.example.burgerstudio.test"  // TEST BUILD ONLY (reverted next commit)
         minSdk = 23
         targetSdk = 34
         versionCode = 81
-        versionName = "3.51-lab"
+        versionName = "3.51-test"
     }
 
     // Same signing key for every build, so a new APK can be installed over the old one
