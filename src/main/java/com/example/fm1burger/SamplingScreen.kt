@@ -114,7 +114,19 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         val wp = ui.panel()
         val nr = ui.row()
         nr.gravity = Gravity.CENTER_VERTICAL
+        nameText.maxLines = 1
+        nameText.ellipsize = android.text.TextUtils.TruncateAt.END
         nr.addView(nameText, ui.w(1f, 0))
+        // 3.51: Load / Clear / Send to… here, in the waveform's top row (they were in "The sound" under it)
+        for ((label, c, act) in listOf<Triple<String, Int, () -> Unit>>(
+            Triple("Load…", Theme.ACCENT, { load() }),
+            Triple("Clear", Theme.RED, { clear() }),
+            Triple("Send to…", Theme.PURPLE, { sendTo() }))) {
+            val b = colored(label, c) { act() }
+            b.isAllCaps = false
+            b.textSize = 15f
+            nr.addView(b, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, ui.dp(52)).also { it.setMargins(ui.dp(6), 0, 0, 0) })
+        }
         val playB = ui.button("▶") { play() }
         val stopB = ui.button("■") { stopAll() }
         for (b in listOf(playB, stopB)) {
@@ -245,15 +257,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         content.addView(rp, ui.fullWidth(10))
         content.addView(wp, ui.fullWidth(10))
 
-        // ---- the sound
-        val mp = ui.panel()
-        mp.addView(ui.text("The sound", 14f, Theme.ACCENT, true))
-        val m1 = ui.row()
-        m1.addView(colored("Load…", Theme.ACCENT) { load() }, ui.w(1f, 3))
-        m1.addView(colored("Clear", Theme.RED) { clear() }, ui.w(1f, 3))
-        m1.addView(colored("Send to…", Theme.PURPLE) { sendTo() }, ui.w(1f, 3))
-        mp.addView(m1, ui.fullWidth(6))
-        content.addView(mp, ui.fullWidth(10))
+        // (3.51: "The sound" is gone: its Load / Clear / Send to… are in the waveform's top row)
 
         // ---- the effects
         val fp = ui.panel()
