@@ -134,6 +134,14 @@ class SamplingScreen(private val a: MainActivity) : Screen {
                 play()
             }
         }
+        // 3.46: a drag inside the part kept slides it, and what plays follows the finger
+        wave.onSlide = { s0, s1 ->
+            val tt = t()
+            tt.start = s0
+            tt.end = s1
+            tt.slideReq = true
+            for ((sl, get) in sliders) sl.set(get())
+        }
         wp.addView(wave, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(150)).also { it.topMargin = ui.dp(6) })
         val trimRow = ui.row()
         addSlider(trimRow, "Start", { (t().start * 1000).toInt() }, 1000, { "${it / 10}.${it % 10}%" }) { v ->

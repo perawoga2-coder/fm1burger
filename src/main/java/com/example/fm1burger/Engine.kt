@@ -1794,6 +1794,21 @@ class Engine {
             t.playing = false
             return 0f
         }
+        // 3.46: the part kept slid under the finger: move the playing sound with it (no restart)
+        if (t.slideReq) {
+            t.slideReq = false
+            if (t.slices == 0 && d.size > 2) {
+                val n = d.size
+                val na = (t.start * n).toDouble().coerceIn(0.0, n - 2.0)
+                val ne = (t.end * n).toDouble().coerceIn(na + 1.0, n.toDouble())
+                val dl = na - t.vStart
+                t.vStart = na
+                t.vEnd = ne
+                t.tl = (t.tl + dl).coerceIn(na, ne - 1.0)
+                t.gPos[0] = (t.gPos[0] + dl).coerceIn(0.0, n - 1.0)
+                t.gPos[1] = (t.gPos[1] + dl).coerceIn(0.0, n - 1.0)
+            }
+        }
         if (t.tl < 0.0 || t.tl.toInt() >= d.size) {
             t.playing = false
             return 0f

@@ -128,6 +128,8 @@ class Track(val index: Int) {
     @Volatile var microLast = 8           // the length the LOOP button turns back on
     // ---- 3.44: ROBOT (off = 0, else how much, 0.1 .. 1) ----
     @Volatile var robot = 0f
+    /** 3.46: start / end moved while it plays (the waveform slide): the audio thread follows without restarting */
+    @Volatile var slideReq = false
     @Volatile var robotAmt = 0.6f         // what the ROBOT button turns back on
     val robotFx = RobotFx()               // (audio thread)
 

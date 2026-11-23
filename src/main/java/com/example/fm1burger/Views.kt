@@ -16,6 +16,11 @@ class WaveformView(ctx: Context) : View(ctx) {
 
     var editable = false
     var onSelect: ((Float, Float) -> Unit)? = null
+    /** 3.46: when set, a drag that starts inside the part kept slides that part (same length) and reports it live */
+    var onSlide: ((Float, Float) -> Unit)? = null
+    private var sliding = false
+    private var slideFrom = 0f
+    private var slideA = 0f
     var color = Theme.ACCENT
     var playhead = -1f
         set(v) {
@@ -123,18 +128,34 @@ class WaveformView(ctx: Context) : View(ctx) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
-                anchor = f
-                selA = f
-                selB = f
+                // 3.46: inside the part kept: slide it; outside: select a new part (the grey frame), as before
+                sliding = onSlide != null && f >= regA && f <= regB && regB - regA < 0.999f
+                if (sliding) {
+                    slideFrom = f
+                    slideA = regA
+                } else {
+                    anchor = f
+                    selA = f
+                    selB = f
+                }
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
-                selA = min(anchor, f)
-                selB = max(anchor, f)
+                if (sliding) {
+                    val len = regB - regA
+                    val a = (slideA + (f - slideFrom)).coerceIn(0f, 1f - len)
+                    regA = a
+                    regB = a + len
+                    onSlide?.invoke(regA, regB)
+                } else {
+                    selA = min(anchor, f)
+                    selB = max(anchor, f)
+                }
                 invalidate()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                onSelect?.invoke(selA, selB)
+                if (!sliding) onSelect?.invoke(selA, selB)
+                sliding = false
             }
         }
         return true
