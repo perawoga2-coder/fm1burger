@@ -123,6 +123,12 @@ class Track(val index: Int) {
     @Volatile var fitBars = 0             // 0 off, or the loop is stretched to 1 / 2 / 4 / 8 bars of the tempo
     @Volatile var keepPitch = false       // fit without changing the pitch (time stretch) instead of like a tape
 
+    // ---- 3.41: the SAMPLING page's small loop: the first 1/micro of a bar (at the tempo) repeats for as long as the part kept lasts ----
+    @Volatile var micro = 0               // 0 off, or 32 / 16 / 8 / 4 / 2 / 1 (1/32 bar .. one bar)
+    @Volatile var microLast = 8           // the length the LOOP button turns back on
+    var microLen = 0.0                    // (audio thread) the loop's length in source samples
+    var microLeft = 0.0                   // (audio thread) source samples left before the sound ends
+
     // ---- slices (STEP mode) ----
     @Volatile var slices = 0              // 0 off, 4 / 8 / 16 equal slices of start..end
     val sliceOf = IntArray(Pat.BAR) { -1 }        // which slice each step of a bar plays (-1 = slice number of the step)

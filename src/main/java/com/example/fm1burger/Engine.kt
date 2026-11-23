@@ -1707,6 +1707,11 @@ class Engine {
                 t.rate = fit * 2.0.pow(t.pitch / 12.0)
             }
         }
+        // 3.41: the small loop (in source samples, so it keeps its length in time at any pitch)
+        if (t.micro > 0) {
+            t.microLen = Pat.barFrames(bpmF) / t.micro * (if (t.stretch) t.tlRate else t.rate)
+            t.microLeft = (e - a).toDouble()
+        } else t.microLen = 0.0
         if (rev) {
             t.dir = -1
             t.pos = (e - 1).toDouble()
@@ -1737,6 +1742,23 @@ class Engine {
         val la = t.vStart + t.loopA.coerceIn(0f, 1f) * (t.vEnd - t.vStart)
         var lb = t.vStart + t.loopB.coerceIn(0f, 1f) * (t.vEnd - t.vStart)
         if (lb - la < 8.0) lb = (la + 8.0).coerceAtMost(t.vEnd)
+        // 3.41: the small loop repeats the start of the part (its end when reversed); it lasts as long as the part
+        // would (for ever with LOOP on)
+        if (t.microLen > 1.0) {
+            if (!t.loop) {
+                t.microLeft -= rate
+                if (t.microLeft <= 0.0) return false
+            }
+            val ma: Double
+            val mb: Double
+            if (t.dir > 0) { ma = t.vStart; mb = (t.vStart + t.microLen).coerceAtMost(t.vEnd) }
+            else { mb = t.vEnd; ma = (t.vEnd - t.microLen).coerceAtLeast(t.vStart) }
+            val len = (mb - ma).coerceAtLeast(2.0)
+            if (t.dir > 0 && p >= mb) p = ma + (p - mb) % len
+            else if (t.dir < 0 && p < ma) p = mb - (ma - p) % len - 1.0
+            t.tl = p.coerceIn(t.vStart, t.vEnd - 1.0)
+            return true
+        }
         if (!t.loop) {
             if (p >= t.vEnd || p < t.vStart) return false
             t.tl = p

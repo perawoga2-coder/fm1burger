@@ -9,11 +9,11 @@ android {
 
     defaultConfig {
         // Burger Studio is its own app, so it installs next to the old FM1 Burger (1.0) instead of over it
-        applicationId = "com.example.burgerstudio.lab"   // 3.0 Lab: its own app, next to Burger Studio 2.x
+        applicationId = "com.makerhip.burger"           // 3.41: the Maker Hip release (Lab 3.x was com.example.burgerstudio.lab)
         minSdk = 23
         targetSdk = 34
-        versionCode = 70
-        versionName = "3.40-lab"
+        versionCode = 71
+        versionName = "3.41"
     }
 
     // Same signing key for every build, so a new APK can be installed over the old one
@@ -34,6 +34,28 @@ android {
         }
     }
 
+    // 3.41: the Maker Hip release key (the same for Burger Studio and 16 Track, so INBOX / → MIX works between them).
+    // CI writes release.jks from the RELEASE_KEYSTORE_B64 secret and passes the password in RELEASE_PASSWORD;
+    // the key itself is never in the repository.
+    val relKey = file("release.jks")
+    val relPw = System.getenv("RELEASE_PASSWORD")
+    if (relKey.exists() && !relPw.isNullOrEmpty()) {
+        signingConfigs {
+            create("makerhip") {
+                storeFile = relKey
+                storePassword = relPw
+                keyAlias = "makerhip"
+                keyPassword = relPw
+            }
+        }
+        buildTypes {
+            getByName("release") {
+                signingConfig = signingConfigs.getByName("makerhip")
+                isMinifyEnabled = false
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -43,7 +65,13 @@ android {
     }
 }
 
-// the APK file carries the version: burgerstudio-v2.0-debug.apk
+// the APK file carries the version and no build type: burgerstudio-v3.41.apk
 base {
-    archivesName.set("burgerstudio-lab-v" + android.defaultConfig.versionName!!.removeSuffix("-lab"))
+    archivesName.set("burgerstudio-v" + android.defaultConfig.versionName!!)
+}
+android.applicationVariants.all {
+    outputs.all {
+        (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName =
+            "burgerstudio-v" + versionName + (if (buildType.name == "release") "" else "-" + buildType.name) + ".apk"
+    }
 }

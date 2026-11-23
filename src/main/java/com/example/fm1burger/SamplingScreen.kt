@@ -22,6 +22,11 @@ import kotlin.math.pow
  *  - the sound: load (from anywhere), loop, reverse, louder, clear, → MPC pad, → FM-1
  *  - the effects: volume, pan, pitch, low-pass, high-pass, drive, delay, reverb, room, mute; more on its own page
  * It replaces the old Sampler, Edit and Voice pages (one way to record, one waveform, one effects panel).
+ *
+ * 3.41 (laid out for the order you work in): the track numbers sit in the page bar after Maker Bank (trackBar);
+ * REC comes first, then the waveform with big ▶ / ■, a small LOOP in steps of the bar and the frequency graph;
+ * the sound has Load, Clear and Send to… (MPC pad or FM-1, with or without the effects); Steps, Loop & slices
+ * and Louder went to the effects.
  */
 class SamplingScreen(private val a: MainActivity) : Screen {
 
@@ -31,6 +36,11 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     private val content = ui.col()
 
     private val trackBtns = ArrayList<Button>()
+    /** 3.41: the track numbers 1..5, shown in the page bar after Maker Bank (MainActivity puts it there) */
+    val trackBar: LinearLayout = ui.row()
+    private val graph = FilterGraphView(a)
+    private val microBtns = ArrayList<Pair<Int, Button>>()
+    private lateinit var microBtn: Button
     private val wave = WaveformView(a)
     private val nameText = ui.text("", 16f, Theme.TEXT, true)
     private val infoText = ui.text("", 12f, Theme.DIM)
@@ -55,7 +65,10 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     private var sendAfter = -1
     private var sendRef: FloatArray? = null
     private val room = IntArray(Cfg.TRACKS)
-    private var bakeBox: CheckBox? = null
+    /** Send to… takes the effects with it (as you hear it): remembered */
+    private var bake: Boolean
+        get() = prefs.getBoolean("bake", true)
+        set(v) { prefs.edit().putBoolean("bake", v).apply() }
     // 🔁 THE APP (resample): its length (0 free, else 1 / 2 / 4 bars from the next bar) and whether the track it goes into is
     // muted meanwhile (so its old sound stays out of the new one)
     private val prefs = a.getSharedPreferences("sampling", 0)
@@ -74,13 +87,17 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         content.setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(88))
         root.addView(content)
 
-        // ---- the tracks: 1 .. 5
-        val tr = ui.row()
-        tr.addView(ui.title("Sampling"), ui.w(0f, 0))
-        tr.addView(View(a), ui.w(0.15f, 0))
+        // ---- the tracks: 1 .. 5 (in the page bar, a little smaller)
+        trackBar.gravity = Gravity.CENTER_VERTICAL
+        trackBar.setPadding(ui.dp(6), 0, 0, 0)
         for (i in 0 until Cfg.TRACKS) {
             val b = ui.button("${i + 1}") { select(i) }
-            b.textSize = 26f
+            b.textSize = 17f
+            b.setPadding(0, 0, 0, 0)
+            b.minWidth = 0
+            b.minimumWidth = 0
+            b.minHeight = 0
+            b.minimumHeight = 0
             b.typeface = Ui.BOLD
             b.setOnLongClickListener {
                 e.tracks[i].mute = !e.tracks[i].mute
@@ -89,17 +106,20 @@ class SamplingScreen(private val a: MainActivity) : Screen {
                 true
             }
             trackBtns.add(b)
-            tr.addView(b, LinearLayout.LayoutParams(0, ui.dp(64), 1f).also { it.setMargins(ui.dp(4), 0, ui.dp(4), 0) })
+            trackBar.addView(b, LinearLayout.LayoutParams(ui.dp(44), ui.dp(38)).also { it.setMargins(ui.dp(3), 0, ui.dp(3), 0) })
         }
-        content.addView(tr)
 
         // ---- the waveform
         val wp = ui.panel()
         val nr = ui.row()
         nr.gravity = Gravity.CENTER_VERTICAL
         nr.addView(nameText, ui.w(1f, 0))
-        nr.addView(ui.button("▶") { play() }, ui.w(0f, 3))
-        nr.addView(ui.button("■") { e.previewStop() }, ui.w(0f, 3))
+        val playB = ui.button("▶") { play() }
+        val stopB = ui.button("■") { stopAll() }
+        for (b in listOf(playB, stopB)) {
+            b.textSize = 26f
+            nr.addView(b, LinearLayout.LayoutParams(ui.dp(76), ui.dp(60)).also { it.setMargins(ui.dp(6), 0, 0, 0) })
+        }
         wp.addView(nr)
         wp.addView(infoText)
         wave.editable = true
@@ -122,10 +142,45 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             val tt = t(); tt.end = max(v / 1000f, tt.start + 0.005f); wave.setRegion(tt.start, tt.end)
         }
         wp.addView(trimRow, ui.fullWidth(2))
+        // the small loop: LOOP on / off, and its length in parts of a bar (at the tempo)
+        val ml = ui.row()
+        ml.gravity = Gravity.CENTER_VERTICAL
+        microBtn = ui.button("LOOP") {
+            val tt = t()
+            tt.micro = if (tt.micro > 0) 0 else tt.microLast
+            refresh(); play()
+        }
+        microBtn.textSize = 14f
+        ml.addView(microBtn, ui.w(1.3f, 3))
+        for (dv in intArrayOf(32, 16, 8, 4, 2, 1)) {
+            val b = ui.button(if (dv == 1) "1" else "1/$dv") {
+                val tt = t()
+                tt.micro = dv
+                tt.microLast = dv
+                refresh(); play()
+            }
+            b.textSize = 13f
+            b.isAllCaps = false
+            b.minWidth = 0
+            b.minimumWidth = 0
+            b.setPadding(0, 0, 0, 0)
+            microBtns.add(Pair(dv, b))
+            ml.addView(b, ui.w(1f, 2))
+        }
+        wp.addView(ml, ui.fullWidth(8))
+        // the frequency graph: low cut and high cut, drag them
+        graph.onChange = { k, av, bv, on ->
+            val fx = t().fx
+            fx.a[k] = av
+            fx.b[k] = bv
+            fx.on[k] = on
+            for ((sl, get) in sliders) sl.set(get())
+        }
+        graph.onRelease = { play() }
+        wp.addView(graph, ui.fullWidth(8))
         wp.addView(ui.text("Drag across the waveform to keep only that part. Long press a track number: mute.", 11f, Theme.DIM))
-        content.addView(wp, ui.fullWidth(10))
 
-        // ---- REC
+        // ---- REC (first: the waveform comes after it)
         val rp = ui.panel()
         val rr = ui.row()
         rr.gravity = Gravity.CENTER_VERTICAL
@@ -176,28 +231,16 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         recInfo = ui.text("", 12f, Theme.DIM)
         rp.addView(recInfo, ui.fullWidth(4))
         content.addView(rp, ui.fullWidth(10))
+        content.addView(wp, ui.fullWidth(10))
 
         // ---- the sound
         val mp = ui.panel()
         mp.addView(ui.text("The sound", 14f, Theme.ACCENT, true))
         val m1 = ui.row()
         m1.addView(colored("Load…", Theme.ACCENT) { load() }, ui.w(1f, 3))
-        m1.addView(colored("Louder", Theme.BLUE) { louder() }, ui.w(1f, 3))
         m1.addView(colored("Clear", Theme.RED) { clear() }, ui.w(1f, 3))
+        m1.addView(colored("Send to…", Theme.PURPLE) { sendTo() }, ui.w(1f, 3))
         mp.addView(m1, ui.fullWidth(6))
-        val m2 = ui.row()
-        m2.addView(colored("→ MPC pad", Theme.ACCENT) { toMpc() }, ui.w(1f, 3))
-        m2.addView(colored("→ FM-1", Theme.PURPLE) { toFm1() }, ui.w(1f, 3))
-        m2.addView(colored("Steps…", Theme.GREEN) { a.showTab(MainActivity.TAB_STEPS) }, ui.w(1f, 3))
-        m2.addView(colored("Loop & slices…", Theme.GREEN) { TrackPage(a, a.sel, TrackPage.TAB_LOOP).open() }, ui.w(1.2f, 3))
-        mp.addView(m2, ui.fullWidth(4))
-        val bake = CheckBox(a)
-        bake.text = "→ MPC / → FM-1 take the effects with them (as you hear it)"
-        bake.setTextColor(Theme.TEXT)
-        bake.isChecked = a.getSharedPreferences("sampling", 0).getBoolean("bake", true)
-        bake.setOnCheckedChangeListener { _, on -> a.getSharedPreferences("sampling", 0).edit().putBoolean("bake", on).apply() }
-        bakeBox = bake
-        mp.addView(bake, ui.fullWidth(4))
         content.addView(mp, ui.fullWidth(10))
 
         // ---- the effects
@@ -209,6 +252,11 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         fh.addView(muteBtn, ui.w(0f, 3))
         fh.addView(ui.button("More effects…") { TrackPage(a, a.sel, TrackPage.TAB_FX).open() }, ui.w(0f, 3))
         fp.addView(fh)
+        val fm = ui.row()
+        fm.addView(colored("Steps…", Theme.GREEN) { a.showTab(MainActivity.TAB_STEPS) }, ui.w(1f, 3))
+        fm.addView(colored("Loop & slices…", Theme.GREEN) { TrackPage(a, a.sel, TrackPage.TAB_LOOP).open() }, ui.w(1.2f, 3))
+        fm.addView(colored("Louder", Theme.BLUE) { louder() }, ui.w(1f, 3))
+        fp.addView(fm, ui.fullWidth(6))
         val f0 = ui.row()
         loopBtn = colored("Loop", Theme.BLUE) { t().loop = !t().loop; refresh() }
         f0.addView(loopBtn, ui.w(1f, 3))
@@ -263,7 +311,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     }
 
     private fun addSlider(parent: LinearLayout, name: String, get: () -> Int, maxV: Int, fmt: (Int) -> String, set: (Int) -> Unit) {
-        val s = ui.slider(name, maxV, get(), fmt, set)
+        val s = ui.slider(name, maxV, get(), fmt) { v -> set(v); graph.set(t().fx) }
         sliders.add(Pair(s, get))
         parent.addView(s.view, ui.w(1f, 4))
     }
@@ -445,6 +493,24 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             }
             x = y
         }
+        // 3.41: the small loop, as it plays: its first part repeated for as long as the part kept lasts
+        if (tt.micro > 0) {
+            val len = (Pat.barFrames(e.bpmF) / tt.micro).toInt().coerceAtLeast(64)
+            if (len < x.size) {
+                val y = FloatArray(x.size)
+                val fade = min(48, len / 4)
+                for (k in y.indices) {
+                    val j = k % len
+                    val w = when {
+                        j < fade && k >= len -> j / fade.toFloat()          // (no fade-in on the very first one)
+                        j >= len - fade -> (len - 1 - j) / fade.toFloat()
+                        else -> 1f
+                    }
+                    y[k] = x[j] * w
+                }
+                x = y
+            }
+        }
         val g = 10f.pow(tt.boostDb / 20f)
         if (g != 1f) for (k in x.indices) x[k] *= g
         if (bake) {
@@ -482,7 +548,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     private fun toMpc() {
         if (t().data == null) return ui.toast("Track ${a.sel + 1} is empty")
         val names = Array(Cfg.PADS) { q -> "Pad ${Cfg.padName(q)}   " + e.pads[q].name.removeSuffix(".wav").ifEmpty { "(empty)" } }
-        val bake = bakeBox?.isChecked == true
+        val bake = this.bake
         AlertDialog.Builder(a)
             .setTitle("Send track ${a.sel + 1} to which MPC pad?")
             .setItems(names) { _, q ->
@@ -505,8 +571,41 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             .show()
     }
 
+    /** 3.41: one Send to… for the MPC pads and the FM-1, with or without the effects (remembered) */
+    private fun sendTo() {
+        if (t().data == null) return ui.toast("Track ${a.sel + 1} is empty")
+        val box = ui.col()
+        box.setPadding(ui.dp(20), ui.dp(8), ui.dp(20), ui.dp(4))
+        val cb = CheckBox(a)
+        cb.text = "With the effects (as you hear it)"
+        cb.setTextColor(Theme.TEXT)
+        cb.isChecked = bake
+        cb.setOnCheckedChangeListener { _, on -> bake = on }
+        box.addView(cb)
+        var dlg: AlertDialog? = null
+        val row = ui.row()
+        val mpcB = colored("MPC pad", Theme.ACCENT) { dlg?.dismiss(); toMpc() }
+        val fmB = colored("FM-1", Theme.PURPLE) { dlg?.dismiss(); toFm1() }
+        mpcB.textSize = 18f
+        fmB.textSize = 18f
+        row.addView(mpcB, LinearLayout.LayoutParams(0, ui.dp(64), 1f).also { it.setMargins(0, 0, ui.dp(6), 0) })
+        row.addView(fmB, LinearLayout.LayoutParams(0, ui.dp(64), 1f).also { it.setMargins(ui.dp(6), 0, 0, 0) })
+        box.addView(row, ui.fullWidth(10))
+        dlg = AlertDialog.Builder(a)
+            .setTitle("Send track ${a.sel + 1} to")
+            .setView(box)
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** ■: the preview and this track's sound (a LOOP keeps going until stopped) */
+    private fun stopAll() {
+        e.previewStop()
+        t().playing = false
+    }
+
     private fun toFm1() {
-        val d = render(bakeBox?.isChecked == true) ?: return ui.toast("Track ${a.sel + 1} is empty")
+        val d = render(bake) ?: return ui.toast("Track ${a.sel + 1} is empty")
         a.sendToFm1(baseName(), d)
     }
 
@@ -540,7 +639,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         val d = tt.data
         infoText.text = if (d == null) "Press REC, or Load… a sound from anywhere." else String.format(
             java.util.Locale.US, "%.2f s, playing %.2f s%s%s", d.size / Cfg.SR.toDouble(), d.size * (tt.end - tt.start) / Cfg.SR.toDouble(),
-            if (tt.loop) " · loop" else "", if (tt.boostDb > 0.1f) String.format(java.util.Locale.US, " · +%.1f dB", tt.boostDb) else "")
+            (if (tt.loop) " · loop" else "") + (if (tt.micro > 0) " · LOOP 1/${tt.micro}" else ""), if (tt.boostDb > 0.1f) String.format(java.util.Locale.US, " · +%.1f dB", tt.boostDb) else "")
         if (d !== lastData || sel != lastSel) {
             wave.setData(d)
             lastData = d
@@ -549,6 +648,10 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         wave.color = c
         wave.setRegion(tt.start, tt.end)
         for ((s, get) in sliders) s.set(get())
+        ui.styleButton(microBtn, tt.micro > 0, c)
+        for ((dv, b) in microBtns) ui.styleButton(b, tt.micro == dv, c)
+        graph.color = c
+        graph.set(tt.fx)
         ui.styleButton(loopBtn, tt.loop, Theme.BLUE)
         ui.styleButton(revBtn, tt.reverse, Theme.BLUE)
         refreshEcho()

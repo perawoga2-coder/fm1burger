@@ -434,7 +434,7 @@ class MainActivity : Activity() {
         hx.setPadding(0, 0, ui.dp(8), 0)
         val hxText = ui.col()
         val ver = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (ex: Exception) { "" }
-        val hxTitle = ui.text("Home  ·  Burger Studio Lab v$ver", 12f, Theme.TEXT, true)
+        val hxTitle = ui.text("Home  ·  Burger Studio v$ver", 12f, Theme.TEXT, true)
         hxTitle.maxLines = 1
         hxTitle.ellipsize = android.text.TextUtils.TruncateAt.END
         val hxHint = ui.text("Number: instrument · Icon: its page · Picture: hear · M: mute", 10f, Theme.DIM)
@@ -519,6 +519,11 @@ class MainActivity : Activity() {
             shownSection = sec
             segRow.removeAllViews()
             for (idx in SECTIONS[sec]) segRow.addView(tabBtns[idx], ui.w(0f, 3))
+            // 3.41: the SAMPLING page's track numbers sit in the bar, after Maker Bank
+            if (TAB_TRACKS in SECTIONS[sec]) {
+                (tracksScreen.trackBar.parent as? android.view.ViewGroup)?.removeView(tracksScreen.trackBar)
+                segRow.addView(tracksScreen.trackBar, ui.w(0f, 0))
+            }
             tabScroll.visibility = if (SECTIONS[sec].size > 1) View.VISIBLE else View.GONE
         }
         for (k in navBtns.indices) {
@@ -530,6 +535,7 @@ class MainActivity : Activity() {
         }
         cueRow?.visibility = if (sec == 3) View.VISIBLE else View.GONE      // (3.39: not on Home any more: Song page only)
         homeFab.visibility = if (i == TAB_HOME) View.GONE else View.VISIBLE
+        tracksScreen.trackBar.visibility = if (i == TAB_TRACKS) View.VISIBLE else View.GONE
         homeBar?.visibility = if (i == TAB_HOME) View.VISIBLE else View.GONE   // (3.23: Home's line in the bar)
         takeBtn.visibility = if (i == TAB_HOME) View.VISIBLE else View.GONE
         screens.forEachIndexed { idx, s -> s.root.visibility = if (idx == i) View.VISIBLE else View.GONE }

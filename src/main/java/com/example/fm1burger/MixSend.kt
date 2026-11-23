@@ -234,6 +234,7 @@ object MixSend {
             b.loopB = a.loopB
             b.xfadeMs = a.xfadeMs
             b.fitBars = a.fitBars
+            b.micro = a.micro
             b.keepPitch = a.keepPitch
             b.slices = a.slices
             a.sliceOf.copyInto(b.sliceOf)
