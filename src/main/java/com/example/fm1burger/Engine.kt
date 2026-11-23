@@ -1204,6 +1204,7 @@ class Engine {
                 for (i in 0 until Cfg.TRACKS) {
                     val t = tracks[i]
                     var s = renderTrack(t) * tb[i]
+                    s = t.robotFx.process(s, t.robot)            // (3.44: ROBOT, off unless turned on)
                     s = t.fx.process(s, bpmNow, beatPos)
                     if (stemOn) {
                         val on = !t.mute && (pr < 0 || pr == i)
@@ -1398,6 +1399,7 @@ class Engine {
             var r = 0f
             if (trk != null) {
                 var s = renderTrack(trk) * boost
+                s = trk.robotFx.process(s, trk.robot)
                 s = trk.fx.process(s, bpmNow, beatPos)
                 if (!trk.mute) {
                     l = s * tv

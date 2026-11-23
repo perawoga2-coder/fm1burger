@@ -40,6 +40,8 @@ class Project(private val a: MainActivity) {
                 j.put("keepPitch", t.keepPitch)
                 j.put("micro", t.micro)
                 j.put("microLast", t.microLast)
+                j.put("robot", t.robot.toDouble())
+                j.put("robotAmt", t.robotAmt.toDouble())
                 j.put("slices", t.slices)
                 val slo = JSONArray()
                 val slr = JSONArray()
@@ -168,6 +170,8 @@ class Project(private val a: MainActivity) {
                     t.fitBars = j.optInt("fitBars", 0).let { if (it in intArrayOf(0, 1, 2, 4, 8)) it else 0 }
                     t.micro = j.optInt("micro", 0).let { if (it in intArrayOf(0, 1, 2, 4, 8, 16, 32)) it else 0 }
                     t.microLast = j.optInt("microLast", 8).let { if (it in intArrayOf(1, 2, 4, 8, 16, 32)) it else 8 }
+                    t.robot = j.optDouble("robot", 0.0).toFloat().coerceIn(0f, 1f)
+                    t.robotAmt = j.optDouble("robotAmt", 0.6).toFloat().coerceIn(0.1f, 1f)
                     t.keepPitch = j.optBoolean("keepPitch", false)
                     t.slices = j.optInt("slices", 0).let { if (it in intArrayOf(0, 4, 8, 16)) it else 0 }
                     val slo = j.optJSONArray("sliceOf")

@@ -17,9 +17,10 @@ import kotlin.math.sqrt
 /**
  * 3.41: the SAMPLING page's frequency graph, the way DAWs draw a filter.
  * Left to right is 20 Hz .. 20 kHz; the curve is what the track's low cut (the high-pass, FxChain 1) and high cut
- * (the low-pass, FxChain 0) do. Drag a handle left / right for its frequency and up / down for its resonance;
- * all the way out (left for the low cut, right for the high cut) turns it off. It reads and writes the same values
- * as the Low-pass / High-pass sliders, so the two always agree.
+ * (the low-pass, FxChain 0) do: it is for cutting noise (rumble, hiss). Press a handle and drag it left / right;
+ * all the way out (left for the low cut, right for the high cut) turns it off. A touch anywhere else changes nothing
+ * (the page scrolls). 3.44: no resonance from the graph (it made voices ring like a robot); ROBOT has its own button.
+ * It reads and writes the same values as the Low-pass / High-pass sliders, so the two always agree.
  */
 class FilterGraphView(ctx: Context) : View(ctx) {
 
@@ -82,7 +83,7 @@ class FilterGraphView(ctx: Context) : View(ctx) {
         k == 0 -> width - pad()
         else -> pad()
     }
-    private fun handleY(k: Int): Float = yOf(-12.0 + resB[k] * 24.0)
+    private fun handleY(k: Int): Float = yOf(-6.0)
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
@@ -151,12 +152,18 @@ class FilterGraphView(ctx: Context) : View(ctx) {
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // only a press on a handle (within 36 dp) takes it; anything else is left to the page
+                val r = 36 * dp
+                val d0 = abs(ev.x - handleX(0)) + abs(ev.y - handleY(0))
+                val d1 = abs(ev.x - handleX(1)) + abs(ev.y - handleY(1))
+                drag = when {
+                    d0 <= r && (d0 <= d1 || d1 > r) -> 0
+                    d1 <= r -> 1
+                    else -> -1
+                }
+                if (drag < 0) return false
                 parent?.requestDisallowInterceptTouchEvent(true)
-                // the nearer handle; between them, the side of the touch
-                val d0 = abs(ev.x - handleX(0)) + abs(ev.y - handleY(0)) * 0.3f
-                val d1 = abs(ev.x - handleX(1)) + abs(ev.y - handleY(1)) * 0.3f
-                drag = if (d0 <= d1) 0 else 1
-                move(ev.x, ev.y)
+                invalidate()
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
@@ -177,7 +184,7 @@ class FilterGraphView(ctx: Context) : View(ctx) {
     private fun move(x: Float, y: Float) {
         val k = drag
         val a = cutA(hzOf(x))
-        val b = ((DB_TOP - (DB_TOP - DB_BOT) * ((y - pad()) / (height - 2 * pad()))).let { (it + 12.0) / 24.0 }).toFloat().coerceIn(0f, 1f)
+        val b = 0f                                          // (a gentle cut: no resonance)
         // all the way out = off
         val off = if (k == 0) a >= 0.99f else a <= 0.01f
         cutA[k] = if (off) (if (k == 0) 1f else 0f) else a

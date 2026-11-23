@@ -41,6 +41,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
     private val graph = FilterGraphView(a)
     private val microBtns = ArrayList<Pair<Int, Button>>()
     private lateinit var microBtn: Button
+    private lateinit var robotBtn: Button
     private val wave = WaveformView(a)
     private val nameText = ui.text("", 16f, Theme.TEXT, true)
     private val infoText = ui.text("", 12f, Theme.DIM)
@@ -172,7 +173,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         graph.onChange = { k, av, bv, on ->
             val fx = t().fx
             fx.a[k] = av
-            fx.b[k] = bv
+            fx.b[k] = 0f                       // (3.44: a gentle cut, no resonance: the graph only cuts noise)
             fx.on[k] = on
             for ((sl, get) in sliders) sl.set(get())
         }
@@ -257,6 +258,28 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         fm.addView(colored("Loop & slices…", Theme.GREEN) { TrackPage(a, a.sel, TrackPage.TAB_LOOP).open() }, ui.w(1.2f, 3))
         fm.addView(colored("Louder", Theme.BLUE) { louder() }, ui.w(1f, 3))
         fp.addView(fm, ui.fullWidth(6))
+        // 3.44: ROBOT in a small box of its own (off unless you turn it on)
+        val rb2 = ui.panel()
+        rb2.background = ui.bg(Theme.alpha(Theme.PINK, 30), 12, Theme.PINK, 1)
+        rb2.setPadding(ui.dp(10), ui.dp(6), ui.dp(10), ui.dp(6))
+        val rbr = ui.row()
+        rbr.gravity = Gravity.CENTER_VERTICAL
+        robotBtn = ui.button("ROBOT") {
+            val tt = t()
+            tt.robot = if (tt.robot > 0f) 0f else tt.robotAmt
+            refresh(); play()
+        }
+        robotBtn.textSize = 15f
+        rbr.addView(robotBtn, ui.w(0f, 3))
+        val rs = ui.slider("Robot voice", 100, (t().robotAmt * 100).toInt(), { "$it%" }) { v ->
+            val tt = t()
+            tt.robotAmt = (v / 100f).coerceIn(0.1f, 1f)
+            if (tt.robot > 0f) tt.robot = tt.robotAmt
+        }
+        sliders.add(Pair(rs, { (t().robotAmt * 100).toInt() }))
+        rbr.addView(rs.view, ui.w(1f, 3))
+        rb2.addView(rbr)
+        fp.addView(rb2, ui.fullWidth(6))
         val f0 = ui.row()
         loopBtn = colored("Loop", Theme.BLUE) { t().loop = !t().loop; refresh() }
         f0.addView(loopBtn, ui.w(1f, 3))
@@ -528,8 +551,9 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             val bpm = e.bpmF
             var beat = 0.0
             val inc = bpm / 60.0 / Cfg.SR
+            val rob = RobotFx()
             for (k in out.indices) {
-                out[k] = fx.process(if (k < x.size) x[k] else 0f, bpm, beat)
+                out[k] = fx.process(rob.process(if (k < x.size) x[k] else 0f, tt.robot), bpm, beat)
                 beat += inc
             }
             x = out
@@ -648,6 +672,7 @@ class SamplingScreen(private val a: MainActivity) : Screen {
         wave.color = c
         wave.setRegion(tt.start, tt.end)
         for ((s, get) in sliders) s.set(get())
+        ui.styleButton(robotBtn, tt.robot > 0f, Theme.PINK)
         ui.styleButton(microBtn, tt.micro > 0, c)
         for ((dv, b) in microBtns) ui.styleButton(b, tt.micro == dv, c)
         graph.color = c

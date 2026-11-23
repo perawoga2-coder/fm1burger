@@ -126,6 +126,10 @@ class Track(val index: Int) {
     // ---- 3.41: the SAMPLING page's small loop: the first 1/micro of a bar (at the tempo) repeats for as long as the part kept lasts ----
     @Volatile var micro = 0               // 0 off, or 32 / 16 / 8 / 4 / 2 / 1 (1/32 bar .. one bar)
     @Volatile var microLast = 8           // the length the LOOP button turns back on
+    // ---- 3.44: ROBOT (off = 0, else how much, 0.1 .. 1) ----
+    @Volatile var robot = 0f
+    @Volatile var robotAmt = 0.6f         // what the ROBOT button turns back on
+    val robotFx = RobotFx()               // (audio thread)
     var microLen = 0.0                    // (audio thread) the loop's length in source samples
     var microLeft = 0.0                   // (audio thread) source samples left before the sound ends
 
