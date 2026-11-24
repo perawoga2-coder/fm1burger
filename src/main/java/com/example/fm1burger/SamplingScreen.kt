@@ -619,31 +619,55 @@ class SamplingScreen(private val a: MainActivity) : Screen {
             .show()
     }
 
-    /** 3.41: one Send to… for the MPC pads and the FM-1, with or without the effects (remembered) */
+    /** 3.41: one Send to… for the MPC pads and the FM-1, with or without the effects (remembered);
+     *  3.53: and the Maker Bank (only the part kept, as a new sound); the effects box under the buttons */
     private fun sendTo() {
         if (t().data == null) return ui.toast("Track ${a.sel + 1} is empty")
         val box = ui.col()
         box.setPadding(ui.dp(20), ui.dp(8), ui.dp(20), ui.dp(4))
+        var dlg: AlertDialog? = null
+        val row = ui.row()
+        val mpcB = colored("MPC pad", Theme.ACCENT) { dlg?.dismiss(); toMpc() }
+        val fmB = colored("FM-1", Theme.PURPLE) { dlg?.dismiss(); toFm1() }
+        val mbB = colored("Maker Bank", Theme.GREEN) { dlg?.dismiss(); toBank() }
+        for ((k, b) in listOf(mpcB, fmB, mbB).withIndex()) {
+            b.textSize = 17f
+            b.isAllCaps = false
+            row.addView(b, LinearLayout.LayoutParams(0, ui.dp(64), 1f).also { it.setMargins(if (k == 0) 0 else ui.dp(6), 0, 0, 0) })
+        }
+        box.addView(row, ui.fullWidth(6))
         val cb = CheckBox(a)
         cb.text = "With the effects (as you hear it)"
         cb.setTextColor(Theme.TEXT)
         cb.isChecked = bake
         cb.setOnCheckedChangeListener { _, on -> bake = on }
-        box.addView(cb)
-        var dlg: AlertDialog? = null
-        val row = ui.row()
-        val mpcB = colored("MPC pad", Theme.ACCENT) { dlg?.dismiss(); toMpc() }
-        val fmB = colored("FM-1", Theme.PURPLE) { dlg?.dismiss(); toFm1() }
-        mpcB.textSize = 18f
-        fmB.textSize = 18f
-        row.addView(mpcB, LinearLayout.LayoutParams(0, ui.dp(64), 1f).also { it.setMargins(0, 0, ui.dp(6), 0) })
-        row.addView(fmB, LinearLayout.LayoutParams(0, ui.dp(64), 1f).also { it.setMargins(ui.dp(6), 0, 0, 0) })
-        box.addView(row, ui.fullWidth(10))
+        box.addView(cb, ui.fullWidth(10))
         dlg = AlertDialog.Builder(a)
             .setTitle("Send track ${a.sel + 1} to")
             .setView(box)
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /** 3.53: the part kept (with the effects if ticked) as a new sound in the Maker Bank (My Recordings) */
+    private fun toBank() {
+        val bk = bake
+        val name = baseName() + "_cut"
+        Thread {
+            val f = try {
+                val d = render(bk) ?: throw IllegalStateException()
+                a.store.saveNew(name, d, Cfg.SR).also { a.store.setCategory(it.name, "Recorded") }
+            } catch (ex: Exception) {
+                null
+            }
+            a.runOnUiThread {
+                if (f == null) ui.toast("Could not save it")
+                else {
+                    a.libraryScreen.refresh()
+                    ui.toast("Maker Bank: ${f.nameWithoutExtension} (My Recordings)")
+                }
+            }
+        }.start()
     }
 
     /** ■: the preview and this track's sound (a LOOP keeps going until stopped) */
