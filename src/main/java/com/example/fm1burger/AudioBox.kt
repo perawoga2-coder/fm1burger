@@ -235,6 +235,8 @@ class AudioBox(private val a: MainActivity) {
     /** 20 times a second, from the activity's ticker. */
     fun tick() {
         ticks++
+        // 3.55: the Bluetooth link closed without Android saying so (MidiLink dropped it): looked for again
+        if (a.ble.state == BleLink.CONNECTED && !a.midi.isOpen(a.ble.midiId)) a.ble.onMidiGone(a.ble.midiId)
         val mon = a.engine.fm1In
         if (sound == MERGED && !background) {
             // the USB input is one thing at a time: a recording or the live voice has it first, and meanwhile the FM-1
@@ -277,6 +279,10 @@ class AudioBox(private val a: MainActivity) {
     private var meter: BoxMeter? = null
     private val leds = HashMap<String, BoxLed>()
     private var status: TextView? = null
+    private var bleBtn: android.widget.Button? = null
+    private var bleText: TextView? = null
+    private var keysSeen = 0L
+    private var keysMs = 0L
 
     fun show() {
         if (dialog != null) return
@@ -314,6 +320,19 @@ class AudioBox(private val a: MainActivity) {
         sl.addView(led("FM-1 MUTED", Theme.RED), ui.w(1f, 2))
         face.addView(sl)
 
+        // 3.55: the FM-1 over Bluetooth MIDI
+        face.addView(section("FM-1 BLUETOOTH"), ui.fullWidth(16))
+        val bl = ui.row()
+        val bb = ui.button("CONNECT") { if (a.ble.busy) a.ble.disconnect() else a.ble.connect() }
+        bleBtn = bb
+        bl.addView(bb, ui.w(1f, 2))
+        bl.addView(led("BT", Theme.BLUE), ui.w(1f, 2))
+        bl.addView(led("FM-1 KEYS", Theme.GREEN), ui.w(1f, 2))
+        face.addView(bl)
+        val bt = ui.text("", 11f, Theme.DIM)
+        bleText = bt
+        face.addView(bt, ui.fullWidth(4))
+
         face.addView(section("FM-1 INPUT LEVEL"), ui.fullWidth(16))
         val m = BoxMeter(a)
         meter = m
@@ -341,6 +360,8 @@ class AudioBox(private val a: MainActivity) {
             soundSw = null
             meter = null
             status = null
+            bleBtn = null
+            bleText = null
             leds.clear()
         }
         dialog = d
@@ -374,6 +395,19 @@ class AudioBox(private val a: MainActivity) {
         leds["USB AUDIO"]?.set(mon.alive())
         val muted = muteSent && ackState == 1 && System.currentTimeMillis() - ackMs < 2500L
         leds["FM-1 MUTED"]?.set(muted)
+        // 3.55: Bluetooth, and the FM-1's keys arriving (kept off the pads: the lamp shows that they come)
+        leds["BT"]?.set(a.ble.state == BleLink.CONNECTED)
+        val nk = a.midi.fm1Notes
+        if (nk != keysSeen) {
+            keysSeen = nk
+            keysMs = System.currentTimeMillis()
+        }
+        leds["FM-1 KEYS"]?.set(System.currentTimeMillis() - keysMs < 250L)
+        val bbt = if (a.ble.busy) "DISCONNECT" else "CONNECT"
+        if (bleBtn?.text.toString() != bbt) bleBtn?.text = bbt
+        bleBtn?.let { a.ui.styleButton(it, a.ble.state == BleLink.CONNECTED) }
+        val bs = a.ble.statusLine()
+        if (bleText?.text.toString() != bs) bleText?.text = bs
         meter?.set(if (mon.on) mon.level else 0f)
         val line = when {
             sound == MERGED && !conn -> "MERGED: waiting for the FM-1 (plug it in by USB). Nothing is muted."

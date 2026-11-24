@@ -185,7 +185,15 @@ class MainActivity : Activity() {
         saveAll()
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == BleLink.PERM_REQ) {          // 3.55: the Bluetooth button's question
+            ble.onPermission(grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED })
+        }
+    }
+
     override fun onDestroy() {
+        ble.stop()
         audioBox.stop()
         hub.stop()
         handler.removeCallbacksAndMessages(null)
@@ -884,6 +892,8 @@ class MainActivity : Activity() {
     val hub by lazy { DeviceHub(this) }
     /** 3.54: the audio box (MASTER CLOCK and SOUND switches for the FM-1). */
     val audioBox by lazy { AudioBox(this) }
+    /** 3.55: the FM-1 over Bluetooth MIDI (the CONNECT button of the audio box and of Setup). */
+    val ble by lazy { BleLink(this) }
 
     /** The sample-slot protocol (DeviceHub asks a new device with it). */
     fun sampleLink(): Fm1SampleLink = fm1Link

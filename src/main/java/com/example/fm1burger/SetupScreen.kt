@@ -13,6 +13,8 @@ class SetupScreen(private val a: MainActivity) : Screen {
     override val root = ScrollView(a)
     private val content = ui.col()
     private lateinit var syncInfo: TextView
+    private lateinit var bleInfo: TextView
+    private lateinit var bleBtn: android.widget.Button
     private lateinit var recInfo: TextView
     private lateinit var latInfo: TextView
     private lateinit var devList: TextView
@@ -34,6 +36,13 @@ class SetupScreen(private val a: MainActivity) : Screen {
         mp.addView(syncInfo, ui.fullWidth(4))
         mp.addView(ui.button("MIDI sync: follow / lead / devices / thru…") { a.openSyncMenu() }, ui.fullWidth(6))
         mp.addView(ui.button("AUDIO BOX: FM-1 clock and sound switches…") { a.audioBox.show() }, ui.fullWidth(6))
+        // 3.55: the FM-1 over Bluetooth MIDI
+        bleInfo = ui.text("", 12f, Theme.DIM)
+        mp.addView(bleInfo, ui.fullWidth(8))
+        bleBtn = ui.button("Connect the FM-1 by Bluetooth") {
+            if (a.ble.busy) a.ble.disconnect() else a.ble.connect()
+        }
+        mp.addView(bleBtn, ui.fullWidth(4))
         content.addView(mp, ui.fullWidth(10))
 
         val lp = ui.panel()
@@ -219,6 +228,11 @@ class SetupScreen(private val a: MainActivity) : Screen {
     override fun onTick() {
         val s = a.syncSummary()
         if (syncInfo.text.toString() != s) syncInfo.text = s
+        val bs = a.ble.statusLine()
+        if (bleInfo.text.toString() != bs) bleInfo.text = bs
+        val bb = if (a.ble.busy) "Disconnect the FM-1's Bluetooth" else "Connect the FM-1 by Bluetooth"
+        if (bleBtn.text.toString() != bb) bleBtn.text = bb
+        ui.styleButton(bleBtn, a.ble.state == BleLink.CONNECTED)
         val m = a.engine.mixRec
         val r = if (m.recording) "Recording now in ${MixRecorder.label(m.recBits)}" else "Next recording: ${MixRecorder.label(m.bits)}"
         if (recInfo.text.toString() != r) recInfo.text = r

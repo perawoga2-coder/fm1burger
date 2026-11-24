@@ -28,6 +28,51 @@ class MidiLink(ctx: Context, private val engine: Engine) {
 
     private inner class Conn(val id: Int, val name: String, val dev: MidiDevice, val inPort: MidiInputPort?, val outPort: MidiOutputPort?) {
         val rx = Rx(this)
+        /** 3.55: an FM-1 (STACK): its keys' notes do not play the app's drum pads (they sound on the FM-1 itself). */
+        @Volatile var fm1 = isFm1Name(name)
+    }
+
+    /** 3.55: a device's name says it is an FM-1 (STACK, or the Burger Studio / Felucca firmware). */
+    private fun isFm1Name(n: String): Boolean =
+        n.contains("STACK", true) || n.contains("FM-1", true) || n.contains("FM1", true) ||
+            n.contains("Felucca", true) || n.contains("Burger", true)
+
+    /** 3.55: this connected device turned out to be an FM-1 (it answered the sample protocol, or came over the
+     * Bluetooth button): its notes stay off the pads. */
+    fun markFm1(name: String) {
+        for (c in conns) if (c.name == name) c.fm1 = true
+    }
+
+    /** 3.55: how many notes from an FM-1 were kept off the pads (the audio box shows that they arrive). */
+    @Volatile var fm1Notes = 0L
+
+    /**
+     * 3.55: takes a MIDI device that is already open (Bluetooth: MidiManager.openBluetoothDevice gives the device,
+     * not its info first). Returns its id, or -1 when its ports could not be opened.
+     */
+    fun adopt(dev: MidiDevice, shownName: String, fm1: Boolean): Int {
+        val info = dev.info
+        val old = conns.firstOrNull { it.id == info.id }
+        if (old != null) {
+            old.fm1 = old.fm1 || fm1
+            return info.id
+        }
+        return try {
+            val ip = if (info.inputPortCount > 0) dev.openInputPort(0) else null
+            val op = if (info.outputPortCount > 0) dev.openOutputPort(0) else null
+            val n = info.properties.getString(MidiDeviceInfo.PROPERTY_NAME) ?: shownName
+            val c = Conn(info.id, n, dev, ip, op)
+            c.fm1 = c.fm1 || fm1
+            op?.connect(c.rx)
+            conns.add(c)
+            info.id
+        } catch (ex: Exception) {
+            try {
+                dev.close()
+            } catch (e2: Exception) {
+            }
+            -1
+        }
     }
 
     private val conns = CopyOnWriteArrayList<Conn>()
@@ -289,7 +334,7 @@ class MidiLink(ctx: Context, private val engine: Engine) {
                         } else if (d1 < 0) {
                             d1 = b
                         } else {
-                            channelMsg(kind, d1, b)
+                            channelMsg(c, kind, d1, b)
                             d1 = -1
                         }
                     }
@@ -313,8 +358,14 @@ class MidiLink(ctx: Context, private val engine: Engine) {
         return clockSource == c.id
     }
 
-    private fun channelMsg(kind: Int, note: Int, vel: Int) {
+    private fun channelMsg(c: Conn, kind: Int, note: Int, vel: Int) {
         if (kind == 0x90 && vel > 0) {
+            if (c.fm1) {
+                // 3.55: the FM-1's own keys (STACK sends them over Bluetooth): they play on the FM-1. Hitting the
+                // app's pads with them too was the echo of old: drums on some of its keys. Counted, not played
+                fm1Notes++
+                return
+            }
             engine.padHit(note % Cfg.PADS, vel / 127f)
         }
     }

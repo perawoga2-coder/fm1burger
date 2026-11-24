@@ -118,6 +118,8 @@ class DeviceHub(private val a: MainActivity) {
 
     private fun plugged(info: MidiDeviceInfo) {
         if (info.type == MidiDeviceInfo.TYPE_VIRTUAL) return     // other apps' virtual ports: only by hand (MIDI sync)
+        // 3.55: the Bluetooth button is opening this one itself (BleLink)
+        if (info.type == MidiDeviceInfo.TYPE_BLUETOOTH && a.ble.busy) return
         if (a.midi.isOpen(info.id) || !asking.add(info.id)) return
         val name = a.midi.nameOf(info)
         a.midi.open(info) { ok ->
@@ -146,6 +148,7 @@ class DeviceHub(private val a: MainActivity) {
         val name = a.midi.nameOf(info)
         if (!a.midi.isOpen(info.id)) return
         a.midi.closeId(info.id)
+        a.ble.onMidiGone(info.id)                 // 3.55: the Bluetooth link: looked for again
         if (slotDevice == name) slotDevice = null
         if (synced == name) synced = null
         if (!a.midi.connected) a.setSyncMode(SYNC_OFF)
@@ -205,6 +208,7 @@ class DeviceHub(private val a: MainActivity) {
                 false
             }
             if (ok) {
+                a.midi.markFm1(name)                     // 3.55: an FM-1: its notes stay off the pads
                 slotDevice = name
                 a.sampleLink().hello()                   // (newer firmware: its REC can ask the app for a take)
                 // 3.54: the audio box's MASTER CLOCK switch decides who leads. BURGER (as before): the app leads and a
