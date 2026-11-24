@@ -60,7 +60,7 @@ class InboxProvider : ContentProvider() {
 
     /** the path as its parts, or null when it is not one of ours (only plain names: no "..", nothing empty) */
     private fun parts(uri: Uri): List<String>? {
-        if (uri.authority?.endsWith(".inbox") != true) return null
+        if (uri.authority != AUTH) return null
         val seg = uri.pathSegments ?: return null
         if (seg.isEmpty() || seg[0] != "boxes") return null
         for (s in seg) if (s.isEmpty() || s == "." || s == ".." || s.contains('/') || s.contains('\\')) return null
