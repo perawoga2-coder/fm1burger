@@ -89,6 +89,8 @@ class MixerScreen(private val a: MainActivity) : Screen {
             )
         )
         op.addView(ui.button("Rescan outputs") { scanOutputs() }, ui.fullWidth(4))
+        // 3.54: the audio box (the FM-1 and the app together: master clock, SEPARATE / BOTH 3.5 / MERGED IN BURGER)
+        op.addView(ui.button("AUDIO BOX: FM-1 clock and sound switches…") { a.audioBox.show() }, ui.fullWidth(4))
 
         // 3.40 CUE: the headphone mix
         op.addView(ui.text("Headphones (CUE \uD83C\uDFA7)", 14f, Theme.ACCENT, true), ui.fullWidth(10))

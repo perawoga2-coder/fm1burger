@@ -371,6 +371,7 @@ class RecordFlow(private val a: MainActivity) {
             a.runOnUiThread { finish(res, ti, auto, base, note, edit) }
         }
         devName = if (dev == null) "automatic microphone" else a.recorder.label(dev)
+        a.audioBox.yieldInput()                 // 3.54: MERGED IN BURGER lets go of the USB input first (the FM-1 plays by itself meanwhile)
         var err = a.recorder.start(dev, maxSec, gate, done)
         if (err != null && dev != null) {
             // the chosen input failed: try again with the automatic input

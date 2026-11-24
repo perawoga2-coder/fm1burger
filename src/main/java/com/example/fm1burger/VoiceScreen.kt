@@ -214,6 +214,7 @@ class VoiceScreen(private val a: MainActivity) : Screen {
                 ui.toast("Finish the other recording first.")
                 return
             }
+            a.audioBox.yieldInput()             // 3.54: MERGED IN BURGER lets go of the input first
             val err = v.start()
             if (err != null) ui.toast(err)
         }

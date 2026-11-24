@@ -238,6 +238,18 @@ class Engine {
         pauseReq = true
     }
 
+    /** 3.54: the FM-1's USB audio played in the mix (the audio box's MERGED IN BURGER). */
+    val fm1In = Fm1Monitor()
+
+    /** 3.54: the id of the Output chosen (Mixer, or the audio box), or -1 for the system's own choice. */
+    fun outputId(): Int = outDevice?.id ?: -1
+
+    /** 3.54: open the output again where it is (a plug went in or out: never a dead output). */
+    fun reopenOutput() {
+        restartOut = true
+        cueTried = false
+    }
+
     fun setOutput(d: AudioDeviceInfo?) {
         outDevice = d
         restartOut = true
@@ -1260,6 +1272,11 @@ class Engine {
                 bank.renderLayers()
                 l += bank.outL * gRest
                 r += bank.outR * gRest
+                if (fm1In.on) {                    // 3.54 MERGED IN BURGER: the FM-1's own sound, from its USB audio
+                    fm1In.render()
+                    l += fm1In.outL
+                    r += fm1In.outR
+                }
                 if (stemOn) {
                     stemBuf[ST][f2] = pm * mv; stemBuf[ST][f2 + 1] = pm * mv
                     stemBuf[ST + 1][f2] = bz * mv; stemBuf[ST + 1][f2 + 1] = bz * mv

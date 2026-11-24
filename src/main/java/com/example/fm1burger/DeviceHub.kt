@@ -177,9 +177,9 @@ class DeviceHub(private val a: MainActivity) {
             .setView(box)
             .setItems(items) { _, w ->
                 var m = modes[w]
-                if (m == SYNC_FOLLOW && slotDevice == name) {   // (Felucca-based firmware sends no clock: the app leads)
-                    m = SYNC_LEAD
-                    a.ui.toast("$name sends no clock of its own: the app leads, $name follows")
+                if (slotDevice == name) {            // 3.54: an FM-1 with sample slots: the audio box's MASTER CLOCK switch decides
+                    m = if (a.audioBox.clockDevice) SYNC_FOLLOW else SYNC_LEAD
+                    a.ui.toast("$name: MASTER CLOCK is " + (if (a.audioBox.clockDevice) "DEVICE (the app follows it)" else "BURGER (the app leads)") + " · AUDIO BOX")
                 }
                 a.setSyncMode(m)
                 if (out.isChecked) usbOutFor(name)?.let { a.engine.setOutput(it) }
@@ -207,15 +207,20 @@ class DeviceHub(private val a: MainActivity) {
             if (ok) {
                 slotDevice = name
                 a.sampleLink().hello()                   // (newer firmware: its REC can ask the app for a take)
-                // tempo: this firmware sends no clock, so the app leads and the device is set to follow it (CLK USB)
-                val clk = a.sampleLink().followAppClock()
+                // 3.54: the audio box's MASTER CLOCK switch decides who leads. BURGER (as before): the app leads and a
+                // Felucca-based firmware is set to follow it (CLK USB; STACK follows any clock by itself). DEVICE: the
+                // app follows the FM-1's clock and sends none
+                val lead = !a.audioBox.clockDevice
+                val clk = lead && a.sampleLink().followAppClock()
                 main.post {
-                    a.setSyncMode(SYNC_LEAD)
-                    if (remembered(name)?.optInt("sync", SYNC_LEAD) != SYNC_LEAD || remembered(name) == null)
-                        remember(name, SYNC_LEAD, remembered(name)?.optBoolean("out", false) ?: false)
+                    val mode = if (lead) SYNC_LEAD else SYNC_FOLLOW
+                    a.audioBox.applyClock()
+                    if (remembered(name)?.optInt("sync", SYNC_LEAD) != mode || remembered(name) == null)
+                        remember(name, mode, remembered(name)?.optBoolean("out", false) ?: false)
                     synced = if (clk) name else null
-                    a.ui.toast(if (clk) "$name: in sync (it follows the app's tempo) · takes samples"
-                               else "$name takes samples. Set its CLK to USB to follow the app's tempo")
+                    a.ui.toast(if (!lead) "$name: the app follows its tempo (MASTER CLOCK: DEVICE) · takes samples"
+                               else if (clk) "$name: in sync (it follows the app's tempo) · takes samples"
+                               else "$name takes samples · the app leads the tempo (older firmware: set its CLK to USB)")
                     a.refreshCurrent()
                 }
             }

@@ -33,6 +33,7 @@ class SetupScreen(private val a: MainActivity) : Screen {
         syncInfo = ui.text("", 12f, Theme.DIM)
         mp.addView(syncInfo, ui.fullWidth(4))
         mp.addView(ui.button("MIDI sync: follow / lead / devices / thru…") { a.openSyncMenu() }, ui.fullWidth(6))
+        mp.addView(ui.button("AUDIO BOX: FM-1 clock and sound switches…") { a.audioBox.show() }, ui.fullWidth(6))
         content.addView(mp, ui.fullWidth(10))
 
         val lp = ui.panel()

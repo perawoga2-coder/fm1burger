@@ -163,6 +163,7 @@ class MainActivity : Activity() {
         val crash = CrashLog.take(this)
         if (crash != null) showCrash(crash)
 
+        audioBox.start()                               // 3.54: the audio box's switches, as they were left
         hub.start()                                    // plug and play: instruments connect by themselves
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
@@ -171,6 +172,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        audioBox.onForeground()
         handler.removeCallbacks(ticker)
         handler.post(ticker)
     }
@@ -179,10 +181,12 @@ class MainActivity : Activity() {
         super.onPause()
         // the screen is hidden: no need to redraw 20 times a second (the audio keeps playing)
         handler.removeCallbacks(ticker)
+        audioBox.onBackground()                         // 3.54: MERGED IN BURGER: the FM-1 plays by itself again
         saveAll()
     }
 
     override fun onDestroy() {
+        audioBox.stop()
         hub.stop()
         handler.removeCallbacksAndMessages(null)
         saveAll()
@@ -878,6 +882,8 @@ class MainActivity : Activity() {
 
     private val fm1Link by lazy { Fm1SampleLink(midi) }
     val hub by lazy { DeviceHub(this) }
+    /** 3.54: the audio box (MASTER CLOCK and SOUND switches for the FM-1). */
+    val audioBox by lazy { AudioBox(this) }
 
     /** The sample-slot protocol (DeviceHub asks a new device with it). */
     fun sampleLink(): Fm1SampleLink = fm1Link
@@ -1147,14 +1153,22 @@ class MainActivity : Activity() {
             "Connect another MIDI device (connected: $devs)",
             "Clock while stopped (LEAD): " + (if (engine.clockIdle) "ON" else "OFF") + "  · tap to switch",
             "MIDI Thru (pass incoming MIDI on to the other devices): " + (if (midi.thru) "ON" else "OFF"),
-            "Disconnect all MIDI devices"
+            "Disconnect all MIDI devices",
+            "AUDIO BOX: master clock and sound switches for the FM-1…"
         )
         AlertDialog.Builder(this)
             .setTitle("MIDI sync (now: $now)")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> startSync(2)
-                    1 -> startSync(1)
+                    0 -> {
+                        audioBox.noteSync(true)
+                        startSync(2)
+                    }
+                    1 -> {
+                        audioBox.noteSync(false)
+                        startSync(1)
+                    }
+                    7 -> audioBox.show()
                     2 -> syncOff()
                     3 -> connectAnother()
                     4 -> {
@@ -1287,6 +1301,7 @@ class MainActivity : Activity() {
     }
 
     private fun tick() {
+        audioBox.tick()           // 3.54
         engine.cueSync()          // 3.40 CUE: the headphone output follows (closes after a recording, a pulled plug...)
         if (engine.bank.wantSounds) preloadBank()
         if (syncState != 0 && !midi.connected) {

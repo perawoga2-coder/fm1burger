@@ -232,10 +232,22 @@ class Fm1SampleLink(private val midi: MidiLink) {
         midi.sysexListener = { data ->
             if (data.size >= 4 && data[0] == HDR[0] && data[1] == HDR[1] && data[2] == HDR[2]) {
                 if (data[3].toInt() == 113 && data.size >= 7) onEvent?.invoke(data[4].toInt(), data[5].toInt(), data[6].toInt())
-                else replies.offer(data)
+                else if (data[3].toInt() == 20) {     // 3.54: STACK's answer to MUTE (never waited for: not queued)
+                    if (data.size >= 5) onMuteAck?.invoke(data[4].toInt() and 0x7F)
+                } else replies.offer(data)
             }
         }
     }
+
+    /** 3.54: STACK answered MUTE: 1 its own output is silent now, 0 it sounds (stack/docs/PROTOCOL.md). */
+    @Volatile var onMuteAck: ((Int) -> Unit)? = null
+
+    /**
+     * 3.54: STACK's MUTE (command 20): F0 7D 46 4C 14 01 F7 the FM-1's own speaker and 3.5 mm jack silent, 00 they
+     * sound. A MUTE ON lasts 3 s on the FM-1: it is sent again every second while it is wanted. Nothing is waited for.
+     */
+    fun mute(on: Boolean): Boolean =
+        midi.sendSysex(byteArrayOf(HDR[0], HDR[1], HDR[2], 20, if (on) 1 else 0))
 
     /** Firmware bs5 and later: link the app (REC on the device's SLICES page then asks the app for a take). */
     fun hello(): Boolean = try {

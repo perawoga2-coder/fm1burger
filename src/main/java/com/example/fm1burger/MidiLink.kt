@@ -331,6 +331,9 @@ class MidiLink(ctx: Context, private val engine: Engine) {
                     if (iv > 250_000_000L) {
                         filled = 0
                         ii = 0
+                    } else if (iv < 4_000_000L) {
+                        // 3.54: no tempo has ticks 4 ms apart: the short gap a device leaves at its Start (STACK
+                        // starts the bar at once). Left out of the average
                     } else {
                         intervals[ii] = iv
                         ii = (ii + 1) % intervals.size
