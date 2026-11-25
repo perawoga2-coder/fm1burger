@@ -9,8 +9,8 @@ import android.widget.TextView
  * 3.56 VACUUM FM-1: asks an FM-1 running STACK (4.0-beta or newer, on the USB cable) for its whole song and puts
  * it on Home's lanes 1 to 8, T1 on lane 1 ... T8 on lane 8 (StackSong.kt has what it means and the plan).
  *
- * Nothing is replaced without a yes: when lanes 1 to 8 hold work the app asks first. Lanes 9 and on, and the sampler
- * tracks and pads they show, are not touched. What could not be carried over is listed at the end, never dropped
+ * Nothing is replaced without a yes: the app asks first (3.57): CLEAR EVERYTHING (an empty Home, then the song) or
+ * LANES 1-8 ONLY (lanes 9 and on, and the sampler tracks and pads they show, are not touched). What could not be carried over is listed at the end, never dropped
  * silently. The lanes it makes are ordinary ones: TAKE ALL takes them as any other.
  */
 class Vacuum(private val a: MainActivity) {
@@ -68,39 +68,32 @@ class Vacuum(private val a: MainActivity) {
                 return@Thread
             }
             say("The sounds…", 0.92f)
-            val plan = VacuumPlan.plan(sg, a.lanes.type, a.lanes.idx, Cfg.TRACKS, Cfg.PADS,
-                { n -> a.store.file(n).exists() }, { t -> findMy(t) }, loopFile)
+            // two plans: on Home as it is (only lanes 1-8 change), and on an empty Home (CLEAR EVERYTHING)
+            val has = { n: String -> a.store.file(n).exists() }
+            val my = { t: StackTrack -> findMy(t) }
+            val plan = VacuumPlan.plan(sg, a.lanes.type, a.lanes.idx, Cfg.TRACKS, Cfg.PADS, has, my, loopFile)
+            val none = IntArray(a.lanes.type.size)        // (Inst.EMPTY everywhere)
+            val planAll = VacuumPlan.plan(sg, none, none, Cfg.TRACKS, Cfg.PADS, has, my, loopFile)
             val data = HashMap<String, FloatArray?>()
-            for (act in plan.acts) {
+            for (act in plan.acts + planAll.acts) {
                 val f = act.file ?: continue
                 if (!data.containsKey(f)) data[f] = try { a.store.loadEngine(f) } catch (ex: Exception) { null }
             }
             a.runOnUiThread {
                 dlg.dismiss()
-                if (holdsWork()) {
-                    AlertDialog.Builder(a).setTitle("Replace lanes 1–8 with the FM-1 song?")
-                        .setMessage("Lanes 1 to 8 hold work now. It is replaced by the FM-1's eight tracks (STACK ${sg.version}). Lanes 9 and on stay as they are.")
-                        .setPositiveButton("Replace") { _, _ -> apply(sg, plan, data) }
-                        .setNegativeButton("Cancel", null).show()
-                } else {
-                    apply(sg, plan, data)
-                }
+                // 3.57: always asked: an empty Home first, or lanes 1-8 only (what 3.56 did)
+                AlertDialog.Builder(a).setTitle("Where does the FM-1 song go? (STACK ${sg.version})")
+                    .setMessage("CLEAR EVERYTHING: every lane, pad, bassline, synth, guitar and the song list are " +
+                        "cleared first, so only the FM-1's song plays. The library's sounds and the recordings kept in Q1–Q6 stay.\n\n" +
+                        "LANES 1–8 ONLY: lanes 1 to 8 are replaced, lanes 9 and on and the rest stay as they are.")
+                    .setPositiveButton("Clear everything") { _, _ ->
+                        VacuumApply.clearAll(e, a.lanes)
+                        apply(sg, planAll, data)
+                    }
+                    .setNeutralButton("Lanes 1–8 only") { _, _ -> apply(sg, plan, data) }
+                    .setNegativeButton("Cancel", null).show()
             }
         }.start()
-    }
-
-    /** Lanes 1 to 8 hold something that plays: steps that are on, a loop, or an instrument of their own. */
-    private fun holdsWork(): Boolean {
-        for (i in 0 until 8) {
-            val k = a.lanes.idx[i]
-            when (a.lanes.type[i]) {
-                Inst.EMPTY -> {}
-                Inst.SAMPLE -> if (e.tracks[k].data != null && (e.tracks[k].loop || e.tracks[k].steps.any { it.on })) return true
-                Inst.DRUM -> if (e.pads[k].data != null && e.pads[k].on.any { it }) return true
-                else -> return true
-            }
-        }
-        return false
     }
 
     /** The library's sound for a sample the app sent to the FM-1: by the CRC kept when it was sent, else by its name. */
@@ -148,6 +141,50 @@ class Vacuum(private val a: MainActivity) {
  * ALL, the queue and 16 Track take it as such (tools/vacuum_check checks exactly that).
  */
 object VacuumApply {
+    /**
+     * 3.57 CLEAR EVERYTHING: nothing on Home plays any more. Every sampler track and pad: steps off, the sound back to
+     * clean (its sample stays loaded); the bassline, synth, guitars, New Ambient and automation: empty; Q1-Q6: their
+     * patterns blank, their recordings kept but not playing; the song list empty; every lane EMPTY (VACUUM's plan
+     * then fills lanes 1 to 8). Nothing in the library is touched.
+     */
+    fun clearAll(e: Engine, lanes: LaneSetup) {
+        val b = e.bank
+        b.songOn = false
+        b.songLen = 0
+        b.songIdx = 0
+        b.songBar = 0
+        b.cueReq = -1
+        for (i in 0 until PartBank.N) if (b.layerOn[i]) b.toggleLayer(i)     // (the recordings stop, they stay in Q)
+        for (t in e.tracks) {
+            t.clearSteps()
+            t.freshSound()
+            t.mute = false
+        }
+        for (p in e.pads) {
+            p.on.fill(false)
+            p.lvl.fill(1f)
+            p.mute = false
+        }
+        e.bass.clear()
+        e.analogSeq.clear()
+        for (g in arrayOf(e.rhythmGtr, e.riffGtr)) {
+            g.art.fill(MetalGuitar.OFF)
+            g.fret.fill(0)
+            g.audition(MetalGuitar.OFF, 0)
+        }
+        e.ambient.steps.fill(false)
+        for (k in e.auto.targets.indices) e.auto.clear(k)
+        for (p in b.parts) {
+            p.blank()
+            p.used = false
+        }
+        b.version++
+        for (i in lanes.type.indices) {
+            lanes.type[i] = Inst.EMPTY
+            lanes.idx[i] = 0
+        }
+    }
+
     fun put(e: Engine, lanes: LaneSetup, song: StackSong, plan: VacuumPlanResult, data: Map<String, FloatArray?>, notes: MutableList<String>) {
         val slot = Pat.slot()
         val bars = Pat.bars()

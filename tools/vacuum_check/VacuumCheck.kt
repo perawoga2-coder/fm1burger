@@ -2,7 +2,7 @@ import com.example.fm1burger.*
 import java.io.File
 
 /**
- * 3.56: VACUUM, then TAKE ALL, checked off the tablet. Not part of the app: it is compiled with the app's sources
+ * 3.56: VACUUM, then TAKE ALL, checked off the tablet (3.57: and CLEAR EVERYTHING first). Not part of the app: it is compiled with the app's sources
  * and run on a computer (tools/vacuum_check/README.md).
  *
  * stack_song.txt is a song as STACK 4.0-beta's simulator sent it (command 30's seven answers): three drums with
@@ -124,6 +124,39 @@ fun main(args: Array<String>) {
     // a sound that is not in the library: the lane is left empty, and said
     val plan3 = VacuumPlan.plan(song, lanes2.type, lanes2.idx, Cfg.TRACKS, Cfg.PADS, { it != "Rock Kick.wav" }, { null }, null)
     check(plan3.acts[0].type == VacuumPlan.EMPTY && plan3.notes.any { it.startsWith("T1") }, "a sound not in the library: its lane empty, and said")
+
+    // --- 3.57 CLEAR EVERYTHING: Home full of the user's work, cleared, then the song on an empty Home
+    val e4 = Engine()
+    e4.bank.soundLoader = { n -> data(n) }
+    val lanes4 = LaneSetup()
+    for (k in 0 until Cfg.PADS) { e4.setPad(k, "Old$k.wav", data("Old$k.wav")); e4.pads[k].on[k % 16] = true }
+    for (t in e4.tracks) { e4.setSample(t.index, "OldT${t.index}.wav", data("OldT${t.index}.wav")); t.steps[2].on = true; t.loop = true }
+    e4.bass.on[0] = true; e4.bass.note[0] = 5
+    e4.analogSeq.grid[0] = 60
+    e4.rhythmGtr.art[0] = MetalGuitar.CHUG; e4.riffGtr.art[1] = MetalGuitar.OPEN
+    e4.ambient.steps[4] = true
+    e4.bank.parts[2].pOn[0][0] = true; e4.bank.parts[2].used = true
+    e4.bank.songLen = 3; e4.bank.songOn = true
+    val none = IntArray(lanes4.type.size)
+    val plan4 = VacuumPlan.plan(song, none, none, Cfg.TRACKS, Cfg.PADS, { true }, { null }, "FM-1 Loop.wav")
+    val files4 = HashMap<String, FloatArray?>()
+    for (a in plan4.acts) a.file?.let { files4[it] = data(it) }
+    VacuumApply.clearAll(e4, lanes4)
+    VacuumApply.put(e4, lanes4, song, plan4, files4, ArrayList())
+    val used = (0 until 8).map { lanes4.type[it] to lanes4.idx[it] }.toSet()
+    check((8 until LaneSetup.N).all { lanes4.type[it] == Inst.EMPTY }, "CLEAR EVERYTHING: lanes 9 and on are empty")
+    check((0 until Cfg.PADS).filter { (Inst.DRUM to it) !in used }.all { k -> e4.pads[k].on.none { it } }, "CLEAR EVERYTHING: no other pad has a step on")
+    check((0 until Cfg.TRACKS).filter { (Inst.SAMPLE to it) !in used }.all { k -> e4.tracks[k].steps.none { it.on } && !e4.tracks[k].loop },
+        "CLEAR EVERYTHING: no other sampler track has a step on or loops")
+    check(e4.bass.on.none { it } && e4.analogSeq.grid.all { it == 0 }, "CLEAR EVERYTHING: the bassline and the synth are empty")
+    check(e4.rhythmGtr.art.all { it == MetalGuitar.OFF } && e4.riffGtr.art.all { it == MetalGuitar.OFF } && e4.ambient.steps.none { it },
+        "CLEAR EVERYTHING: the guitars and New Ambient are empty")
+    check(e4.bank.songLen == 0 && !e4.bank.songOn && e4.bank.parts.all { q -> !q.used && q.pOn.all { r -> r.none { it } } },
+        "CLEAR EVERYTHING: the song list is empty, Q1-Q6 hold no pattern")
+    val kick4 = e4.pads[lanes4.idx[0]]
+    check(lanes4.type[0] == Inst.DRUM && kick4.name == "Rock Kick.wav" && (0 until 16).map { kick4.on[it] } == song.tracks[0].on.toList(),
+        "CLEAR EVERYTHING: then the FM-1's song is on lanes 1-8 (the kick: ${kick4.name})")
+    check((0 until 8).map { lanes4.type[it] to lanes4.idx[it] }.distinct().size == 8, "CLEAR EVERYTHING: no two lanes share a track or a pad")
     println(if (bad == 0) "ALL OK" else "$bad FAILED")
     if (bad != 0) System.exit(1)
 }
