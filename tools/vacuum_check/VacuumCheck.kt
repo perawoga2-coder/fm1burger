@@ -2,7 +2,7 @@ import com.example.fm1burger.*
 import java.io.File
 
 /**
- * 3.56: VACUUM, then TAKE ALL, checked off the tablet (3.57: and CLEAR EVERYTHING first). Not part of the app: it is compiled with the app's sources
+ * 3.56: VACUUM, then TAKE ALL, checked off the tablet (3.57: and CLEAR EVERYTHING first; 3.58: DIRECT SPLIT). Not part of the app: it is compiled with the app's sources
  * and run on a computer (tools/vacuum_check/README.md).
  *
  * stack_song.txt is a song as STACK 4.0-beta's simulator sent it (command 30's seven answers): three drums with
@@ -157,6 +157,38 @@ fun main(args: Array<String>) {
     check(lanes4.type[0] == Inst.DRUM && kick4.name == "Rock Kick.wav" && (0 until 16).map { kick4.on[it] } == song.tracks[0].on.toList(),
         "CLEAR EVERYTHING: then the FM-1's song is on lanes 1-8 (the kick: ${kick4.name})")
     check((0 until 8).map { lanes4.type[it] to lanes4.idx[it] }.distinct().size == 8, "CLEAR EVERYTHING: no two lanes share a track or a pad")
+
+    // --- 3.58 DIRECT SPLIT: bar 1 on an empty Home, then a changed song into bar 2, lanes 1-8 only
+    val e5 = Engine()
+    e5.bank.soundLoader = { n -> data(n) }
+    val lanes5 = LaneSetup()
+    Pat.len = 16
+    VacuumApply.clearAll(e5, lanes5)
+    VacuumApply.put(e5, lanes5, song, plan4, files4, ArrayList(), 0)
+    val k5 = lanes5.idx[0]
+    val b5 = e5.tracks[lanes5.idx[3]]
+    check((0 until 16).map { e5.pads[k5].on[it] } == song.tracks[0].on.toList() && (16 until 64).none { e5.pads[k5].on[it] }, "SPLIT bar 1: the kick's steps in bar 1 only")
+    check((0 until 16).map { b5.steps[it].on } == song.tracks[3].on.toList() && (16 until 64).none { b5.steps[it].on }, "SPLIT bar 1: the bass's steps in bar 1 only")
+    val bar1Kick = e5.pads[k5].on.copyOf(16)
+    val bar1Bass = (0 until 16).map { b5.steps[it].on to b5.steps[it].pitch }
+    val bassPitch = b5.pitch
+    e5.setPad(k5, "Other.wav", data("Other.wav"))          // the user changed lane 1's sound meanwhile
+    val song2 = StackDump.parse(rec.toByteArray())!!
+    for (i in 0 until 16) { song2.tracks[0].on[i] = i % 4 == 1; song2.tracks[3].on[i] = i % 2 == 0 }
+    Pat.len = 32
+    val plan5 = VacuumPlan.plan(song2, lanes5.type, lanes5.idx, Cfg.TRACKS, Cfg.PADS, { true }, { null }, "FM-1 Loop 2.wav")
+    val files5 = HashMap<String, FloatArray?>()
+    for (a in plan5.acts) a.file?.let { files5[it] = data(it) }
+    val notes5 = ArrayList<String>()
+    val lanesBefore = (0 until LaneSetup.N).map { lanes5.type[it] to lanes5.idx[it] }
+    VacuumApply.put(e5, lanes5, song2, plan5, files5, notes5, 1)
+    check((0 until LaneSetup.N).map { lanes5.type[it] to lanes5.idx[it] } == lanesBefore, "SPLIT bar 2: every lane keeps its own track or pad")
+    check(e5.pads[k5].on.copyOf(16).contentEquals(bar1Kick) && b5.steps.take(16).map { it.on to it.pitch } == bar1Bass, "SPLIT bar 2: bar 1 is as it was")
+    check((16 until 32).map { e5.pads[k5].on[it] } == (0 until 16).map { it % 4 == 1 }, "SPLIT bar 2: the kick's new steps are in bar 2")
+    check((16 until 32).map { b5.steps[it].on } == (0 until 16).map { it % 2 == 0 } && b5.pitch == bassPitch, "SPLIT bar 2: the bass's new steps, its sound and pitch kept")
+    check(e5.pads[k5].name == "Other.wav" && notes5.any { it.startsWith("T1") && it.contains("keeps its sound") }, "SPLIT bar 2: lane 1 keeps the user's sound, and it is said")
+    val loop5 = e5.tracks[lanes5.idx[7]]
+    check(loop5.sampleName == "FM-1 Loop.wav" && loop5.loop && notes5.any { it.startsWith("T8") && it.contains("keeps its loop") }, "SPLIT bar 2: the loop lane keeps its loop, and it is said")
     println(if (bad == 0) "ALL OK" else "$bad FAILED")
     if (bad != 0) System.exit(1)
 }

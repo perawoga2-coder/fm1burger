@@ -10,7 +10,8 @@ import android.widget.TextView
  * it on Home's lanes 1 to 8, T1 on lane 1 ... T8 on lane 8 (StackSong.kt has what it means and the plan).
  *
  * Nothing is replaced without a yes: the app asks first (3.57): CLEAR EVERYTHING (an empty Home, then the song) or
- * LANES 1-8 ONLY (lanes 9 and on, and the sampler tracks and pads they show, are not touched). What could not be carried over is listed at the end, never dropped
+ * LANES 1-8 ONLY (lanes 9 and on, and the sampler tracks and pads they show, are not touched); and (3.58 DIRECT
+ * SPLIT) every bar, or one bar of the pattern only, so a longer song is built bar by bar. What could not be carried over is listed at the end, never dropped
  * silently. The lanes it makes are ordinary ones: TAKE ALL takes them as any other.
  */
 class Vacuum(private val a: MainActivity) {
@@ -82,15 +83,39 @@ class Vacuum(private val a: MainActivity) {
             a.runOnUiThread {
                 dlg.dismiss()
                 // 3.57: always asked: an empty Home first, or lanes 1-8 only (what 3.56 did)
+                // 3.58 DIRECT SPLIT: and where the steps go: every bar, or one bar (to build a longer song bar by bar)
+                val slot = Pat.slot()
+                val nBars = Cfg.STEPS / slot
+                val where = android.widget.RadioGroup(a)
+                where.setPadding(ui.dp(20), ui.dp(8), ui.dp(20), 0)
+                val opts = listOf("Every bar (the song repeats)") +
+                    (0 until nBars).map { "Bar ${it + 1}: steps ${it * slot + 1}–${(it + 1) * slot}" }
+                for ((k, t) in opts.withIndex()) {
+                    val r = android.widget.RadioButton(a)
+                    r.text = t
+                    r.id = 100 + k
+                    r.setTextColor(Theme.TEXT)
+                    where.addView(r)
+                }
+                where.check(100)
+                val head = ui.text("CLEAR EVERYTHING: every lane, pad, bassline, synth, guitar and the song list are " +
+                    "cleared first, so only the FM-1's song plays. The library's sounds and the recordings kept in Q1–Q6 stay.\n\n" +
+                    "LANES 1–8 ONLY: lanes 1 to 8 get the song, lanes 9 and on and the rest stay as they are.\n\n" +
+                    "WHERE: one bar writes that bar's steps only, the other bars stay. A lane that already has a sound keeps it.", 13f, Theme.TEXT)
+                head.setPadding(ui.dp(20), ui.dp(12), ui.dp(20), 0)
+                val box = ui.col()
+                box.addView(head)
+                box.addView(where)
+                val sc = android.widget.ScrollView(a)
+                sc.addView(box)
+                fun bar() = where.checkedRadioButtonId - 101         // -1: every bar
                 AlertDialog.Builder(a).setTitle("Where does the FM-1 song go? (STACK ${sg.version})")
-                    .setMessage("CLEAR EVERYTHING: every lane, pad, bassline, synth, guitar and the song list are " +
-                        "cleared first, so only the FM-1's song plays. The library's sounds and the recordings kept in Q1–Q6 stay.\n\n" +
-                        "LANES 1–8 ONLY: lanes 1 to 8 are replaced, lanes 9 and on and the rest stay as they are.")
+                    .setView(sc)
                     .setPositiveButton("Clear everything") { _, _ ->
                         VacuumApply.clearAll(e, a.lanes)
-                        apply(sg, planAll, data)
+                        apply(sg, planAll, data, bar(), true)
                     }
-                    .setNeutralButton("Lanes 1–8 only") { _, _ -> apply(sg, plan, data) }
+                    .setNeutralButton("Lanes 1–8 only") { _, _ -> apply(sg, plan, data, bar(), false) }
                     .setNegativeButton("Cancel", null).show()
             }
         }.start()
@@ -110,17 +135,28 @@ class Vacuum(private val a: MainActivity) {
         return null
     }
 
-    private fun apply(song: StackSong, plan: VacuumPlanResult, data: Map<String, FloatArray?>) {
+    private fun apply(song: StackSong, plan: VacuumPlanResult, data: Map<String, FloatArray?>, barIn: Int = -1, cleared: Boolean = false) {
         val notes = ArrayList(plan.notes)
         // the song's own: tempo, time signature (the app has no swing: the plan said so)
         if (!e.follow) e.bpm = song.bpm.coerceIn(40, 240)
         else notes.add("TEMPO ${song.bpm}: the app follows a clock now, so its tempo is the clock's.")
-        a.setMeter(StackSounds.METER[song.sig.coerceIn(0, 4)])
-        VacuumApply.put(e, a.lanes, song, plan, data, notes)
+        val meter = StackSounds.METER[song.sig.coerceIn(0, 4)]
+        if (barIn < 0 || cleared) a.setMeter(meter)
+        else if (meter != Pat.meter) notes.add("TIME SIG ${StackSounds.SIG_NAME[song.sig.coerceIn(0, 4)]}: the pattern keeps its meter " +
+            "(${Pat.METERS[Pat.meter]}), so its other bars stay as they are.")
+        // DIRECT SPLIT: the pattern grows to hold the bar (its new bars start as copies, as the app's own length button does)
+        var bar = barIn
+        if (bar >= 0) {
+            bar = bar.coerceAtMost(Cfg.STEPS / Pat.slot() - 1)
+            val need = (bar + 1) * Pat.slot()
+            if (Pat.len < need) Pat.lengths().firstOrNull { it >= need }?.let { a.setPatternLength(it) }
+        }
+        VacuumApply.put(e, a.lanes, song, plan, data, notes, bar)
         a.homeScreen.refresh()
         a.refreshCurrent()
-        val head = "The FM-1's song is on lanes 1 to 8, in its own order: ${song.bpm} BPM, ${StackSounds.SIG_NAME[song.sig.coerceIn(0, 4)]}." +
-            (if (plan.acts.any { it.loop && it.type != VacuumPlan.EMPTY }) " The loop of track 8 is on lane 8, as a looping sample." else "") +
+        val at = if (bar < 0) "on lanes 1 to 8" else "on lanes 1 to 8, bar ${bar + 1} (steps ${bar * Pat.slot() + 1}–${(bar + 1) * Pat.slot()}; the other bars are as they were)"
+        val head = "The FM-1's song is $at, in its own order: ${song.bpm} BPM, ${StackSounds.SIG_NAME[song.sig.coerceIn(0, 4)]}." +
+            (if (bar < 0 && plan.acts.any { it.loop && it.type != VacuumPlan.EMPTY }) " The loop of track 8 is on lane 8, as a looping sample." else "") +
             "\n\nCarried over: sounds, steps and their notes, LEVEL, PITCH, FILTER, EDIT's START / LENGTH / REVERSE, FIT of 1, 2 or 4 bars, " +
             "and the effects the app has (DELAY, ECHO, REVERB, OVERDRIVE, CHORUS, LO-FI, ROBOT; FLANGER as the Phaser).\n" +
             "Not carried over: SWING, ENV, LFO, ARP, DECAY, TAPE SPEED, and anything PERFORM was doing."
@@ -185,26 +221,96 @@ object VacuumApply {
         }
     }
 
-    fun put(e: Engine, lanes: LaneSetup, song: StackSong, plan: VacuumPlanResult, data: Map<String, FloatArray?>, notes: MutableList<String>) {
+    /**
+     * The plan on the engine and the lanes. [bar] -1: the song's steps in every bar of the pattern (3.56). [bar] 0 and
+     * on (3.58 DIRECT SPLIT): only that bar's steps are written, the other bars stay; a lane that already plays a sound
+     * of the same kind (Sampler / Drum) keeps it, with its settings, and only takes the steps (a different sound is
+     * said, by name); a lane that does not gets its sound and the rest of its steps off. A track or pad that a lane
+     * keeps is never given to another lane.
+     */
+    fun put(e: Engine, lanes: LaneSetup, song: StackSong, plan: VacuumPlanResult, data: Map<String, FloatArray?>,
+            notes: MutableList<String>, bar: Int = -1) {
         val slot = Pat.slot()
         val bars = Pat.bars()
-        for (act in plan.acts) {
+        // DIRECT SPLIT: which lanes keep their own track or pad, and what every other lane may take
+        val keep = BooleanArray(8)
+        val acts = plan.acts.toMutableList()
+        if (bar >= 0) {
+            val taken = HashSet<Pair<Int, Int>>()
+            for (i in 8 until lanes.type.size) taken.add(lanes.type[i] to lanes.idx[i])
+            for (act in plan.acts) {
+                if (act.type == VacuumPlan.EMPTY) continue
+                val ty = lanes.type[act.lane]
+                val k = lanes.idx[act.lane]
+                val has = when {
+                    act.type == VacuumPlan.SAMPLE && ty == Inst.SAMPLE -> e.tracks[k].data != null
+                    act.type == VacuumPlan.DRUM && ty == Inst.DRUM -> e.pads[k].data != null
+                    else -> false
+                }
+                if (has) {
+                    keep[act.lane] = true
+                    taken.add(ty to k)
+                    acts[act.lane] = LaneAct(act.lane, act.type, k, act.track, act.file, act.semis, act.loop)
+                }
+            }
+            for (act in plan.acts) {
+                if (act.type == VacuumPlan.EMPTY || keep[act.lane]) continue
+                val inst = if (act.type == VacuumPlan.SAMPLE) Inst.SAMPLE else Inst.DRUM
+                var k = act.idx
+                if ((inst to k) in taken) {
+                    val n = if (inst == Inst.SAMPLE) Cfg.TRACKS else Cfg.PADS
+                    k = (0 until n).firstOrNull { (inst to it) !in taken } ?: -1
+                }
+                if (k < 0) {
+                    notes.add("T${act.lane + 1} ${act.track.label}: no ${if (inst == Inst.SAMPLE) "Sampler track" else "Drum pad"} is free. Lane ${act.lane + 1} stays as it was.")
+                    acts[act.lane] = LaneAct(act.lane, VacuumPlan.EMPTY, 0, act.track, null, act.semis, act.loop)
+                    keep[act.lane] = true          // (nothing is written there)
+                    continue
+                }
+                taken.add(inst to k)
+                acts[act.lane] = LaneAct(act.lane, act.type, k, act.track, act.file, act.semis, act.loop)
+            }
+        }
+        // the steps of the bar(s) written: every bar, or the one of DIRECT SPLIT
+        val barsTo = if (bar >= 0) listOf(bar) else (0 until bars).toList()
+        for (act in acts) {
             val s = act.track
             val v = s.set
+            val kept = bar >= 0 && keep[act.lane]
+            if (kept && act.type == VacuumPlan.EMPTY) continue       // (DIRECT SPLIT: no room: the lane as it was)
             val d = if (act.file != null) data[act.file] else null
-            if (act.type != VacuumPlan.EMPTY && d == null) {
+            if (!kept && act.type != VacuumPlan.EMPTY && d == null) {
                 notes.add("T${act.lane + 1} ${s.label}: \"${act.file}\" could not be read. Lane ${act.lane + 1} is left empty.")
             }
-            if (act.type == VacuumPlan.EMPTY || d == null) {
-                lanes.type[act.lane] = Inst.EMPTY
-                lanes.idx[act.lane] = 0
+            if (act.type == VacuumPlan.EMPTY || (!kept && d == null)) {
+                if (bar < 0) {                     // (DIRECT SPLIT: a lane that gets nothing stays as it was)
+                    lanes.type[act.lane] = Inst.EMPTY
+                    lanes.idx[act.lane] = 0
+                }
                 continue
             }
             if (act.type == VacuumPlan.SAMPLE) {
                 val t = e.tracks[act.idx]
+                if (kept) {
+                    if (t.sampleName != act.file) notes.add("T${act.lane + 1} ${s.label}: lane ${act.lane + 1} keeps its sound " +
+                        "\"${t.sampleName.removeSuffix(".wav")}\" (one sound a lane); only the steps of this bar came.")
+                    if (act.loop || t.loop) {
+                        if (act.loop) notes.add("T${act.lane + 1}: lane ${act.lane + 1} keeps its loop; the new loop is in the library as \"${act.file?.removeSuffix(".wav")}\".")
+                        continue
+                    }
+                    val want = v[StackTrack.PITCH] + act.semis
+                    val rest = want - t.pitch
+                    for (b in barsTo) for (i in 0 until slot) {
+                        val st = t.steps[(b * slot + i).coerceIn(0, Cfg.STEPS - 1)]
+                        st.on = i < song.steps && s.on[i]
+                        st.pitch = if (i >= song.steps) 0 else if (s.hit) rest else s.note[i] - 60 + rest
+                        st.level = 1f
+                    }
+                    continue
+                }
                 t.freshSound()
                 t.clearSteps()
-                e.setSample(act.idx, act.file!!, d)
+                e.setSample(act.idx, act.file!!, d!!)
                 t.mute = false
                 t.volume = VacuumPlan.trackVolume(v[StackTrack.LEVEL])
                 if (act.loop) {                  // the loop: it goes round with the bar, at the tempo's length
@@ -217,7 +323,7 @@ object VacuumApply {
                     val want = v[StackTrack.PITCH] + act.semis
                     t.pitch = want.coerceIn(-24, 24)
                     val rest = want - t.pitch
-                    for (b in 0 until bars) for (i in 0 until song.steps) {
+                    for (b in barsTo) for (i in 0 until song.steps) {
                         val st = t.steps[(b * slot + i).coerceIn(0, Cfg.STEPS - 1)]
                         st.on = s.on[i]
                         st.pitch = if (s.hit) rest else s.note[i] - 60 + rest
@@ -253,14 +359,24 @@ object VacuumApply {
                 lanes.idx[act.lane] = act.idx
             } else {
                 val p = e.pads[act.idx]
-                e.setPad(act.idx, act.file!!, d)
+                if (kept) {
+                    if (p.name != act.file) notes.add("T${act.lane + 1} ${s.label}: lane ${act.lane + 1} keeps its sound " +
+                        "\"${p.name.removeSuffix(".wav")}\" (one sound a lane); only the steps of this bar came.")
+                    for (b in barsTo) for (i in 0 until slot) {
+                        val q = (b * slot + i).coerceIn(0, Cfg.STEPS - 1)
+                        p.on[q] = i < song.steps && s.on[i]
+                        p.lvl[q] = 1f
+                    }
+                    continue
+                }
+                e.setPad(act.idx, act.file!!, d!!)
                 p.mute = false
                 p.volume = VacuumPlan.padVolume(v[StackTrack.LEVEL])
                 for (k in 0 until Cfg.STEPS) {
                     p.on[k] = false
                     p.lvl[k] = 1f
                 }
-                for (b in 0 until bars) for (i in 0 until song.steps) p.on[(b * slot + i).coerceIn(0, Cfg.STEPS - 1)] = s.on[i]
+                for (b in barsTo) for (i in 0 until song.steps) p.on[(b * slot + i).coerceIn(0, Cfg.STEPS - 1)] = s.on[i]
                 lanes.type[act.lane] = Inst.DRUM
                 lanes.idx[act.lane] = act.idx
             }
