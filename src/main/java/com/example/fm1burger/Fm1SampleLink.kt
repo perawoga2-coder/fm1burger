@@ -239,6 +239,87 @@ class Fm1SampleLink(private val midi: MidiLink) {
         }
     }
 
+    /** 3.56: the CRC of the data the last upload sent (what STACK's song names a sample of the app's by). */
+    @Volatile var lastCrc = 0L
+
+    // ---------------- 3.56 VACUUM: STACK's song and loop (stack/docs/PROTOCOL.md: commands 30, 31, 32) ----------------
+
+    /** The FM-1 answered none of the tries: it is not there, or its firmware is older than STACK 4.0-beta. */
+    class NoAnswer : Exception("no answer")
+    class Loop(val data: ShortArray, val rate: Int)
+
+    /** One piece asked for until its answer comes (the answer names the piece: an older one that comes late is passed over). */
+    private fun piece(cmd: Int, k: Int, tries: Int): ByteArray {
+        for (n in 0 until tries) {
+            try {
+                val end = System.currentTimeMillis() + 700
+                while (System.currentTimeMillis() < end) {
+                    val r = req(cmd, byteArrayOf((k and 0x7F).toByte(), (k shr 7).toByte()), 700)
+                    if (r.size >= 4 && ((r[0].toInt() and 0x7F) or ((r[1].toInt() and 0x7F) shl 7)) == k) return r
+                }
+            } catch (ex: IllegalStateException) {
+            }
+        }
+        throw NoAnswer()
+    }
+
+    /** STACK's song, whole (its record: StackDump.parse reads it). NoAnswer: no STACK 4.0-beta or newer there. */
+    fun dumpSong(progress: (Float) -> Unit): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        var pieces = 1
+        var k = 0
+        while (k < pieces) {
+            val r = piece(30, k, if (k == 0) 2 else 5)
+            pieces = ((r[2].toInt() and 0x7F) or ((r[3].toInt() and 0x7F) shl 7)).coerceIn(1, 64)
+            out.write(StackDump.unpack7(r, 4))
+            k++
+            progress(k.toFloat() / pieces)
+        }
+        return out.toByteArray()
+    }
+
+    /** The loop on STACK's track 8, or null when there is none. Read again from its start if it changed meanwhile. */
+    fun dumpLoop(progress: (Float) -> Unit): Loop? {
+        for (round in 0 until 3) {
+            var info: ByteArray? = null
+            for (n in 0 until 4) {
+                try {
+                    info = req(31, ByteArray(0), 900)
+                    break
+                } catch (ex: IllegalStateException) {
+                }
+            }
+            val i = info ?: throw NoAnswer()
+            if (i.size < 8 || i[0].toInt() == 0) return null
+            val rate = if (i[1].toInt() == 1) 11025 else 22050
+            val n = (i[2].toInt() and 0x7F) or ((i[3].toInt() and 0x7F) shl 7) or ((i[4].toInt() and 0x7F) shl 14)
+            val ver = (i[6].toInt() and 0x7F) or ((i[7].toInt() and 0x7F) shl 7)
+            val c4 = StackDump.unpack7(i, 8)
+            if (n <= 0 || c4.size < 4) return null
+            val want = (c4[0].toLong() and 0xFF) or ((c4[1].toLong() and 0xFF) shl 8) or ((c4[2].toLong() and 0xFF) shl 16) or ((c4[3].toLong() and 0xFF) shl 24)
+            val bytes = java.io.ByteArrayOutputStream()
+            val pieces = (2 * n + StackDump.PIECE - 1) / StackDump.PIECE
+            var same = true
+            var k = 0
+            while (k < pieces && same) {
+                val r = piece(32, k, 5)
+                same = ((r[2].toInt() and 0x7F) or ((r[3].toInt() and 0x7F) shl 7)) == ver
+                bytes.write(StackDump.unpack7(r, 4))
+                k++
+                if (k % 8 == 0) progress(k.toFloat() / pieces)
+            }
+            val b = bytes.toByteArray()
+            val crc = CRC32()
+            crc.update(b, 0, minOf(b.size, 2 * n))
+            if (same && b.size >= 2 * n && crc.value == want) {
+                progress(1f)
+                return Loop(ShortArray(n) { ((b[2 * it].toInt() and 0xFF) or (b[2 * it + 1].toInt() shl 8)).toShort() }, rate)
+            }
+            // (a layer was added or taken off while it was read, or a piece was damaged: once more, from the start)
+        }
+        throw IllegalStateException("The loop kept changing while it was read. Stop adding layers, then press VACUUM FM-1 again.")
+    }
+
     /** 3.54: STACK answered MUTE: 1 its own output is silent now, 0 it sounds (stack/docs/PROTOCOL.md). */
     @Volatile var onMuteAck: ((Int) -> Unit)? = null
 
@@ -316,6 +397,7 @@ class Fm1SampleLink(private val midi: MidiLink) {
         val data = imaEncode(s)
         val hdr = header(name, s.size, data, 60, q, sp)
         write(slot, hdr, data, progress)
+        lastCrc = CRC32().also { it.update(data) }.value        // (3.56: VACUUM finds the sample again by it)
         return String.format(java.util.Locale.US, "%.1f s, %s%s", s.size / qualityRate(q), QUALITY_NAMES[q.coerceIn(0, 2)],
             if (sp > 1) ", USR${slot + 1}-${slot + sp}" else "")
     }

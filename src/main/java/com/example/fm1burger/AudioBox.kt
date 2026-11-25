@@ -343,6 +343,11 @@ class AudioBox(private val a: MainActivity) {
         face.addView(st, ui.fullWidth(14))
 
         val br = ui.row()
+        // 3.56: the FM-1's whole song (STACK) onto Home's lanes 1 to 8
+        face.addView(ui.button("VACUUM FM-1") {
+            d.dismiss()
+            Vacuum(a).start()
+        }, ui.fullWidth(14))
         br.addView(ui.button("RESTART AUDIO") { restartAudio() }, ui.w(1f, 3))
         br.addView(ui.button("CLOSE", true) { d.dismiss() }, ui.w(1f, 3))
         face.addView(br, ui.fullWidth(14))

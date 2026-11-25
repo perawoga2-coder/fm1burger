@@ -456,6 +456,9 @@ class MainActivity : Activity() {
         hxText.addView(hxTitle)
         hxText.addView(hxHint)
         hx.addView(hxText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        // 3.56: the FM-1's whole song (STACK) onto lanes 1 to 8
+        hx.addView(ui.button("VACUUM FM-1") { Vacuum(this).start() },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, ui.dp(40)).also { it.marginStart = ui.dp(8) })
         hx.addView(ui.button("Reset lanes") {
             lanes.reset()
             homeScreen.refresh()
@@ -1015,7 +1018,12 @@ class MainActivity : Activity() {
         val nm = name.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9 _-]"), "").ifEmpty { "BURGER" }
         Thread {
             val res = try {
-                Result.success(fm1Link.upload(slot, nm, data, q, span) { f -> runOnUiThread { bar.progress = (f * 1000).toInt() } })
+                Result.success(fm1Link.upload(slot, nm, data, q, span) { f -> runOnUiThread { bar.progress = (f * 1000).toInt() } }.also {
+                    // 3.56: which sound of the library this was (when it is one), by the CRC of what went: VACUUM finds it again
+                    val lib = if (name.endsWith(".wav", true)) name else "$name.wav"
+                    if (store.file(lib).exists())
+                        getSharedPreferences("fm1sent", MODE_PRIVATE).edit().putString(java.lang.Long.toHexString(fm1Link.lastCrc), lib).apply()
+                })
             } catch (ex: Exception) {
                 Result.failure(ex)
             }
