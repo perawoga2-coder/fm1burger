@@ -271,6 +271,13 @@ fun main(args: Array<String>) {
     check((0 until 8).map { lanes6.type[it] to lanes6.idx[it] }.distinct().size == 8, "4.05-beta: no two lanes share a track or a pad")
     check(e6.drumHeavy.amount == 0f, "3.59: CLEAR EVERYTHING: the drum bus HEAVY is off (STACK's drums are clean)")
 
+    // 3.60: ERASE a slot (stack/docs/PROTOCOL.md, app/my_samples.c: command 14; Burger Studio bs19: SMP_ERASE)
+    fun hex(b: ByteArray) = b.joinToString(" ") { String.format("%02X", it.toInt() and 0xFF) }
+    for (k in 0 until Fm1SampleLink.SLOTS)
+        check(hex(Fm1SampleLink.eraseMessage(k)) == "F0 7D 46 4C 0E 0${k} F7", "3.60: ERASE USR${k + 1} is " + hex(Fm1SampleLink.eraseMessage(k)))
+    check(runCatching { Fm1SampleLink.eraseMessage(3) }.isFailure && runCatching { Fm1SampleLink.eraseMessage(-1) }.isFailure,
+        "3.60: ERASE of a slot other than USR1..USR3 is never sent")
+
     println(if (bad == 0) "ALL OK" else "$bad FAILED")
     if (bad != 0) System.exit(1)
 }

@@ -204,6 +204,21 @@ class Fm1SampleLink(private val midi: MidiLink) {
             return h
         }
 
+        /** 3.60: a message to the FM-1 without F0 / F7 (MidiLink.sendSysex adds them): 7D 46 4C cmd args. */
+        fun message(cmd: Int, args: ByteArray): ByteArray {
+            val body = ByteArray(4 + args.size)
+            System.arraycopy(HDR, 0, body, 0, 3)
+            body[3] = cmd.toByte()
+            System.arraycopy(args, 0, body, 4, args.size)
+            return body
+        }
+
+        /** 3.60: ERASE (command 14) of slot 0..2, as it goes on the wire: F0 7D 46 4C 0E slot F7. */
+        fun eraseMessage(slot: Int): ByteArray {
+            require(slot in 0 until SLOTS) { "no slot $slot" }
+            return byteArrayOf(0xF0.toByte()) + message(14, byteArrayOf(slot.toByte())) + byteArrayOf(0xF7.toByte())
+        }
+
         /** Felucca's pack7: groups of up to 7 bytes, each group led by their top bits. */
         fun pack7(b: ByteArray, from: Int = 0, to: Int = b.size): ByteArray {
             val out = java.io.ByteArrayOutputStream()
@@ -221,6 +236,15 @@ class Fm1SampleLink(private val midi: MidiLink) {
     }
 
     private val replies = ArrayBlockingQueue<ByteArray>(64)
+
+    /** 3.60: a send (BEGIN / WRITE / END), a VACUUM read or an ERASE is running: ERASE waits for none of them, it is refused. */
+    private val inUse = java.util.concurrent.atomic.AtomicInteger(0)
+    val busy: Boolean get() = inUse.get() > 0
+
+    /** 3.60: what the last SMP_INFO said of each slot: its sample's name (null: empty or part of another's sample) and
+     * the slot whose sample runs over it (-1: none). */
+    @Volatile var slotNames: Array<String?> = arrayOfNulls(SLOTS)
+    @Volatile var slotOwner: IntArray = IntArray(SLOTS) { -1 }
 
     /** The firmware joins slots (bs10 and later): learnt from SMP_INFO. */
     @Volatile var joinOk = false
@@ -264,7 +288,9 @@ class Fm1SampleLink(private val midi: MidiLink) {
     }
 
     /** STACK's song, whole (its record: StackDump.parse reads it). NoAnswer: no STACK 4.0-beta or newer there. */
-    fun dumpSong(progress: (Float) -> Unit): ByteArray {
+    fun dumpSong(progress: (Float) -> Unit): ByteArray = using { dumpSong0(progress) }
+
+    private fun dumpSong0(progress: (Float) -> Unit): ByteArray {
         val out = java.io.ByteArrayOutputStream()
         var pieces = 1
         var k = 0
@@ -282,7 +308,9 @@ class Fm1SampleLink(private val midi: MidiLink) {
      * changed meanwhile. 3.59: since 4.03-beta a loop is up to 8 s (352 800 bytes, 2 757 pieces, four times before):
      * there is no time limit on the whole, only on each piece (asked again, five times), and the bytes are kept in
      * one buffer of the loop's own size. */
-    fun dumpLoop(progress: (Float) -> Unit): Loop? {
+    fun dumpLoop(progress: (Float) -> Unit): Loop? = using { dumpLoop0(progress) }
+
+    private fun dumpLoop0(progress: (Float) -> Unit): Loop? {
         for (round in 0 until 3) {
             var info: ByteArray? = null
             for (n in 0 until 4) {
@@ -342,11 +370,7 @@ class Fm1SampleLink(private val midi: MidiLink) {
 
     private fun req(cmd: Int, args: ByteArray, timeoutMs: Long = 3000): ByteArray {
         replies.clear()
-        val body = ByteArray(4 + args.size)
-        System.arraycopy(HDR, 0, body, 0, 3)
-        body[3] = cmd.toByte()
-        System.arraycopy(args, 0, body, 4, args.size)
-        midi.sendSysex(body)
+        midi.sendSysex(message(cmd, args))
         val end = System.currentTimeMillis() + timeoutMs
         while (true) {
             val left = end - System.currentTimeMillis()
@@ -369,6 +393,8 @@ class Fm1SampleLink(private val midi: MidiLink) {
         val d = r ?: throw IllegalStateException(
             "The FM-1 does not answer. Is it running the Burger Studio firmware, and connected in MIDI sync?")
         val out = ArrayList<String>()
+        val names = arrayOfNulls<String>(SLOTS)
+        val owner = IntArray(SLOTS) { -1 }
         try {
             val n = d[0].toInt()
             var i = 2
@@ -378,17 +404,23 @@ class Fm1SampleLink(private val midi: MidiLink) {
                 while (d[j].toInt() != 0) j++
                 val nm = String(d, i + 1, j - i - 1, Charsets.US_ASCII)
                 out.add("USR${k + 1}: " + if (nz == 0) "empty" else "$nm (${d[j + 1]} KiB)")
+                if (nz != 0 && k < SLOTS) names[k] = nm
                 i = j + 2
             }
             joinOk = i + n <= d.size                 // (an older firmware sends nothing after the slots)
             for (k in 0 until n) {                   // bs10: after the slots, what each one's sample takes / whose it is
                 if (i + k >= d.size) break
                 val v = d[i + k].toInt()
-                if (v and 0x40 != 0) out[k] = "USR${k + 1}: part of USR${(v and 3) + 1}'s sample"
+                if (v and 0x40 != 0) {
+                    out[k] = "USR${k + 1}: part of USR${(v and 3) + 1}'s sample"
+                    if (k < SLOTS) { owner[k] = v and 3; names[k] = null }
+                }
                 else if (v >= 2 && k < out.size) out[k] = out[k] + " · USR${k + 1}-${k + v}"
             }
         } catch (ex: Exception) {
         }
+        slotNames = names
+        slotOwner = owner
         return out
     }
 
@@ -428,7 +460,47 @@ class Fm1SampleLink(private val midi: MidiLink) {
         return String.format(java.util.Locale.US, "%d hits, %.1f s", list.size, total / SLOT_RATE.toDouble())
     }
 
-    private fun write(slot: Int, hdr: ByteArray, data: ByteArray, progress: (Float) -> Unit) {
+    private fun <T> using(f: () -> T): T {
+        inUse.incrementAndGet()
+        try {
+            return f()
+        } finally {
+            inUse.decrementAndGet()
+        }
+    }
+
+    /** 3.60: the firmware does not answer ERASE (or the FM-1 is gone): nothing was erased that the app knows of. */
+    class EraseUnsupported : Exception("not supported by this firmware")
+
+    /**
+     * 3.60: ERASE (command 14): F0 7D 46 4C 0E slot F7, answered slot, rc (0: the slot is empty now). STACK: MY 1..3;
+     * when another slot's sample runs over this one, that sample goes too. Burger Studio bs19 (Felucca's SMP_ERASE):
+     * the whole slot, about 1 s. Refused while a send or a VACUUM runs. Runs on a worker thread.
+     */
+    fun erase(slot: Int) {
+        if (slot !in 0 until SLOTS) throw IllegalArgumentException("No slot USR${slot + 1}")
+        if (!inUse.compareAndSet(0, 1)) throw IllegalStateException("The FM-1 is busy with a transfer. Wait for it to end, then erase.")
+        try {
+            val r = try {
+                req(14, byteArrayOf(slot.toByte()), 8000)
+            } catch (ex: IllegalStateException) {
+                throw EraseUnsupported()
+            }
+            if (r.size < 2 || r[0].toInt() != slot) throw IllegalStateException("The FM-1's answer to ERASE was not understood.")
+            when (val rc = r[1].toInt()) {
+                0 -> {}
+                1 -> throw IllegalStateException("The FM-1 refused to erase USR${slot + 1} (stop it playing, then try again).")
+                2 -> throw IllegalStateException("The FM-1 could not erase its flash (USR${slot + 1}).")
+                else -> throw IllegalStateException("The FM-1 could not erase USR${slot + 1} ($rc).")
+            }
+        } finally {
+            inUse.decrementAndGet()
+        }
+    }
+
+    private fun write(slot: Int, hdr: ByteArray, data: ByteArray, progress: (Float) -> Unit) = using { write0(slot, hdr, data, progress) }
+
+    private fun write0(slot: Int, hdr: ByteArray, data: ByteArray, progress: (Float) -> Unit) {
         info()
         val sl = slot.coerceIn(0, SLOTS - 1).toByte()
         val b = req(11, byteArrayOf(sl))

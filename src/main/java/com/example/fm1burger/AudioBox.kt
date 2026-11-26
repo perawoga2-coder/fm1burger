@@ -348,6 +348,11 @@ class AudioBox(private val a: MainActivity) {
             d.dismiss()
             Vacuum(a).start()
         }, ui.fullWidth(14))
+        // 3.60: take a sample out of a slot of the FM-1 (MY 1..3 on STACK)
+        face.addView(ui.button("ERASE A SAMPLE SLOT…") {
+            d.dismiss()
+            a.eraseFm1Slots()
+        }, ui.fullWidth(8))
         br.addView(ui.button("RESTART AUDIO") { restartAudio() }, ui.w(1f, 3))
         br.addView(ui.button("CLOSE", true) { d.dismiss() }, ui.w(1f, 3))
         face.addView(br, ui.fullWidth(14))
