@@ -1348,14 +1348,18 @@ class MainActivity : Activity() {
         bpmBar.isEnabled = !engine.follow
         if (engine.follow) bpmBar.progress = (engine.bpm - 40).coerceIn(0, 200)
 
+        // 3.59: the status line is set only when it says something else (a new text every 50 ms laid the screen out
+        // again each time, also while it was being dragged: work that took the CPU from the audio thread)
+        var stText: String
+        var stCol: Int
         val rec = flow.statusLine()
         if (rec.isNotEmpty()) {
-            statusText.setTextColor(Theme.RED)
-            statusText.text = rec
+            stCol = Theme.RED
+            stText = rec
         } else {
-            statusText.setTextColor(Theme.DIM)
+            stCol = Theme.DIM
             val sl = syncLine()
-            statusText.text = if (engine.playing && engine.curStep >= 0) {
+            stText = if (engine.playing && engine.curStep >= 0) {
                 "Playing ${PartNames.NAMES[engine.bank.cur]} · step ${engine.curStep + 1} / ${Pat.len}" +
                     (if (engine.bank.songOn) " · song ${engine.bank.songIdx + 1}/${engine.bank.songLen}" else "") +
                     (if (sl.isNotEmpty()) " · $sl" else "")
@@ -1374,10 +1378,12 @@ class MainActivity : Activity() {
         if (recMixBtn.text.toString() != rt) recMixBtn.text = rt
         ui.styleButton(recMixBtn, mr.recording, Theme.RED)
         if (mr.recording) {
-            statusText.setTextColor(Theme.RED)
-            statusText.text = "● Recording the whole mix " + clock(mr.frames / Cfg.SR) +
+            stCol = Theme.RED
+            stText = "● Recording the whole mix " + clock(mr.frames / Cfg.SR) +
                 " · " + String.format(Locale.US, "%.1f", mr.bytesWritten / 1048576.0) + " MB. Press ■ REC to stop."
         }
+        if (statusText.currentTextColor != stCol) statusText.setTextColor(stCol)
+        if (statusText.text.toString() != stText) statusText.text = stText
         paintCues()
         val bk = engine.bank
         if (bk.recState == 4) recPartDone()

@@ -677,7 +677,7 @@ class LaneView(
 
     var muted = false
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val tp = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val r = RectF()
     private val d = resources.displayMetrics.density
 
@@ -686,6 +686,7 @@ class LaneView(
     private var cacheW = -1
     private var mn = FloatArray(0)
     private var mx = FloatArray(0)
+    private var wavePts = FloatArray(0)      // 3.59: the waveform as one drawLines (it was one drawRect a column)
 
     // the volume drag: a small move is still a tap, a sideways one sets the volume, an upright one scrolls the page
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop
@@ -835,16 +836,33 @@ class LaneView(
         }
     }
 
+    /** 3.59: one drawLines for the whole waveform, not a drawRect a column: the lanes are drawn again every step while
+     * the song plays, and a thousand operations a lane, recorded on the UI thread and drawn by the render thread, were
+     * CPU taken from the audio thread while the screen was dragged. It looks the same: a 1 px line a column. */
     private fun drawWave(c: Canvas, w: Float, h: Float, col: Int) {
         val mid = h / 2f
-        p.style = Paint.Style.FILL
         p.color = col
         val n = min(mn.size, w.toInt())
+        if (n <= 0) return
+        if (wavePts.size < n * 4) wavePts = FloatArray(n * 4)
+        val pts = wavePts
         for (x in 0 until n) {
             val top = mid - mx[x].coerceIn(-1f, 1f) * mid * 0.85f
             val bot = mid - mn[x].coerceIn(-1f, 1f) * mid * 0.85f
-            c.drawRect(x.toFloat(), top, x + 1f, max(bot, top + 1f), p)
+            val k = x * 4
+            pts[k] = x + 0.5f
+            pts[k + 1] = top
+            pts[k + 2] = x + 0.5f
+            pts[k + 3] = max(bot, top + 1f)
         }
+        val sw = p.strokeWidth
+        val cap = p.strokeCap
+        p.strokeWidth = 1f
+        p.strokeCap = Paint.Cap.BUTT
+        c.drawLines(pts, 0, n * 4, p)
+        p.strokeWidth = sw
+        p.strokeCap = cap
+        p.style = Paint.Style.FILL
     }
 
     /** 16 step blocks: height = note (or level), for bass, synth and drums. */
@@ -1047,7 +1065,7 @@ class LaneView(
             tp.typeface = Ui.MEDIUM
             room -= tw + 16 * d
         }
-        label(c, TextUtils.ellipsize(name, android.text.TextPaint(tp), max(0f, room), TextUtils.TruncateAt.END).toString(),
+        label(c, TextUtils.ellipsize(name, tp, max(0f, room), TextUtils.TruncateAt.END).toString(),
             if (t == Inst.EMPTY) Theme.FAINT else Theme.TEXT)
     }
 }

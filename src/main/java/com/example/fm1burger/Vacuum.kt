@@ -43,15 +43,28 @@ class Vacuum(private val a: MainActivity) {
             var err: String? = null
             var song: StackSong? = null
             var loopFile: String? = null
+            var loopBars = 1
+            var loopDb = 0f
             try {
                 val blob = link.dumpSong { f -> say("The song…", 0.1f * f) }
                 song = StackDump.parse(blob) ?: throw IllegalStateException("The FM-1's answer was damaged on the way. Try again.")
-                if (song.hasLoop && song.tracks.any { it.kind == 3 }) {
-                    say("The loop on track 8…", 0.1f)
-                    val lp = link.dumpLoop { f -> say("The loop on track 8…", 0.1f + 0.8f * f) }
+                val lt = song.loopTrack           // 3.59: T8, or T7 since 4.04-beta
+                if (song.hasLoop && lt >= 0) {
+                    val on = "The loop on track ${lt + 1}…"
+                    say(on, 0.1f)
+                    val lp = link.dumpLoop { f -> say(on, 0.1f + 0.8f * f) }
                     if (lp != null) {
-                        // 16 bits where 16384 is full level -> floats; to the engine's rate; kept in the library as any sound
-                        val f = FloatArray(lp.data.size) { (lp.data[it] / 16384f).coerceIn(-1f, 1f) }
+                        // 16 bits where 16384 is full level -> floats; to the engine's rate; kept in the library as any sound.
+                        // 3.59: a loop can go up to 2 (two layers at full level fit): it was cut off at 1 here (hard
+                        // clipping, heard as crackle). Now it is turned down to fit, and its track turned up by as much.
+                        val f = FloatArray(lp.data.size) { lp.data[it] / 16384f }
+                        val pk = Wav.peak(f)
+                        if (pk > 1f) {
+                            val g = 0.999f / pk
+                            for (i in f.indices) f[i] *= g
+                            loopDb = (-20.0 * Math.log10(g.toDouble())).toFloat().coerceIn(0f, 12f)
+                        }
+                        loopBars = VacuumPlan.loopBars(lp.data.size, lp.rate, song)
                         loopFile = a.store.saveNew("FM-1 Loop", Wav.resample(f, lp.rate, Cfg.SR), Cfg.SR).name
                     }
                 }
@@ -72,9 +85,9 @@ class Vacuum(private val a: MainActivity) {
             // two plans: on Home as it is (only lanes 1-8 change), and on an empty Home (CLEAR EVERYTHING)
             val has = { n: String -> a.store.file(n).exists() }
             val my = { t: StackTrack -> findMy(t) }
-            val plan = VacuumPlan.plan(sg, a.lanes.type, a.lanes.idx, Cfg.TRACKS, Cfg.PADS, has, my, loopFile)
+            val plan = VacuumPlan.plan(sg, a.lanes.type, a.lanes.idx, Cfg.TRACKS, Cfg.PADS, has, my, loopFile, loopBars)
             val none = IntArray(a.lanes.type.size)        // (Inst.EMPTY everywhere)
-            val planAll = VacuumPlan.plan(sg, none, none, Cfg.TRACKS, Cfg.PADS, has, my, loopFile)
+            val planAll = VacuumPlan.plan(sg, none, none, Cfg.TRACKS, Cfg.PADS, has, my, loopFile, loopBars)
             val data = HashMap<String, FloatArray?>()
             for (act in plan.acts + planAll.acts) {
                 val f = act.file ?: continue
@@ -113,9 +126,9 @@ class Vacuum(private val a: MainActivity) {
                     .setView(sc)
                     .setPositiveButton("Clear everything") { _, _ ->
                         VacuumApply.clearAll(e, a.lanes)
-                        apply(sg, planAll, data, bar(), true)
+                        apply(sg, planAll, data, bar(), true, loopDb)
                     }
-                    .setNeutralButton("Lanes 1–8 only") { _, _ -> apply(sg, plan, data, bar(), false) }
+                    .setNeutralButton("Lanes 1–8 only") { _, _ -> apply(sg, plan, data, bar(), false, loopDb) }
                     .setNegativeButton("Cancel", null).show()
             }
         }.start()
@@ -135,7 +148,8 @@ class Vacuum(private val a: MainActivity) {
         return null
     }
 
-    private fun apply(song: StackSong, plan: VacuumPlanResult, data: Map<String, FloatArray?>, barIn: Int = -1, cleared: Boolean = false) {
+    private fun apply(song: StackSong, plan: VacuumPlanResult, data: Map<String, FloatArray?>, barIn: Int = -1, cleared: Boolean = false,
+                      loopDb: Float = 0f) {
         val notes = ArrayList(plan.notes)
         // the song's own: tempo, time signature (the app has no swing: the plan said so)
         if (!e.follow) e.bpm = song.bpm.coerceIn(40, 240)
@@ -151,12 +165,18 @@ class Vacuum(private val a: MainActivity) {
             val need = (bar + 1) * Pat.slot()
             if (Pat.len < need) Pat.lengths().firstOrNull { it >= need }?.let { a.setPatternLength(it) }
         }
-        VacuumApply.put(e, a.lanes, song, plan, data, notes, bar)
+        VacuumApply.put(e, a.lanes, song, plan, data, notes, bar, loopDb)
+        // 3.59: STACK's drums are clean; the app's drum bus HEAVY (on by default) compresses, lifts and saturates them
+        if (!cleared && e.drumHeavy.amount > 0.001f && plan.acts.any { it.type == VacuumPlan.DRUM })
+            notes.add("Drums · HEAVY is at ${(e.drumHeavy.amount * 100).toInt()}% (Pads page): the FM-1 has no such thing, and it makes " +
+                "the drums louder and dirtier than STACK's. Turn it to 0 to hear them as on the FM-1.")
         a.homeScreen.refresh()
         a.refreshCurrent()
         val at = if (bar < 0) "on lanes 1 to 8" else "on lanes 1 to 8, bar ${bar + 1} (steps ${bar * Pat.slot() + 1}–${(bar + 1) * Pat.slot()}; the other bars are as they were)"
         val head = "The FM-1's song is $at, in its own order: ${song.bpm} BPM, ${StackSounds.SIG_NAME[song.sig.coerceIn(0, 4)]}." +
-            (if (bar < 0 && plan.acts.any { it.loop && it.type != VacuumPlan.EMPTY }) " The loop of track 8 is on lane 8, as a looping sample." else "") +
+            (plan.acts.firstOrNull { it.loop && it.type != VacuumPlan.EMPTY }?.takeIf { bar < 0 }?.let {
+                " The loop of track ${it.lane + 1} is on lane ${it.lane + 1}, as a looping sample of ${it.fit} bar${if (it.fit > 1) "s" else ""}."
+            } ?: "") +
             "\n\nCarried over: sounds, steps and their notes, LEVEL, PITCH, FILTER, EDIT's START / LENGTH / REVERSE, FIT of 1, 2 or 4 bars, " +
             "and the effects the app has (DELAY, ECHO, REVERB, OVERDRIVE, CHORUS, LO-FI, ROBOT; FLANGER as the Phaser).\n" +
             "Not carried over: SWING, ENV, LFO, ARP, DECAY, TAPE SPEED, and anything PERFORM was doing."
@@ -209,6 +229,7 @@ object VacuumApply {
             g.audition(MetalGuitar.OFF, 0)
         }
         e.ambient.steps.fill(false)
+        e.drumHeavy.amount = 0f        // 3.59: the drum bus clean, as STACK's drums are (HEAVY saturates them)
         for (k in e.auto.targets.indices) e.auto.clear(k)
         for (p in b.parts) {
             p.blank()
@@ -229,7 +250,7 @@ object VacuumApply {
      * keeps is never given to another lane.
      */
     fun put(e: Engine, lanes: LaneSetup, song: StackSong, plan: VacuumPlanResult, data: Map<String, FloatArray?>,
-            notes: MutableList<String>, bar: Int = -1) {
+            notes: MutableList<String>, bar: Int = -1, loopDb: Float = 0f) {
         val slot = Pat.slot()
         val bars = Pat.bars()
         // DIRECT SPLIT: which lanes keep their own track or pad, and what every other lane may take
@@ -250,7 +271,7 @@ object VacuumApply {
                 if (has) {
                     keep[act.lane] = true
                     taken.add(ty to k)
-                    acts[act.lane] = LaneAct(act.lane, act.type, k, act.track, act.file, act.semis, act.loop)
+                    acts[act.lane] = LaneAct(act.lane, act.type, k, act.track, act.file, act.semis, act.loop, act.fit)
                 }
             }
             for (act in plan.acts) {
@@ -263,12 +284,12 @@ object VacuumApply {
                 }
                 if (k < 0) {
                     notes.add("T${act.lane + 1} ${act.track.label}: no ${if (inst == Inst.SAMPLE) "Sampler track" else "Drum pad"} is free. Lane ${act.lane + 1} stays as it was.")
-                    acts[act.lane] = LaneAct(act.lane, VacuumPlan.EMPTY, 0, act.track, null, act.semis, act.loop)
+                    acts[act.lane] = LaneAct(act.lane, VacuumPlan.EMPTY, 0, act.track, null, act.semis, act.loop, act.fit)
                     keep[act.lane] = true          // (nothing is written there)
                     continue
                 }
                 taken.add(inst to k)
-                acts[act.lane] = LaneAct(act.lane, act.type, k, act.track, act.file, act.semis, act.loop)
+                acts[act.lane] = LaneAct(act.lane, act.type, k, act.track, act.file, act.semis, act.loop, act.fit)
             }
         }
         // the steps of the bar(s) written: every bar, or the one of DIRECT SPLIT
@@ -313,10 +334,10 @@ object VacuumApply {
                 e.setSample(act.idx, act.file!!, d!!)
                 t.mute = false
                 t.volume = VacuumPlan.trackVolume(v[StackTrack.LEVEL])
-                if (act.loop) {                  // the loop: it goes round with the bar, at the tempo's length
+                if (act.loop) {                  // the loop: it goes round with its bars, at the tempo's length
                     t.loop = true
-                    t.fitBars = 1
-                    t.volume = 0.8f
+                    t.fitBars = act.fit          // 3.59: 1 or more whole bars (was always 1: a longer loop ran too fast)
+                    t.boostDb = loopDb           // (a loop over full level was turned down in its file: as loud as it was)
                 } else {
                     // STACK's middle C is the sound's own note: the track's pitch brings the sample there (as far as
                     // its knob goes), the rest and each step's note go on the steps
@@ -340,6 +361,7 @@ object VacuumApply {
                     VacuumPlan.filter(v[StackTrack.FILTER])?.let { (k, cut) ->
                         t.fx.on[k] = true
                         t.fx.a[k] = cut
+                        t.fx.b[k] = 0f           // 3.59: no resonance (Q 0.7), as STACK's filter (it had a +3.5 dB bump)
                     }
                     for (q in 0..1) {
                         val kn = v[StackTrack.FX_AK + q]

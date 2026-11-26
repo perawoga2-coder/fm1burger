@@ -278,7 +278,10 @@ class Fm1SampleLink(private val midi: MidiLink) {
         return out.toByteArray()
     }
 
-    /** The loop on STACK's track 8, or null when there is none. Read again from its start if it changed meanwhile. */
+    /** The loop on STACK's track 8 (or 7, since 4.04-beta), or null when there is none. Read again from its start if it
+     * changed meanwhile. 3.59: since 4.03-beta a loop is up to 8 s (352 800 bytes, 2 757 pieces, four times before):
+     * there is no time limit on the whole, only on each piece (asked again, five times), and the bytes are kept in
+     * one buffer of the loop's own size. */
     fun dumpLoop(progress: (Float) -> Unit): Loop? {
         for (round in 0 until 3) {
             var info: ByteArray? = null
@@ -297,7 +300,7 @@ class Fm1SampleLink(private val midi: MidiLink) {
             val c4 = StackDump.unpack7(i, 8)
             if (n <= 0 || c4.size < 4) return null
             val want = (c4[0].toLong() and 0xFF) or ((c4[1].toLong() and 0xFF) shl 8) or ((c4[2].toLong() and 0xFF) shl 16) or ((c4[3].toLong() and 0xFF) shl 24)
-            val bytes = java.io.ByteArrayOutputStream()
+            val bytes = java.io.ByteArrayOutputStream(2 * n + StackDump.PIECE)
             val pieces = (2 * n + StackDump.PIECE - 1) / StackDump.PIECE
             var same = true
             var k = 0

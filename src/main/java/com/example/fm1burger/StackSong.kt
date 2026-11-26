@@ -41,7 +41,13 @@ class StackTrack(
 class StackSong(
     val bpm: Int, val sig: Int, val steps: Int, val swing: Int, val layers: Int,
     val hasLoop: Boolean, val version: String, val tracks: List<StackTrack>
-)
+) {
+    /** 3.59: the track that holds the loop (the one of kind 3, LOOP): 7 (T8) up to 4.03-beta; since 4.04-beta it moves
+     * between T8 and T7 with every layer (the head's flag bit 3 says the same). -1: none. */
+    val loopTrack: Int get() = tracks.indexOfFirst { it.kind == 3 }
+    /** a bar (STACK's pattern) in seconds: its steps are 16ths at the tempo */
+    val barSeconds: Double get() = steps * 15.0 / bpm.coerceAtLeast(1)
+}
 
 object StackDump {
     const val PIECE = 128
@@ -187,8 +193,10 @@ object StackSounds {
     val FX_NAME = arrayOf("OFF", "DELAY", "ECHO", "REVERB", "TAPE SPEED", "ROBOT", "FLANGER", "OVERDRIVE", "CHORUS", "LO-FI")
 }
 
-/** What one Home lane becomes. type: Inst.EMPTY / SAMPLE / DRUM; idx: the engine's sampler track or pad. */
-class LaneAct(val lane: Int, val type: Int, val idx: Int, val track: StackTrack, val file: String?, val semis: Int, val loop: Boolean)
+/** What one Home lane becomes. type: Inst.EMPTY / SAMPLE / DRUM; idx: the engine's sampler track or pad; fit: the
+ * loop's FIT in bars (3.59: the loop is 1 or more whole bars long). */
+class LaneAct(val lane: Int, val type: Int, val idx: Int, val track: StackTrack, val file: String?, val semis: Int, val loop: Boolean,
+              val fit: Int = 1)
 
 class VacuumPlanResult(val acts: List<LaneAct>, val notes: List<String>)
 
@@ -201,12 +209,14 @@ object VacuumPlan {
      * The plan. laneType / laneIdx: Home's lanes as they are (only the lanes after the eighth matter: the sampler
      * tracks and pads they show are theirs and are not taken). hasFile: is this sound in the library. findMy: the
      * library's sound for a sample of the app's, or null. loopFile: the loop's audio, already in the library, or null.
+     * loopBars: the loop's length in STACK's bars ([loopBars] of its samples), fitted to the nearest FIT the app has.
      */
     fun plan(
         song: StackSong, laneType: IntArray, laneIdx: IntArray, tracks: Int, pads: Int,
-        hasFile: (String) -> Boolean, findMy: (StackTrack) -> String?, loopFile: String?
+        hasFile: (String) -> Boolean, findMy: (StackTrack) -> String?, loopFile: String?, loopBars: Int = 1
     ): VacuumPlanResult {
         val notes = ArrayList<String>()
+        val loopFit = fitOf(loopBars)
         val freeTr = ArrayList<Int>()
         for (k in 0 until tracks) if ((8 until laneType.size).none { laneType[it] == SAMPLE && laneIdx[it] == k }) freeTr.add(k)
         val freePad = ArrayList<Int>()
@@ -244,6 +254,8 @@ object VacuumPlan {
                     if (loopFile != null) {
                         file[t] = loopFile
                         want[t] = SAMPLE
+                        if (loopFit != loopBars) notes.add("T${t + 1}: the loop is $loopBars bars long; the app's FIT has 1, 2, 4 or 8 bars, " +
+                            "so lane ${t + 1} fits it to $loopFit bars: it plays ${if (loopFit > loopBars) "slower and lower" else "faster and higher"} than on the FM-1.")
                     } else if (song.hasLoop) notes.add("T${t + 1}: the loop could not be read. Lane ${t + 1} is left empty.")
                 }
             }
@@ -275,8 +287,9 @@ object VacuumPlan {
         for (t in 0 until 8) {
             val s = song.tracks[t]
             val ty = if (idx[t] < 0) EMPTY else want[t]
-            acts.add(LaneAct(t, ty, maxOf(0, idx[t]), s, if (ty == EMPTY) null else file[t], semis[t], s.kind == 3))
+            acts.add(LaneAct(t, ty, maxOf(0, idx[t]), s, if (ty == EMPTY) null else file[t], semis[t], s.kind == 3, if (s.kind == 3) loopFit else 1))
             if (ty == EMPTY) continue
+            if (s.kind == 3) continue      // (the loop's track: its own sound sleeps under the loop, its settings are not the loop's)
             // what does not come across, said per track
             val lost = ArrayList<String>()
             val v = s.set
@@ -309,6 +322,23 @@ object VacuumPlan {
 
     /** STACK's LEVEL (80 where it starts; the gain is its square) -> a Sampler track's volume (0.8 where it starts). */
     fun trackVolume(level: Int): Float = (level * level / 8000f).coerceIn(0f, 1f)
-    /** -> a Drum pad's volume (1 where it starts). */
-    fun padVolume(level: Int): Float = (level * level / 6400f).coerceIn(0f, 1f)
+    /** -> a Drum pad's volume. 3.59: 0.8 where it starts (was 1): with the Pads master (0.8) a pad then plays at
+     * LEVEL's own gain, 0.64 at 80, as on STACK (at 1 the drums were 2 dB over STACK's and over the other lanes). */
+    fun padVolume(level: Int): Float = (level * level / 8000f).coerceIn(0f, 1f)
+
+    /** The FITs (in bars) the app's Sampler tracks have (Track.fitBars, the SAMPLING page's FIT). */
+    val FITS = intArrayOf(1, 2, 4, 8)
+
+    /** 3.59: a loop of [samples] at [rate] -> its whole bars at the song's tempo and time signature (since 4.02-beta a
+     * loop is 1 or more whole bars long; PROTOCOL.md, LOOP INFO): rounded, 1 at least. */
+    fun loopBars(samples: Int, rate: Int, song: StackSong): Int {
+        if (samples <= 0 || rate <= 0) return 1
+        return Math.round(samples.toDouble() / rate / song.barSeconds).toInt().coerceAtLeast(1)
+    }
+
+    /** The FIT nearest to [bars] (nearest in tempo: 3 -> 4, 5 -> 4, 6 and on -> 8). */
+    fun fitOf(bars: Int): Int {
+        val b = bars.coerceAtLeast(1).toDouble()
+        return FITS.minByOrNull { Math.abs(ln(it / b)) } ?: 1
+    }
 }

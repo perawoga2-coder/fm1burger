@@ -30,6 +30,16 @@ class Engine {
         const val SYNTH_LIFT_GTR = 1.4f       // +3 dB
         const val BLOCK = 256
 
+        // 3.59: the master's limiter (as STACK's on its output): one gain for left and right, down at once to what keeps
+        // the peak at LIM_T, back up over ~60 ms once the level has fallen (~0.25 s). Under LIM_T nothing is touched,
+        // and LIM_T is where the soft clip starts, so the soft clip no longer bends a loud mix (that was heard as
+        // crackle: 8 lanes and the drum bus summed well over full scale). No look-ahead: no latency.
+        const val LIM_T = 0.8f
+        const val LIM_UP = 0.0004f
+        const val LIM_REL = 0.99991f
+        /** 3.59: the most the low / normal output buffer grows to, in bursts */
+        const val MAX_BURSTS = 16
+
         // 3.40 CUE: the sources that can go to the headphones (the index into Engine.cue)
         const val CUE_PAD = Cfg.TRACKS                 // sampler track i = i; drum pad k = CUE_PAD + k
         const val CUE_BASS = CUE_PAD + Cfg.PADS
@@ -131,6 +141,8 @@ class Engine {
     @Volatile var padVol = 0.8f
     @Volatile var curStep = -1
     @Volatile var masterPeak = 0f
+    private var limEnv = 0f              // (audio thread) the master limiter's level follower and its gain
+    private var limG = 1f
     @Volatile var startReq = false
     @Volatile var stopReq = false
     @Volatile var midiOut: ((ByteArray, Long) -> Unit)? = null
@@ -883,7 +895,8 @@ class Engine {
         val rate = if (mode < 2 && nativeRate in 8000..192000) nativeRate else Cfg.SR
         return try {
             val minBuf = AudioTrack.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_16BIT)
-            val bytes = if (mode == 2) max(minBuf, BLOCK * 2 * ch * 6) else max(minBuf, burst.coerceIn(64, 2048) * 2 * ch * 8)
+            // (3.59: room to grow to 16 bursts, was 8: the tuner below could not get past 8 when the sound broke up)
+            val bytes = if (mode == 2) max(minBuf, BLOCK * 2 * ch * 6) else max(minBuf, burst.coerceIn(64, 2048) * 2 * ch * MAX_BURSTS)
             val fmt = AudioFormat.Builder()
                 .setSampleRate(rate)
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -912,10 +925,12 @@ class Engine {
             if (d != null) t.setPreferredDevice(d)
             outCapacity = if (Build.VERSION.SDK_INT >= 24) t.bufferCapacityInFrames else t.bufferSizeInFrames
             if (Build.VERSION.SDK_INT >= 24 && mode < 2) {
-                // start small (2 bursts low, 4 normal; at least one engine block) and grow on glitches
+                // start small (2 bursts low; at least one engine block) and grow on glitches. 3.59: normal starts 4
+                // bursts over low (was 2): the audio thread is an ordinary thread, not a real-time one, and when the
+                // screen is dragged the UI and render threads take the CPU for a while: a few ms more of buffer ride it out
                 val bu = burst.coerceIn(64, 2048)
                 val low = max(bu * 2, BLOCK * rate / Cfg.SR + bu)
-                val want = if (mode == 0) low else low + bu * 2
+                val want = if (mode == 0) low else low + bu * 4
                 t.setBufferSizeInFrames(want.coerceAtMost(outCapacity))
                 lastUnderrun = t.underrunCount
             }
@@ -956,13 +971,15 @@ class Engine {
             }
             underruns += u - lastUnderrun
             lastUnderrun = u
-            // one glitch often comes as several underruns: grow at most once in 300 ms, and to 12 bursts at most
+            // one glitch often comes as several underruns: grow at most once in 300 ms, and to MAX_BURSTS at most
+            // (3.59: was 12, and the buffer could not hold more than 8); normal grows by two bursts a glitch
             if (now - lastGrowNs < 300_000_000L) return
             lastGrowNs = now
             val cur = t.bufferSizeInFrames
-            if (cur >= burst.coerceIn(64, 2048) * 12) return
+            val bu = burst.coerceIn(64, 2048)
+            if (cur >= bu * MAX_BURSTS) return
             if (cur < outCapacity) {
-                val got = t.setBufferSizeInFrames((cur + burst.coerceIn(64, 2048)).coerceAtMost(outCapacity))
+                val got = t.setBufferSizeInFrames((cur + bu * (if (latencyMode == 0) 1 else 2)).coerceAtMost(outCapacity))
                 if (got > 0) {
                     outFrames = got
                     latencyNs = got.toLong() * 1_000_000_000L / outRate
@@ -1304,6 +1321,12 @@ class Engine {
                     l += kv
                     r += kv
                 }
+                // 3.59: the master's limiter, on the whole mix at MASTER (the CUE outputs get the same gain)
+                val lpk = max(abs(l), abs(r)) * mv
+                limEnv = if (lpk > limEnv) lpk else limEnv * LIM_REL
+                val lw = if (limEnv > LIM_T) LIM_T / limEnv else 1f
+                limG = if (lw < limG) lw else limG + (lw - limG) * LIM_UP
+                val lg = limG
                 if (cq) {
                     // 3.40: main = the mix less the CUE sources; headphones = the CUE sources + CUE MIX x main.
                     // (l / r stay the whole mix: that is what every recording below gets)
@@ -1313,20 +1336,20 @@ class Engine {
                     val hr = cr + cmx * mr
                     if (split) {
                         // split cable: one side the main mix, the other the headphone mix, both mono
-                        val a = softClip((ml + mr) * 0.5f * mv)
-                        val b = softClip((hl + hr) * 0.5f * hv)
+                        val a = softClip((ml + mr) * 0.5f * mv * lg)
+                        val b = softClip((hl + hr) * 0.5f * hv * lg)
                         mainF[f2] = if (swap) b else a
                         mainF[f2 + 1] = if (swap) a else b
                     } else {
-                        mainF[f2] = softClip(ml * mv)
-                        mainF[f2 + 1] = softClip(mr * mv)
+                        mainF[f2] = softClip(ml * mv * lg)
+                        mainF[f2 + 1] = softClip(mr * mv * lg)
                     }
-                    hpF[f2] = softClip(hl * hv)
-                    hpF[f2 + 1] = softClip(hr * hv)
+                    hpF[f2] = softClip(hl * hv * lg)
+                    hpF[f2 + 1] = softClip(hr * hv * lg)
                 }
                 val preMono = (l + r) * 0.5f       // (3.19 RESAMPLE: caught before MASTER, at full level)
-                l = softClip(l * mv)
-                r = softClip(r * mv)
+                l = softClip(l * mv * lg)
+                r = softClip(r * mv * lg)
                 val al = abs(l)
                 if (al > mpk) mpk = al
                 val ar = abs(r)
