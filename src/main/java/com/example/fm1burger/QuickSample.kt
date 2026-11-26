@@ -202,10 +202,12 @@ class QuickSamplePanel(private val a: MainActivity) {
                     a.store.saveNew("Kit_hit_" + String.format(java.util.Locale.US, "%02d", hits.size), hits.last(), Cfg.SR)
                 } catch (ex: Exception) {
                 }
-                val len = a.sampleLink().uploadKit(s, "KIT", hits) { f ->
-                    a.runOnUiThread { status.text = "Sending the kit to $device USR${s + 1}: ${(f * 100).toInt()} %" }
+                val link = a.sampleLink()
+                val len = link.transfer {                  // 3.61: one transfer (an ERASE waits for none of it, it is refused)
+                    link.uploadKit(s, "KIT", hits) { f ->
+                        a.runOnUiThread { status.text = "Sending the kit to $device USR${s + 1}: ${(f * 100).toInt()} %" }
+                    }.also { if (!link.show(s, t, false)) link.prepareTrack(t, "SAMPLE", s) }
                 }
-                if (!a.sampleLink().show(s, t, false)) a.sampleLink().prepareTrack(t, "SAMPLE", s)
                 "Kit ready ($len): $device track ${t + 1}, keys C4 … " + PianoRollView.noteName(59 + hits.size) +
                     ". REC again: the next key."
             } catch (ex: Exception) {
@@ -242,10 +244,12 @@ class QuickSamplePanel(private val a: MainActivity) {
                     a.store.saveNew(name, d, Cfg.SR)
                 } catch (ex: Exception) {
                 }
-                val len = a.sampleLink().upload(s, name, d) { f ->
-                    a.runOnUiThread { status.text = "Sending to $device USR${s + 1}: ${(f * 100).toInt()} %" }
+                val link = a.sampleLink()
+                val len = link.transfer {                  // 3.61: one transfer (an ERASE waits for none of it, it is refused)
+                    link.upload(s, name, d) { f ->
+                        a.runOnUiThread { status.text = "Sending to $device USR${s + 1}: ${(f * 100).toInt()} %" }
+                    }.also { if (!link.show(s, t, eng == "SLICE")) link.prepareTrack(t, eng, s) }
                 }
-                if (!a.sampleLink().show(s, t, eng == "SLICE")) a.sampleLink().prepareTrack(t, eng, s)
                 "Ready ($len): $device track ${t + 1} plays USR${s + 1} with $eng." +
                     (if (eng == "SLICE") " Trim it there: EDIT → SLICES." else "") + " REC again for the next one."
             } catch (ex: Exception) {

@@ -37,6 +37,9 @@ class Engine {
         const val LIM_T = 0.8f
         const val LIM_UP = 0.0004f
         const val LIM_REL = 0.99991f
+        /** 3.61: the most the limiter's follower takes in (+50 dB over LIM_T: no mix gets there; a wild sample is let
+         * go of in about 1.5 s, an Inf or NaN is not followed at all). */
+        const val LIM_MAX = 256f
         /** 3.59: the most the low / normal output buffer grows to, in bursts */
         const val MAX_BURSTS = 16
 
@@ -143,6 +146,9 @@ class Engine {
     @Volatile var masterPeak = 0f
     private var limEnv = 0f              // (audio thread) the master limiter's level follower and its gain
     private var limG = 1f
+    /** 3.61: the limiter's state goes back to rest at the next block (RESTART AUDIO, an output opened again). */
+    @Volatile private var limReset = false
+    fun resetLimiter() { limReset = true }
     @Volatile var startReq = false
     @Volatile var stopReq = false
     @Volatile var midiOut: ((ByteArray, Long) -> Unit)? = null
@@ -1004,11 +1010,13 @@ class Engine {
         val quadOut = ShortArray(rsOut.size * 2)        // 4 channels, interleaved
         val hpRs = FloatArray(rsOut.size)               // the second output, resampled
         var hpCur: AudioTrack? = null
+        limReset = true                                  // 3.61: (the engine started again: the limiter at rest)
         var at = makeOut()
         mainTrack = at
         while (running) {
             if (restartOut) {
                 restartOut = false
+                limReset = true                          // 3.61: a new output starts with the limiter at rest
                 try {
                     at?.stop()
                     at?.release()
@@ -1131,6 +1139,11 @@ class Engine {
 
     /** Mixes one block of audio into out. Runs on the audio thread. */
     private fun renderBlock(t0: Long, out: ShortArray, tl: FloatArray, tr: FloatArray, tpk: FloatArray) {
+            if (limReset || !limEnv.isFinite() || !limG.isFinite()) {   // 3.61: (a non-finite state never stays)
+                limReset = false
+                limEnv = 0f
+                limG = 1f
+            }
             handleRequests(t0)
             drainKeys()
             renderKeys()
@@ -1322,7 +1335,10 @@ class Engine {
                     r += kv
                 }
                 // 3.59: the master's limiter, on the whole mix at MASTER (the CUE outputs get the same gain)
-                val lpk = max(abs(l), abs(r)) * mv
+                // 3.61: a non-finite sample (an unstable filter, say) is not followed, and the follower sees at most
+                // LIM_MAX: an Inf here held the gain at 0, the master silent until the app was started again
+                val lpk0 = max(abs(l), abs(r)) * mv
+                val lpk = if (lpk0.isFinite()) kotlin.math.min(lpk0, LIM_MAX) else 0f
                 limEnv = if (lpk > limEnv) lpk else limEnv * LIM_REL
                 val lw = if (limEnv > LIM_T) LIM_T / limEnv else 1f
                 limG = if (lw < limG) lw else limG + (lw - limG) * LIM_UP

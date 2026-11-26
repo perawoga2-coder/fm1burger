@@ -196,6 +196,7 @@ class AudioBox(private val a: MainActivity) {
 
     /** RESTART AUDIO: the output opened again on the system's own choice (the Mixer's Output goes back to Default). */
     fun restartAudio() {
+        a.engine.resetLimiter()                          // 3.61: (a limiter held down by a bad sample comes back up)
         if (sound == BOTH35) {
             force35(true)
         } else {

@@ -1001,7 +1001,7 @@ class MainActivity : Activity() {
                 // 3.60: an old sample (one of the old firmware's, say) can be taken out of a slot
                 lbox.addView(ui.button("Erase a slot…") {
                     dlg?.dismiss()
-                    eraseFm1Slots()
+                    eraseFm1Slots { sendToFm1(name, data) }        // 3.61: then back here, the slots asked for again
                 }, ui.fullWidth(12))
                 dlg = AlertDialog.Builder(this)
                     .setTitle("Send $name to ${hub.slotDevice ?: "the device"}")
@@ -1015,8 +1015,9 @@ class MainActivity : Activity() {
     /**
      * 3.60: ERASE a slot of the FM-1 (USR1..USR3; STACK's MY 1..3): the slots as the FM-1 lists them (INFO), an Erase
      * button by each one with a sample, a confirmation naming the slot and its sample, then the list again.
+     * 3.61: [then] runs when the list is closed (the Send dialog opens again).
      */
-    fun eraseFm1Slots() {
+    fun eraseFm1Slots(then: (() -> Unit)? = null) {
         if (!midi.connected) {
             AlertDialog.Builder(this)
                 .setTitle("Erase a slot")
@@ -1027,11 +1028,13 @@ class MainActivity : Activity() {
         }
         if (fm1Link.busy) {
             ui.toast("The FM-1 is busy with a transfer. Wait for it to end, then erase.")
+            then?.invoke()
             return
         }
         ui.toast("Asking ${hub.slotDevice ?: midi.deviceName}…")
         Thread {
             val slots = try { fm1Link.info() } catch (ex: Exception) { null }
+            if (slots != null && fm1Link.firmware == null) fm1Link.hello()   // 3.61: (which firmware: what ERASE does there)
             val names = fm1Link.slotNames
             val owner = fm1Link.slotOwner
             runOnUiThread {
@@ -1039,13 +1042,16 @@ class MainActivity : Activity() {
                     AlertDialog.Builder(this)
                         .setTitle("Erase a slot")
                         .setMessage("The FM-1 does not answer. Is it running STACK or the Burger Studio firmware, connected with the USB cable?")
-                        .setPositiveButton("OK", null)
+                        .setPositiveButton("OK") { _, _ -> then?.invoke() }
+                        .setOnCancelListener { then?.invoke() }
                         .show()
                     return@runOnUiThread
                 }
                 val box = ui.col()
                 box.setPadding(ui.dp(20), ui.dp(6), ui.dp(20), 0)
                 box.addView(ui.text("What the slots of ${hub.slotDevice ?: "the FM-1"} hold (on STACK: MY 1, MY 2, MY 3):", 13f, Theme.DIM), ui.fullWidth(6))
+                if (names.none { it != null })                    // 3.61
+                    box.addView(ui.text("Nothing to erase: all slots are empty.", 14f, Theme.TEXT), ui.fullWidth(6))
                 var dlg: AlertDialog? = null
                 for (k in 0 until Fm1SampleLink.SLOTS) {
                     val row = ui.row()
@@ -1057,7 +1063,7 @@ class MainActivity : Activity() {
                         val joined = (k + 1 until Fm1SampleLink.SLOTS).filter { owner.getOrNull(it) == k }
                         row.addView(ui.button("Erase") {
                             dlg?.dismiss()
-                            confirmEraseFm1(k, nm, joined)
+                            confirmEraseFm1(k, nm, joined, then)
                         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, ui.dp(40)))
                     }
                     box.addView(row, ui.fullWidth(6))
@@ -1065,26 +1071,36 @@ class MainActivity : Activity() {
                 dlg = AlertDialog.Builder(this)
                     .setTitle("Erase a slot")
                     .setView(android.widget.ScrollView(this).also { it.addView(box) })
-                    .setNegativeButton("Close", null)
+                    .setNegativeButton("Close") { _, _ -> then?.invoke() }
+                    .setOnCancelListener { then?.invoke() }
                     .show()
             }
         }.start()
     }
 
-    private fun confirmEraseFm1(slot: Int, name: String, joined: List<Int>) {
+    private fun confirmEraseFm1(slot: Int, name: String, joined: List<Int>, then: (() -> Unit)?) {
+        // 3.61: the Burger Studio firmware stops the FM-1's song for an ERASE (STACK plays on)
+        val stops = when (fm1Link.firmware) {
+            "STACK" -> ""
+            "BURGER" -> "\n\nThe FM-1's song stops while it erases (the Burger Studio firmware)."
+            else -> "\n\nThe FM-1 may stop playing while it erases."
+        }
         val msg = "Erase USR${slot + 1} \"$name\" on the FM-1? This cannot be undone." +
-            if (joined.isEmpty()) "" else "\n\nThe sample runs on over " + joined.joinToString(" and ") { "USR${it + 1}" } + ": those are freed too."
+            (if (joined.isEmpty()) "" else "\n\nThe sample runs on over " + joined.joinToString(" and ") { "USR${it + 1}" } + ": those are freed too.") +
+            stops
         AlertDialog.Builder(this)
             .setTitle("Erase USR${slot + 1}?")
             .setMessage(msg)
-            .setPositiveButton("Erase") { _, _ -> eraseFm1(slot, name) }
-            .setNegativeButton("Cancel") { _, _ -> eraseFm1Slots() }
+            .setPositiveButton("Erase") { _, _ -> eraseFm1(slot, name, then) }
+            .setNegativeButton("Cancel") { _, _ -> eraseFm1Slots(then) }
+            .setOnCancelListener { eraseFm1Slots(then) }
             .show()
     }
 
-    private fun eraseFm1(slot: Int, name: String) {
+    private fun eraseFm1(slot: Int, name: String, then: (() -> Unit)?) {
         if (fm1Link.busy) {
             ui.toast("The FM-1 is busy with a transfer. Wait for it to end, then erase.")
+            eraseFm1Slots(then)
             return
         }
         val box = ui.col()
@@ -1092,11 +1108,15 @@ class MainActivity : Activity() {
         box.addView(ui.text("Erasing USR${slot + 1}. Keep the cable in.", 13f, Theme.DIM))
         val dlg = AlertDialog.Builder(this).setTitle("Erase a slot").setView(box).setCancelable(false).show()
         Thread {
+            var sent = true
             val err = try {
                 fm1Link.erase(slot)
                 null
+            } catch (ex: Fm1SampleLink.Busy) {
+                sent = false                                  // (nothing went to the FM-1)
+                ex.message
             } catch (ex: Fm1SampleLink.EraseUnsupported) {
-                "The FM-1 did not answer ERASE: not supported by this firmware (or the cable is out). Nothing was erased that the app knows of."
+                "The FM-1 did not answer ERASE in ${Fm1SampleLink.ERASE_MS / 1000} s: its firmware may not have ERASE, or the cable is out."
             } catch (ex: Exception) {
                 ex.message ?: "Erasing failed."
             }
@@ -1104,12 +1124,15 @@ class MainActivity : Activity() {
                 try { dlg.dismiss() } catch (e: Exception) {}
                 if (err == null) {
                     ui.toast("USR${slot + 1}${if (name.isNotEmpty()) " \"$name\"" else ""} is erased")
-                    eraseFm1Slots()                               // the list again, as the FM-1 has it now
+                    eraseFm1Slots(then)                           // the list again, as the FM-1 has it now
                 } else {
+                    // 3.61: the slot may be erased all the same (an answer lost or late): the list can be asked for again
                     AlertDialog.Builder(this)
                         .setTitle("Erasing failed")
-                        .setMessage(err)
-                        .setPositiveButton("OK", null)
+                        .setMessage(if (!sent) err else "$err\n\nThe slot may have been erased all the same: Check again shows the slots as the FM-1 has them now.")
+                        .setPositiveButton("Check again") { _, _ -> eraseFm1Slots(then) }
+                        .setNegativeButton("OK") { _, _ -> then?.invoke() }
+                        .setOnCancelListener { then?.invoke() }
                         .show()
                 }
             }

@@ -2,6 +2,7 @@ package com.example.fm1burger
 
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 import java.util.zip.CRC32
 import kotlin.math.abs
 import kotlin.math.max
@@ -22,6 +23,8 @@ class Fm1SampleLink(private val midi: MidiLink) {
         private val HDR = byteArrayOf(0x7D, 0x46, 0x4C)
         const val SLOT_RATE = 22050
         const val SLOTS = 3
+        /** 3.61: how long ERASE is waited for: the Burger Studio firmware's whole-slot erase takes up to ~8 s. */
+        const val ERASE_MS = 15000L
         private const val DATA_OFF = 512
         private const val ZONES = 16
         private const val HDR_LEN = 32 + ZONES * 28
@@ -237,9 +240,20 @@ class Fm1SampleLink(private val midi: MidiLink) {
 
     private val replies = ArrayBlockingQueue<ByteArray>(64)
 
-    /** 3.60: a send (BEGIN / WRITE / END), a VACUUM read or an ERASE is running: ERASE waits for none of them, it is refused. */
+    /** 3.60: a send (BEGIN / WRITE / END), a VACUUM read or an ERASE is running (or waits to): ERASE waits for none of
+     * them, it is refused. */
     private val inUse = java.util.concurrent.atomic.AtomicInteger(0)
     val busy: Boolean get() = inUse.get() > 0
+
+    /** 3.61: one request and its answer at a time (every message that is answered goes through req): they all share
+     * one queue of answers, and a second request cleared it, or took the first one's answer, while the first waited. */
+    private val xLock = ReentrantLock(true)
+    /** 3.61: one transfer at a time (a send, a VACUUM read, an ERASE): a send waits for an ERASE to end, an ERASE is
+     * refused while a transfer runs. Held across a transfer's requests; nothing calls back into the UI and waits. */
+    private val tLock = ReentrantLock(true)
+
+    /** 3.61: what answered HELLO (command 114): "STACK", "BURGER" (the Burger Studio firmware), or null (not known). */
+    @Volatile var firmware: String? = null
 
     /** 3.60: what the last SMP_INFO said of each slot: its sample's name (null: empty or part of another's sample) and
      * the slot whose sample runs over it (-1: none). */
@@ -363,20 +377,35 @@ class Fm1SampleLink(private val midi: MidiLink) {
 
     /** Firmware bs5 and later: link the app (REC on the device's SLICES page then asks the app for a take). */
     fun hello(): Boolean = try {
-        req(114, ByteArray(0), 1200).isNotEmpty()
+        val r = req(114, ByteArray(0), 1200)
+        // 3.61: STACK answers "STACK <version>", the Burger Studio firmware "BURGER <version>" (then 0, capabilities)
+        val txt = String(r, 0, r.indexOfFirst { it.toInt() == 0 }.let { if (it < 0) r.size else it }, Charsets.US_ASCII).trim()
+        firmware = when {
+            txt.startsWith("STACK", true) -> "STACK"
+            txt.startsWith("BURGER", true) -> "BURGER"
+            else -> null
+        }
+        r.isNotEmpty()
     } catch (ex: IllegalStateException) {
+        firmware = null
         false
     }
 
     private fun req(cmd: Int, args: ByteArray, timeoutMs: Long = 3000): ByteArray {
-        replies.clear()
-        midi.sendSysex(message(cmd, args))
-        val end = System.currentTimeMillis() + timeoutMs
-        while (true) {
-            val left = end - System.currentTimeMillis()
-            if (left <= 0) throw IllegalStateException("no answer from the FM-1 (command $cmd)")
-            val r = replies.poll(left, TimeUnit.MILLISECONDS) ?: continue
-            if (r[3].toInt() == cmd) return r.copyOfRange(4, r.size)
+        // 3.61: one exchange at a time (the lock is held only for the request and its wait, never around a callback)
+        xLock.lock()
+        try {
+            replies.clear()
+            midi.sendSysex(message(cmd, args))
+            val end = System.currentTimeMillis() + timeoutMs
+            while (true) {
+                val left = end - System.currentTimeMillis()
+                if (left <= 0) throw IllegalStateException("no answer from the FM-1 (command $cmd)")
+                val r = replies.poll(left, TimeUnit.MILLISECONDS) ?: continue
+                if (r[3].toInt() == cmd) return r.copyOfRange(4, r.size)
+            }
+        } finally {
+            xLock.unlock()
         }
     }
 
@@ -460,41 +489,64 @@ class Fm1SampleLink(private val midi: MidiLink) {
         return String.format(java.util.Locale.US, "%d hits, %.1f s", list.size, total / SLOT_RATE.toDouble())
     }
 
+    /** 3.61: [f] as one transfer: it waits for an ERASE that runs to end, and an ERASE is refused while it runs.
+     * (A send that goes on with SHOW / the track set-up, as Quick sample's, runs it all in one.) */
+    fun <T> transfer(f: () -> T): T = using(f)
+
     private fun <T> using(f: () -> T): T {
         inUse.incrementAndGet()
         try {
-            return f()
+            if (!tLock.tryLock(ERASE_MS + 5000, TimeUnit.MILLISECONDS))
+                throw IllegalStateException("The FM-1 is busy erasing a slot. Wait for it to end, then try again.")
+            try {
+                return f()
+            } finally {
+                tLock.unlock()
+            }
         } finally {
             inUse.decrementAndGet()
         }
     }
 
-    /** 3.60: the firmware does not answer ERASE (or the FM-1 is gone): nothing was erased that the app knows of. */
+    /** 3.60: the firmware does not answer ERASE (or the FM-1 is gone). 3.61: the slot may be erased all the same
+     * (the answer can be lost, or come too late): ask for the slots again to see. */
     class EraseUnsupported : Exception("not supported by this firmware")
+    /** 3.61: ERASE was not sent: a transfer runs. */
+    class Busy : IllegalStateException("The FM-1 is busy with a transfer. Wait for it to end, then erase.")
 
     /**
      * 3.60: ERASE (command 14): F0 7D 46 4C 0E slot F7, answered slot, rc (0: the slot is empty now). STACK: MY 1..3;
      * when another slot's sample runs over this one, that sample goes too. Burger Studio bs19 (Felucca's SMP_ERASE):
-     * the whole slot, about 1 s. Refused while a send or a VACUUM runs. Runs on a worker thread.
+     * the whole slot, about 1 s (up to ~8 s; it stops the FM-1's song first). Refused while a send or a VACUUM runs.
+     * Runs on a worker thread. 3.61: the rc as each firmware means it: STACK 1 a bad request, 2 a flash error;
+     * Burger Studio 1 the song could not be stopped or the flash failed.
      */
     fun erase(slot: Int) {
         if (slot !in 0 until SLOTS) throw IllegalArgumentException("No slot USR${slot + 1}")
-        if (!inUse.compareAndSet(0, 1)) throw IllegalStateException("The FM-1 is busy with a transfer. Wait for it to end, then erase.")
+        if (inUse.get() > 0 || !tLock.tryLock()) throw Busy()
+        inUse.incrementAndGet()
         try {
             val r = try {
-                req(14, byteArrayOf(slot.toByte()), 8000)
+                req(14, byteArrayOf(slot.toByte()), ERASE_MS)
             } catch (ex: IllegalStateException) {
                 throw EraseUnsupported()
             }
             if (r.size < 2 || r[0].toInt() != slot) throw IllegalStateException("The FM-1's answer to ERASE was not understood.")
+            val u = "USR${slot + 1}"
             when (val rc = r[1].toInt()) {
                 0 -> {}
-                1 -> throw IllegalStateException("The FM-1 refused to erase USR${slot + 1} (stop it playing, then try again).")
-                2 -> throw IllegalStateException("The FM-1 could not erase its flash (USR${slot + 1}).")
-                else -> throw IllegalStateException("The FM-1 could not erase USR${slot + 1} ($rc).")
+                1 -> throw IllegalStateException(when (firmware) {
+                    "STACK" -> "STACK did not take the request to erase $u (a bad request)."
+                    "BURGER" -> "The FM-1 could not erase $u: it could not stop playing, or its flash failed."
+                    else -> "The FM-1 could not erase $u (answer 1: the request was refused, the song could not be stopped, or the flash failed)."
+                })
+                2 -> throw IllegalStateException(
+                    if (firmware == "BURGER") "The FM-1 could not erase $u (answer 2)." else "The FM-1 could not erase its flash ($u).")
+                else -> throw IllegalStateException("The FM-1 could not erase $u (answer $rc).")
             }
         } finally {
             inUse.decrementAndGet()
+            tLock.unlock()
         }
     }
 
