@@ -204,6 +204,21 @@ fun main(args: Array<String>) {
     check(e5.pads[k5].name == "Other.wav" && notes5.any { it.startsWith("T1") && it.contains("keeps its sound") }, "SPLIT bar 2: lane 1 keeps the user's sound, and it is said")
     val loop5 = e5.tracks[lanes5.idx[7]]
     check(loop5.sampleName == "FM-1 Loop.wav" && loop5.loop && notes5.any { it.startsWith("T8") && it.contains("keeps its loop") }, "SPLIT bar 2: the loop lane keeps its loop, and it is said")
+    // --- 3.62: patterns up to 8 bars (128 steps); SPLIT can fill bar 8
+    check(Cfg.STEPS == 128 && Pat.MAX_BARS == 8, "3.62: room for 8 bars (${Cfg.STEPS} steps, ${Pat.MAX_BARS} bar buttons)")
+    val m0 = Pat.meter
+    Pat.meter = 0
+    check(Pat.lengths().toList() == listOf(16, 32, 64, 128), "3.62: 4/4 offers 1, 2, 4 and 8 bars: ${Pat.lengths().toList()}")
+    Pat.meter = Pat.METERS.indexOf("5/4")
+    check(Pat.lengths().toList() == listOf(32, 64, 128), "3.62: 5/4 (a 32-step slot) offers 1, 2 and 4 bars: ${Pat.lengths().toList()}")
+    Pat.meter = 0
+    Pat.len = 128
+    check(Pat.bars() == 8 && Pat.playLen() == 128 && Pat.stepAt(127) == 127 && Pat.stepAt(128) == 0 && Pat.nextStep(127) == 0,
+        "3.62: an 8-bar pattern plays steps 1-128, then bar 1 again")
+    VacuumApply.put(e5, lanes5, song2, plan5, files5, ArrayList(), 7)
+    check((112 until 128).map { e5.pads[k5].on[it] } == (0 until 16).map { it % 4 == 1 }, "3.62 SPLIT bar 8: the kick's steps are in bar 8 (steps 113-128)")
+    check(e5.pads[k5].on.copyOf(16).contentEquals(bar1Kick) && (64 until 112).none { e5.pads[k5].on[it] }, "3.62 SPLIT bar 8: bar 1 kept, bars 5-7 untouched")
+    Pat.meter = m0
     // --- 3.59: a loop of 1..N whole bars (STACK 4.02-beta and on): its FIT is as many bars (the nearest the app has)
     // 110 BPM, 16 steps: a bar is 16 x 15 / 110 = 2.1818 s; at 22 050 Hz, 48 109 samples
     val barS = 16 * 15.0 / 110 * 22050

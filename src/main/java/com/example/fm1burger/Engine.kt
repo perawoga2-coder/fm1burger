@@ -1624,7 +1624,7 @@ class Engine {
         }
         if (tickCount % 6L == 0L) {
             // b = step inside the bar (parts, cues and songs work in bars),
-            // s = step inside the pattern, which can be 1, 2 or 4 bars long
+            // s = step inside the pattern, which can be 1, 2, 4 or 8 bars long
             // (3.28: the meter's bar. The meter changed while playing: bar and pattern start again together)
             val m = Pat.meter
             if (tickCount == 0L || m != seenMeter) {

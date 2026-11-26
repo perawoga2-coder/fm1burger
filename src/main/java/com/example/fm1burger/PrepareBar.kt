@@ -59,7 +59,7 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
         meterBtn = ui.button("4/4") { a.meterDialog() }
         meterBtn.textSize = 12f
         pr.addView(meterBtn, ui.w(0.9f, 2))
-        for (k in 0 until 4) {
+        for (k in 0 until Pat.MAX_BARS) {
             val b = ui.button("${k + 1}") {
                 Pat.view = k
                 Pat.follow = false
@@ -67,7 +67,7 @@ class PrepareBar(private val a: MainActivity, withTransport: Boolean, private va
             }
             b.textSize = 12f
             barBtns.add(b)
-            pr.addView(b, ui.w(0.7f, 2))
+            pr.addView(b, ui.w(0.45f, 2))
         }
         followBtn = ui.button("Follow") {
             Pat.follow = !Pat.follow

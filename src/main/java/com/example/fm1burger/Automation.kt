@@ -17,7 +17,7 @@ import org.json.JSONObject
 class AutoTarget(val key: String, val name: String, val get: () -> Float, val set: (Float) -> Unit)
 
 /**
- * Knob automation: every knob below has a lane of up to 64 steps (the pattern length).
+ * Knob automation: every knob below has a lane of up to 128 steps (the pattern length).
  * A step with a value moves the knob there (with a short glide), a step without one keeps it.
  * A lane with no values at all leaves the knob alone, so the knob works by hand as before.
  */

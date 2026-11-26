@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Step sequencer for the analog synth (1, 2 or 4 bars). Polyphonic: any number of notes can start on a
+ * Step sequencer for the analog synth (1, 2, 4 or 8 bars). Polyphonic: any number of notes can start on a
  * step, each with its own length (1 to 16 steps). The chord type is added on top of every note.
  * It is triggered by the engine step clock, so it stays in sync with the drums and the bassline.
  */

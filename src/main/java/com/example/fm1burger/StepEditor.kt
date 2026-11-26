@@ -87,7 +87,7 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         }
         br.addView(meterBtn, ui.w(0.9f, 3))
         br.addView(ui.text("BAR", 12f, Theme.DIM), ui.w(0f, 6))
-        for (b in 0 until 4) {
+        for (b in 0 until Pat.MAX_BARS) {
             val bb = ui.button("${b + 1}") {
                 if (b >= Pat.bars()) ui.toast("The pattern is ${Pat.bars()} bar. Set its length on the Steps page.")
                 else { Pat.follow = false; Pat.view = b; paint() }

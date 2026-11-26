@@ -3,8 +3,8 @@ package com.example.fm1burger
 object Cfg {
     const val SR = 44100
     const val TRACKS = 5      // 3.19: five sampler tracks (SAMPLING page)
-    /** Room for the longest pattern (4 bars of 16th notes). The pattern plays [Pat.len] of them. */
-    const val STEPS = 64
+    /** Room for the longest pattern (8 bars of 16th notes, since 3.62; 4 before). The pattern plays [Pat.len] of them. */
+    const val STEPS = 128
     /** Drum pads: 2 banks (A, B) of 16. */
     const val PADS = 32
     const val PAD_BANK = 16
@@ -16,11 +16,13 @@ object Cfg {
 
 /**
  * Pattern length and the bar the step editors show. One length for every sequencer, so all
- * parts stay in step: 1, 2 or 4 bars (16 / 32 / 64 steps). Editors show one bar (16 steps) at a time.
+ * parts stay in step: 1, 2, 4 or 8 bars (16 / 32 / 64 / 128 steps). Editors show one bar (16 steps) at a time.
  */
 object Pat {
     const val BAR = 16
-    val LENGTHS = intArrayOf(16, 32, 64)
+    val LENGTHS = intArrayOf(16, 32, 64, 128)
+    /** the most bars a pattern can have (the bar buttons) */
+    const val MAX_BARS = Cfg.STEPS / BAR
     @Volatile var len = 16
     /** The bar shown in the step editors (0 based). */
     @Volatile var view = 0
@@ -47,8 +49,8 @@ object Pat {
     fun accent(i: Int): Boolean = i in ACC[meter.coerceIn(0, ACC.size - 1)]
     /** which beat step i of the bar is in (0, 1, 2 ...: the editors shade every other beat) */
     fun beatOf(i: Int): Int = ACC[meter.coerceIn(0, ACC.size - 1)].count { it <= i } - 1
-    /** the pattern lengths this meter allows (in stored steps): 1, 2, 4 bars that fit the 64 steps */
-    fun lengths(): IntArray = intArrayOf(1, 2, 4).map { it * slot() }.filter { it <= Cfg.STEPS }.toIntArray()
+    /** the pattern lengths this meter allows (in stored steps): 1, 2, 4, 8 bars that fit the 128 steps (5/4 and 12/8: 4) */
+    fun lengths(): IntArray = intArrayOf(1, 2, 4, 8).map { it * slot() }.filter { it <= Cfg.STEPS }.toIntArray()
     /** the steps the pattern plays */
     fun playLen(): Int {
         // (meter and len are read once: another thread may change them meanwhile)
@@ -76,7 +78,7 @@ object Pat {
     /**
      * The bar slot changes from [oldSlot] to [newSlot] steps: calls [mv] (from, to) for every step of bars 2.. that
      * moves (bar b: b * oldSlot -> b * newSlot, the steps both slots hold), in an order that overwrites nothing still
-     * to be moved (growing: the last bar first; shrinking: the first). Only bars that fit the 64 steps both ways.
+     * to be moved (growing: the last bar first; shrinking: the first). Only bars that fit the 128 steps both ways.
      */
     fun moveBars(oldSlot: Int, newSlot: Int, bars: Int, mv: (Int, Int) -> Unit) {
         if (oldSlot == newSlot || oldSlot <= 0 || newSlot <= 0) return

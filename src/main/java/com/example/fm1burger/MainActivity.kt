@@ -1174,7 +1174,7 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    /** Pattern length for every sequencer: 1, 2 or 4 bars. A longer pattern starts as copies of the bars it has. */
+    /** Pattern length for every sequencer: 1, 2, 4 or 8 bars. A longer pattern starts as copies of the bars it has. */
     fun patternLengthDialog() {
         val ls = Pat.lengths()
         val items = Array(ls.size) { val b = ls[it] / Pat.slot(); "$b bar${if (b > 1) "s" else ""} (${b * Pat.spb()} steps, ${Pat.METERS[Pat.meter]})" }
