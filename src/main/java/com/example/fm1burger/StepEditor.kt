@@ -327,7 +327,7 @@ class StepEditor(private val a: MainActivity, private val lane: Int) {
         val cur = if (e.playing) e.curStep else -1
         if (picked >= Pat.spb()) picked = 0
         for (i in 0 until Pat.spb()) paintKey(i, base, cur)
-        for (b in 0 until 4) {
+        for (b in barBtns.indices) {                        // (3.63: all 8; 3.62 left buttons 5-8 always shown)
             barBtns[b].visibility = if (b < Pat.bars()) android.view.View.VISIBLE else android.view.View.INVISIBLE
             ui.styleButton(barBtns[b], b == Pat.viewBar(), color)
         }
