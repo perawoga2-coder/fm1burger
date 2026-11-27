@@ -23,7 +23,7 @@ class StackTrack(
     val name: String,
     val catName: String,
     val set: IntArray,          // the 25 settings, signed where they are (PROTOCOL.md's order)
-    val on: BooleanArray,
+    val on: BooleanArray,       // 3.64: 64, page p's step i at p * 16 + i (STACK 4.16-beta and on: up to 4 pages)
     val note: IntArray
 ) {
     companion object {
@@ -40,8 +40,12 @@ class StackTrack(
 
 class StackSong(
     val bpm: Int, val sig: Int, val steps: Int, val swing: Int, val layers: Int,
-    val hasLoop: Boolean, val version: String, val tracks: List<StackTrack>
+    val hasLoop: Boolean, val version: String, val tracks: List<StackTrack>,
+    val pages: Int = 1,         // 3.64: the pattern's pages, a page a bar (STACK 4.16-beta's LENGTH; 1 before)
+    val mode: Int = 0           // STACK's PLAY MODE: 0 CHAIN (page after page), 1 PAGE (one page, over and over)
 ) {
+    /** 3.64: the page Burger's bar b gets: the pages one after another, round again (one page: every bar) */
+    fun pageOf(b: Int): Int = b % pages.coerceAtLeast(1)
     /** 3.59: the track that holds the loop (the one of kind 3, LOOP): 7 (T8) up to 4.03-beta; since 4.04-beta it moves
      * between T8 and T7 with every layer (the head's flag bit 3 says the same). -1: none. */
     val loopTrack: Int get() = tracks.indexOfFirst { it.kind == 3 }
@@ -75,6 +79,10 @@ object StackDump {
         crc.update(b, 16, len - 16)
         if (crc.value != u32(b, 10)) return null
         val tr = ArrayList<StackTrack>()
+        // 3.64: STACK 4.16-beta's record is 192 bytes a track: pages 2 to 4 after the first 96 (steps 16, notes 16
+        // each); the head's byte 14 the pages that play (0 before: one), 15 PLAY MODE
+        val pages = if (ts >= 192) (b[14].toInt() and 0xFF).coerceIn(1, 4) else 1
+        fun stepAt(o: Int, i: Int): Int = if (i < 16) o + 56 + i else o + 96 + (i / 16 - 1) * 32 + i % 16
         for (t in 0 until nt) {
             val o = 32 + t * ts
             val f = b[o + 3].toInt()
@@ -82,12 +90,14 @@ object StackDump {
                 b[o].toInt() and 0xFF, b[o + 1].toInt() and 0xFF, b[o + 2].toInt() and 0xFF, f and 1 != 0, u32(b, o + 8),
                 text(b, o + 12, 16), text(b, o + 88, 8),
                 IntArray(25) { StackTrack.signed(it, b[o + 28 + it].toInt() and 0xFF) },
-                BooleanArray(16) { b[o + 56 + it].toInt() != 0 }, IntArray(16) { b[o + 72 + it].toInt() and 0x7F }
+                BooleanArray(64) { it / 16 < pages && b[stepAt(o, it)].toInt() != 0 },
+                IntArray(64) { if (it / 16 < pages) b[stepAt(o, it) + 16].toInt() and 0x7F else 60 }
             ))
         }
         return StackSong(
             b[16].toInt() and 0xFF, b[17].toInt() and 0xFF, (b[18].toInt() and 0xFF).coerceIn(1, 16), b[19].toInt() and 0xFF,
-            b[21].toInt() and 0xFF, b[7].toInt() and 1 != 0, text(b, 22, 10), tr
+            b[21].toInt() and 0xFF, b[7].toInt() and 1 != 0, text(b, 22, 10), tr,
+            pages, if (ts >= 192 && b[15].toInt() == 1) 1 else 0
         )
     }
 

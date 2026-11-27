@@ -82,7 +82,7 @@ fun main(args: Array<String>) {
     check((8 until LaneSetup.N).map { lanes.type[it] to lanes.idx[it] } == before, "lanes 9 and on are as they were")
     check(e.pads[keepPad].name == "Mine.wav" && e.pads[keepPad].on[3], "a pad a later lane shows was not taken")
     val kick = e.pads[lanes.idx[0]]
-    check(kick.name == "Rock Kick.wav" && (0 until 16).map { kick.on[it] } == song.tracks[0].on.toList(), "the kick: the app's Rock Kick, its steps")
+    check(kick.name == "Rock Kick.wav" && (0 until 16).map { kick.on[it] } == song.tracks[0].on.take(16), "the kick: the app's Rock Kick, its steps")
     val bass = e.tracks[lanes.idx[3]]
     check(bass.sampleName == "Sub Bass C3.wav", "the bass: the app's Sub Bass C3")
     check(bass.pitch == 2 + 12, "its pitch: PITCH 2 and the octave that makes STACK's middle C the sample's C3 (${bass.pitch})")
@@ -169,7 +169,7 @@ fun main(args: Array<String>) {
     check(e4.bank.songLen == 0 && !e4.bank.songOn && e4.bank.parts.all { q -> !q.used && q.pOn.all { r -> r.none { it } } },
         "CLEAR EVERYTHING: the song list is empty, Q1-Q6 hold no pattern")
     val kick4 = e4.pads[lanes4.idx[0]]
-    check(lanes4.type[0] == Inst.DRUM && kick4.name == "Rock Kick.wav" && (0 until 16).map { kick4.on[it] } == song.tracks[0].on.toList(),
+    check(lanes4.type[0] == Inst.DRUM && kick4.name == "Rock Kick.wav" && (0 until 16).map { kick4.on[it] } == song.tracks[0].on.take(16),
         "CLEAR EVERYTHING: then the FM-1's song is on lanes 1-8 (the kick: ${kick4.name})")
     check((0 until 8).map { lanes4.type[it] to lanes4.idx[it] }.distinct().size == 8, "CLEAR EVERYTHING: no two lanes share a track or a pad")
 
@@ -182,8 +182,8 @@ fun main(args: Array<String>) {
     VacuumApply.put(e5, lanes5, song, plan4, files4, ArrayList(), 0)
     val k5 = lanes5.idx[0]
     val b5 = e5.tracks[lanes5.idx[3]]
-    check((0 until 16).map { e5.pads[k5].on[it] } == song.tracks[0].on.toList() && (16 until 64).none { e5.pads[k5].on[it] }, "SPLIT bar 1: the kick's steps in bar 1 only")
-    check((0 until 16).map { b5.steps[it].on } == song.tracks[3].on.toList() && (16 until 64).none { b5.steps[it].on }, "SPLIT bar 1: the bass's steps in bar 1 only")
+    check((0 until 16).map { e5.pads[k5].on[it] } == song.tracks[0].on.take(16) && (16 until 64).none { e5.pads[k5].on[it] }, "SPLIT bar 1: the kick's steps in bar 1 only")
+    check((0 until 16).map { b5.steps[it].on } == song.tracks[3].on.take(16) && (16 until 64).none { b5.steps[it].on }, "SPLIT bar 1: the bass's steps in bar 1 only")
     val bar1Kick = e5.pads[k5].on.copyOf(16)
     val bar1Bass = (0 until 16).map { b5.steps[it].on to b5.steps[it].pitch }
     val bassPitch = b5.pitch
@@ -218,6 +218,25 @@ fun main(args: Array<String>) {
     VacuumApply.put(e5, lanes5, song2, plan5, files5, ArrayList(), 7)
     check((112 until 128).map { e5.pads[k5].on[it] } == (0 until 16).map { it % 4 == 1 }, "3.62 SPLIT bar 8: the kick's steps are in bar 8 (steps 113-128)")
     check(e5.pads[k5].on.copyOf(16).contentEquals(bar1Kick) && (64 until 112).none { e5.pads[k5].on[it] }, "3.62 SPLIT bar 8: bar 1 kept, bars 5-7 untouched")
+    Pat.meter = m0
+    // --- 3.63: CLEAR EVERYTHING + every bar on a 4-bar and an 8-bar pattern: every lane's steps in every bar
+    for (pl in listOf(64, 128)) {
+        val e6 = Engine()
+        e6.bank.soundLoader = { n -> data(n) }
+        val l6 = LaneSetup()
+        Pat.meter = 0
+        Pat.len = pl
+        VacuumApply.clearAll(e6, l6)
+        VacuumApply.put(e6, l6, song, plan4, files4, ArrayList())
+        val nb = pl / 16
+        for (ln in 0 until 7) {
+            val ty = l6.type[ln]; val ix = l6.idx[ln]
+            val bars = (0 until nb).map { b -> (0 until 16).map { i ->
+                if (ty == Inst.DRUM) e6.pads[ix].on[b * 16 + i] else if (ix in 0 until Cfg.TRACKS) e6.tracks[ix].steps[b * 16 + i].on else false } }
+            check(bars.all { it == bars[0] } && bars[0].any { it } || ty != Inst.DRUM && ix !in 0 until Cfg.TRACKS,
+                "3.63 every bar, $nb bars: lane ${ln + 1} (${ty}) has the same steps in every bar: " + bars.map { it.count { x -> x } })
+        }
+    }
     Pat.meter = m0
     // --- 3.59: a loop of 1..N whole bars (STACK 4.02-beta and on): its FIT is as many bars (the nearest the app has)
     // 110 BPM, 16 steps: a bar is 16 x 15 / 110 = 2.1818 s; at 22 050 Hz, 48 109 samples
@@ -285,6 +304,47 @@ fun main(args: Array<String>) {
     check(l8ok, "4.05-beta: lane 8 is track 8's own sound (${m8?.file}), no loop")
     check((0 until 8).map { lanes6.type[it] to lanes6.idx[it] }.distinct().size == 8, "4.05-beta: no two lanes share a track or a pad")
     check(e6.drumHeavy.amount == 0f, "3.59: CLEAR EVERYTHING: the drum bus HEAVY is off (STACK's drums are clean)")
+
+    // --- 3.64: STACK 4.16-beta's pages (stack_song_416.txt: app/tests/dump.txt's last song). Track 1's kick: page 1
+    // steps 1 and 7, pages 2 and 3 steps 1, 2 and 7; LENGTH 3, PLAY MODE PAGE; 192 bytes a track
+    val f416 = File(File(args[0]).parentFile, "stack_song_416.txt")
+    val rec416 = readRecord(f416)
+    val s416 = StackDump.parse(rec416)
+    check(s416 != null && rec416[6].toInt() and 0xFF == 192, "3.64: STACK 4.16-beta's record (192 bytes a track) is read")
+    s416 ?: return
+    check(s416.version == "4.16-BETA" && s416.pages == 3 && s416.mode == 1, "3.64: 4.16-beta: 3 pages, PLAY MODE PAGE (${s416.pages}, ${s416.mode})")
+    val kick416 = s416.tracks[0]
+    fun onAt(t: StackTrack, pg: Int) = (0 until 16).filter { t.on[pg * 16 + it] }
+    check(onAt(kick416, 0) == listOf(0, 6) && onAt(kick416, 1) == listOf(0, 1, 6) && onAt(kick416, 2) == listOf(0, 1, 6) && onAt(kick416, 3).isEmpty(),
+        "3.64: the kick's pages: " + (0 until 4).map { onAt(kick416, it) })
+    check(s405.pages == 1 && s405.tracks.all { t -> (16 until 64).none { t.on[it] } } && song.pages == 1,
+        "3.64: a record of before 4.16-beta (96 bytes a track) is one page, pages 2-4 empty")
+    check((0 until 6).map { s416.pageOf(it) } == listOf(0, 1, 2, 0, 1, 2) && song.pageOf(5) == 0, "3.64: bar b gets page b, round again")
+    // on a pattern of 4 bars (4/4 here, as the app's 3.63 checks): bar 1 page 1, bars 2 and 3 pages 2 and 3, bar 4 page 1
+    val s416b = StackSong(s416.bpm, 2, 16, s416.swing, s416.layers, false, s416.version,
+        s416.tracks.map { t -> if (t.kind == 3) song.tracks[4] else t }, s416.pages, s416.mode)
+    for (pl in listOf(64, 32)) {
+        val e7 = Engine()
+        e7.bank.soundLoader = { n -> data(n) }
+        val l7s = LaneSetup()
+        val none7 = IntArray(l7s.type.size)
+        Pat.meter = 0
+        Pat.len = pl
+        val plan7 = VacuumPlan.plan(s416b, none7, none7, Cfg.TRACKS, Cfg.PADS, { true }, { null }, "FM-1 Loop.wav")
+        val files7 = HashMap<String, FloatArray?>()
+        for (a in plan7.acts) a.file?.let { files7[it] = data(it) }
+        val notes7 = ArrayList(plan7.notes)
+        VacuumApply.clearAll(e7, l7s)
+        VacuumApply.put(e7, l7s, s416b, plan7, files7, notes7)
+        check(l7s.type[0] == Inst.DRUM, "3.64: lane 1 is the kick, a drum pad")
+        val p7 = e7.pads[l7s.idx[0]]
+        val got = (0 until pl / 16).map { b -> (0 until 16).filter { p7.on[b * 16 + it] } }
+        val want = (0 until pl / 16).map { b -> onAt(kick416, b % 3) }
+        check(got == want, "3.64: ${pl / 16} bars: each bar its page: $got")
+        check((notes7.any { it.contains("did not come") }) == (pl < 48), "3.64: ${pl / 16} bars: " +
+            (notes7.firstOrNull { it.contains("did not come") } ?: "nothing said (all 3 pages are here)"))
+    }
+    Pat.meter = m0
 
     // 3.60: ERASE a slot (stack/docs/PROTOCOL.md, app/my_samples.c: command 14; Burger Studio bs19: SMP_ERASE)
     fun hex(b: ByteArray) = b.joinToString(" ") { String.format("%02X", it.toInt() and 0xFF) }

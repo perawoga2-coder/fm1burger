@@ -294,6 +294,10 @@ object VacuumApply {
         }
         // the steps of the bar(s) written: every bar, or the one of DIRECT SPLIT
         val barsTo = if (bar >= 0) listOf(bar) else (0 until bars).toList()
+        if (bar < 0 && song.pages > bars)          // (3.64: STACK's pages past this pattern's bars are not here)
+            notes.add("STACK's pattern is ${song.pages} bars and this one is $bars: STACK's " +
+                (if (bars + 1 == song.pages) "bar ${song.pages}" else "bars ${bars + 1}-${song.pages}") + " did not come. " +
+                "Make this pattern longer and VACUUM again to bring " + (if (bars + 1 == song.pages) "it." else "them."))
         for (act in acts) {
             val s = act.track
             val v = s.set
@@ -323,8 +327,9 @@ object VacuumApply {
                     val rest = want - t.pitch
                     for (b in barsTo) for (i in 0 until slot) {
                         val st = t.steps[(b * slot + i).coerceIn(0, Cfg.STEPS - 1)]
-                        st.on = i < song.steps && s.on[i]
-                        st.pitch = if (i >= song.steps) 0 else if (s.hit) rest else s.note[i] - 60 + rest
+                        val j = song.pageOf(b) * 16 + i     // (3.64: bar b gets STACK's page b, round again)
+                        st.on = i < song.steps && s.on[j]
+                        st.pitch = if (i >= song.steps) 0 else if (s.hit) rest else s.note[j] - 60 + rest
                         st.level = 1f
                     }
                     continue
@@ -346,8 +351,9 @@ object VacuumApply {
                     val rest = want - t.pitch
                     for (b in barsTo) for (i in 0 until song.steps) {
                         val st = t.steps[(b * slot + i).coerceIn(0, Cfg.STEPS - 1)]
-                        st.on = s.on[i]
-                        st.pitch = if (s.hit) rest else s.note[i] - 60 + rest
+                        val j = song.pageOf(b) * 16 + i
+                        st.on = s.on[j]
+                        st.pitch = if (s.hit) rest else s.note[j] - 60 + rest
                         st.level = 1f
                     }
                     t.start = v[StackTrack.ED_START] / 100f
@@ -386,7 +392,7 @@ object VacuumApply {
                         "\"${p.name.removeSuffix(".wav")}\" (one sound a lane); only the steps of this bar came.")
                     for (b in barsTo) for (i in 0 until slot) {
                         val q = (b * slot + i).coerceIn(0, Cfg.STEPS - 1)
-                        p.on[q] = i < song.steps && s.on[i]
+                        p.on[q] = i < song.steps && s.on[song.pageOf(b) * 16 + i]
                         p.lvl[q] = 1f
                     }
                     continue
@@ -398,7 +404,7 @@ object VacuumApply {
                     p.on[k] = false
                     p.lvl[k] = 1f
                 }
-                for (b in barsTo) for (i in 0 until song.steps) p.on[(b * slot + i).coerceIn(0, Cfg.STEPS - 1)] = s.on[i]
+                for (b in barsTo) for (i in 0 until song.steps) p.on[(b * slot + i).coerceIn(0, Cfg.STEPS - 1)] = s.on[song.pageOf(b) * 16 + i]
                 lanes.type[act.lane] = Inst.DRUM
                 lanes.idx[act.lane] = act.idx
             }
