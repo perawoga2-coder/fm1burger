@@ -28,6 +28,8 @@ class MainActivity : Activity() {
         const val REQ_EXPORT = 11
         const val REQ_EXPORT_FILE = 12
         const val REQ_SYX = 13
+        const val REQ_BACKUP = 14              // 3.65: BACKUP EVERYTHING: where the zip goes
+        const val REQ_RESTORE = 15             // and RESTORE: the zip to read
 
         // page numbers (the order of the screens list)
         const val TAB_TRACKS = 0
@@ -207,7 +209,10 @@ class MainActivity : Activity() {
     }
 
     /** Writes the whole session to disk. Each part is saved on its own, so one failure does not lose the rest. */
+    private var restored = false               // 3.65: a restore put its files in: nothing of now may be saved over them
+
     private fun saveAll() {
+        if (restored) return
         try { project.save() } catch (e: Exception) { }
         try { SynthSave.save(File(filesDir, "synth.json"), engine.bass, engine.analog) } catch (e: Exception) { }
         try { VocalSave.save(File(filesDir, "vocal.json"), engine.vocal) } catch (e: Exception) { }
@@ -1786,6 +1791,81 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    // ---------------- 3.65: BACKUP EVERYTHING / RESTORE (Backup.kt) ----------------
+
+    private val prefsDir get() = File(applicationInfo.dataDir, "shared_prefs")
+
+    fun backupAll() {
+        saveAll()                                 // (what is in the app now, on disk first)
+        val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "application/zip"
+        i.putExtra(Intent.EXTRA_TITLE, "Burger-backup-" +
+            java.text.SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(java.util.Date()) + ".zip")
+        startActivityForResult(i, REQ_BACKUP)
+    }
+
+    fun restoreAll() {
+        AlertDialog.Builder(this)
+            .setTitle("Restore a backup")
+            .setMessage("Everything in the app now (sounds, patterns, parts, settings) is replaced by the backup. " +
+                "Make a backup of now first if you may want it. The app closes when it is done: open it again.")
+            .setPositiveButton("Choose the backup…") { _, _ ->
+                val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
+                i.addCategory(Intent.CATEGORY_OPENABLE)
+                i.type = "*/*"                    // (some file pickers do not mark a .zip as application/zip)
+                startActivityForResult(i, REQ_RESTORE)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun backupTo(uri: Uri) {
+        ui.toast("Backing up…")
+        Thread {
+            try {
+                val ver = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
+                val r = contentResolver.openOutputStream(uri)?.use { Backup.write(filesDir, prefsDir, it, ver) }
+                    ?: throw java.io.IOException("cannot write there")
+                runOnUiThread {
+                    AlertDialog.Builder(this)
+                        .setTitle("Backup saved")
+                        .setMessage("${r.files} files, ${r.bytes / (1024 * 1024)} MB, in ${displayName(uri)}.\n\n" +
+                            "Keep it somewhere safe (Download, Google Drive).")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            } catch (ex: Exception) {
+                runOnUiThread { ui.toast("Backup failed: ${ex.message}") }
+            }
+        }.start()
+    }
+
+    private fun restoreFrom(uri: Uri) {
+        ui.toast("Restoring…")
+        engine.stop()                             // (the transport stops: nothing reads the files meanwhile)
+        Thread {
+            try {
+                val r = contentResolver.openInputStream(uri)?.use { Backup.restore(filesDir, prefsDir, it) }
+                    ?: throw java.io.IOException("cannot read it")
+                restored = true
+                runOnUiThread {
+                    AlertDialog.Builder(this)
+                        .setTitle("Restored")
+                        .setMessage("${r.files} files are back. The app closes now: open it again.")
+                        .setCancelable(false)
+                        .setPositiveButton("Close the app") { _, _ ->
+                            finishAffinity()
+                            android.os.Process.killProcess(android.os.Process.myPid())
+                        }
+                        .show()
+                }
+            } catch (ex: Exception) {
+                runOnUiThread { ui.toast("Not restored (the app is as it was): ${ex.message}") }
+            }
+        }.start()
+    }
+
     fun saveFile(f: File, mime: String = "audio/wav") {
         pendingFile = f
         val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
@@ -2117,6 +2197,10 @@ class MainActivity : Activity() {
                 ui.toast("Export failed: ${e.message}")
             }
             pendingBytes = null
+        } else if (requestCode == REQ_BACKUP) {
+            data.data?.let { backupTo(it) }
+        } else if (requestCode == REQ_RESTORE) {
+            data.data?.let { restoreFrom(it) }
         } else if (requestCode == REQ_EXPORT_FILE) {
             val uri = data.data ?: return
             val src = pendingFile ?: return

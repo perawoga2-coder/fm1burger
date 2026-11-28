@@ -193,6 +193,18 @@ class SetupScreen(private val a: MainActivity) : Screen {
         devPanel.addView(d2, ui.fullWidth(4))
         content.addView(devPanel, ui.fullWidth(10))
 
+        // 3.65: everything the app keeps, in one file and back
+        val bk = ui.panel()
+        bk.addView(ui.text("Backup", 14f, Theme.ACCENT, true))
+        bk.addView(ui.text("One .zip with everything in the app: sounds, patterns, parts, mixes and settings. " +
+            "Keep it in Download or Google Drive. RESTORE puts a backup back in place of what is in the app now.",
+            12f, Theme.DIM), ui.fullWidth(4))
+        val br = ui.row()
+        br.addView(ui.button("Backup everything") { a.backupAll() }, ui.w(1f, 3))
+        br.addView(ui.button("Restore…") { a.restoreAll() }, ui.w(1f, 3))
+        bk.addView(br, ui.fullWidth(4))
+        content.addView(bk, ui.fullWidth(10))
+
         val ab = ui.panel()
         ab.addView(ui.text("About", 14f, Theme.ACCENT, true))
         val ver = try {

@@ -353,6 +353,43 @@ fun main(args: Array<String>) {
     check(runCatching { Fm1SampleLink.eraseMessage(3) }.isFailure && runCatching { Fm1SampleLink.eraseMessage(-1) }.isFailure,
         "3.60: ERASE of a slot other than USR1..USR3 is never sent")
 
+    // --- 3.65: BACKUP EVERYTHING / RESTORE (Backup.kt): files/ and shared_prefs/ into one zip and back
+    run {
+        val tmp = java.nio.file.Files.createTempDirectory("bk").toFile()
+        val f1 = File(tmp, "app/files"); val p1 = File(tmp, "app/shared_prefs")
+        File(f1, "samples").mkdirs(); p1.mkdirs()
+        File(f1, "samples/Kick.wav").writeBytes(ByteArray(70000) { (it % 251).toByte() })
+        File(f1, "parts.json").writeText("{\"parts\":6}")
+        File(p1, "fm1.xml").writeText("<map><int name=\"bpm\" value=\"128\" /></map>")
+        val zip = java.io.ByteArrayOutputStream()
+        val w = Backup.write(f1, p1, zip, "3.65-lab")
+        check(w.files == 3, "3.65: BACKUP: the 3 files of both folders in one zip (${w.files})")
+        // into another build of the app (another folder): all back, byte for byte
+        val f2 = File(tmp, "app2/files"); val p2 = File(tmp, "app2/shared_prefs")
+        File(f2, "old.txt").also { it.parentFile.mkdirs() }.writeText("what was there")
+        val r = Backup.restore(f2, p2, java.io.ByteArrayInputStream(zip.toByteArray()))
+        check(r.files == 3 && File(f2, "samples/Kick.wav").readBytes().contentEquals(File(f1, "samples/Kick.wav").readBytes()) &&
+            File(f2, "parts.json").readText() == "{\"parts\":6}" && File(p2, "fm1.xml").readText().contains("128") &&
+            !File(f2, "old.txt").exists() && !File(tmp, "app2/restore_stage").exists(),
+            "3.65: RESTORE: everything back in place of what was there, nothing left over")
+        // a zip that is not a backup, or one cut short: refused, and the app as it was
+        val other = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(other).use { z -> z.putNextEntry(java.util.zip.ZipEntry("files/x.wav")); z.write(1); z.closeEntry() }
+        val notOk = runCatching { Backup.restore(f2, p2, java.io.ByteArrayInputStream(other.toByteArray())) }.isFailure
+        val cut = runCatching { Backup.restore(f2, p2, java.io.ByteArrayInputStream(zip.toByteArray().copyOf(zip.size() / 2))) }.isFailure
+        check(notOk && cut && File(f2, "samples/Kick.wav").length() == 70000L && File(p2, "fm1.xml").exists(),
+            "3.65: RESTORE refuses a zip that is not a backup and one cut short; the app stays as it was")
+        // a name that points outside the app's folders: refused
+        val evil = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(evil).use { z ->
+            z.putNextEntry(java.util.zip.ZipEntry(Backup.TAG_NAME)); z.write(Backup.BACKUP_TAG.toByteArray()); z.closeEntry()
+            z.putNextEntry(java.util.zip.ZipEntry("files/../../evil.txt")); z.write(1); z.closeEntry()
+        }
+        check(runCatching { Backup.restore(f2, p2, java.io.ByteArrayInputStream(evil.toByteArray())) }.isFailure &&
+            !File(tmp, "evil.txt").exists(), "3.65: RESTORE refuses a name that points outside (files/../..)")
+        tmp.deleteRecursively()
+    }
+
     println(if (bad == 0) "ALL OK" else "$bad FAILED")
     if (bad != 0) System.exit(1)
 }

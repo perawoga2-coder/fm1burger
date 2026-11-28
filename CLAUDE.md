@@ -14,7 +14,7 @@ M-VAVE FM-1 and with Maker Hip's STACK firmware (repo `perawoga2-coder/stack`). 
 work. The package name stays `com.example.fm1burger` so updates install over earlier versions.
 
 - Work branch: `ccr-94587bba-xqg4fh`. Never push to `main` without the owner's word.
-- Version: `build.gradle.kts`, `versionCode` and `versionName` (`3.64-lab`, code 94 at the time of writing). Every
+- Version: `build.gradle.kts`, `versionCode` and `versionName` (`3.65-lab`, code 95 at the time of writing). Every
   build that goes to the owner gets a new version.
 - The owner's site (repo `Fm1sampa`, `web/makerhip/index.html`) has a Burger download button that stays on 3.55
   until the owner says otherwise.
@@ -61,6 +61,7 @@ work. The package name stays `com.example.fm1burger` so updates install over ear
 | `Parts.kt`, `TakeAll.kt`, `SongScreen.kt` | song parts Q1-Q6, TAKE ALL, the song list |
 | `Store.kt`, `Project.kt` | saving; files live in the app's private storage (samples, inbox, mixes, stems, parts, drumedit) |
 | `MainActivity.kt`, `HomeScreen.kt` | the app's frame, Home and its lanes |
+| `Backup.kt` | 3.65: BACKUP EVERYTHING / RESTORE (Setup page): files/ and shared_prefs/ in one zip; restore stages first, then the app closes without saving |
 
 The STACK side of VACUUM is documented in `stack/docs/PROTOCOL.md` of the `stack` repo (command 30: SONG, 31/32:
 the loop).
@@ -70,8 +71,10 @@ the loop).
 - Every pattern length 1, 2, 4, 8 bars works since 3.63 (3.62's STEPS window showed buttons 5-8 on any length).
 - A STACK song of N pages goes into Burger bar b = STACK page (b mod N); a shorter Burger pattern says which bars did
   not come (3.64).
-- **To check with the owner:** `.github/workflows/build.yml` holds the signing keystore written out in the file. The
-  rules want secrets in GitHub Secrets; moving it there needs the owner (adding a secret) and keeps the same key.
+- **The signing key (owner chose ข, a new key, 28 Nov):** `.github/workflows/build.yml` holds the old keystore written
+  out in the file (public). Plan: 3.65 adds BACKUP/RESTORE (old key) → the owner backs up → a new key, put in GitHub
+  Secrets by the owner → 3.66 reads it from Secrets → install, RESTORE. Still to ask: the new build as a new app id
+  beside the old one (recommended: nothing to uninstall until the restore is checked) or the same id.
 
 ## Waiting (the owner's words, not yet work)
 
