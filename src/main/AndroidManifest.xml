@@ -16,11 +16,13 @@
     <uses-feature android:name="android.software.midi" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
-    <!-- 3.36 → MIX: the Maker Hip INBOX (INBOX.md of 16 Track). Only apps signed with the same key get the permission. -->
-    <permission android:name="com.makerhip.permission.INBOX" android:protectionLevel="signature" />
-    <uses-permission android:name="com.makerhip.permission.INBOX" />
+    <!-- 3.36 → MIX: the Maker Hip INBOX (INBOX.md of 16 Track). Only apps signed with the same key get the permission.
+         3.66: the Maker Hip release key; the permission, the authority and 16 Track's package have new names, so this
+         pair installs beside the pair of before (whose names stay theirs) -->
+    <permission android:name="com.makerhip.studio.permission.INBOX" android:protectionLevel="signature" />
+    <uses-permission android:name="com.makerhip.studio.permission.INBOX" />
     <queries>
-        <package android:name="com.makerhip.track16" />
+        <package android:name="com.makerhip.track16.studio" />
     </queries>
 
     <application
@@ -41,10 +43,10 @@
         <!-- 3.36 → MIX: the boxes of stems that 16 Track reads (InboxProvider.kt) -->
         <provider
             android:name=".InboxProvider"
-            android:authorities="com.makerhip.burger.inbox"
+            android:authorities="com.makerhip.burgerstudio.inbox"
             android:exported="true"
-            android:readPermission="com.makerhip.permission.INBOX"
-            android:writePermission="com.makerhip.permission.INBOX" />
+            android:readPermission="com.makerhip.studio.permission.INBOX"
+            android:writePermission="com.makerhip.studio.permission.INBOX" />
     </application>
 
 </manifest>

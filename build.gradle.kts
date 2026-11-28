@@ -9,16 +9,19 @@ android {
 
     defaultConfig {
         // Burger Studio is its own app, so it installs next to the old FM1 Burger (1.0) instead of over it
-        applicationId = "com.example.burgerstudio.lab"   // 3.0 Lab: its own app, next to Burger Studio 2.x (3.43: back on it; the release app waits)
+        // 3.66: the Maker Hip release key and a name of Maker Hip's own (registered with Google's developer verification);
+        // it installs beside the Lab of before (com.example.burgerstudio.lab, the old key), whose work comes over by RESTORE
+        applicationId = "com.makerhip.burgerstudio.lab"
         minSdk = 23
         targetSdk = 34
-        versionCode = 95
-        versionName = "3.65-lab"
+        versionCode = 96
+        versionName = "3.66-lab"
     }
 
-    // Same signing key for every build, so a new APK can be installed over the old one
+    // 3.66: every build is signed with the Maker Hip release key (below), the debug build too. (The old fixed debug
+    // key, until 3.65, only for the FM1 Burger 1.0 rebuild in CI)
     val fixedKey = file("debug.keystore")
-    if (fixedKey.exists()) {
+    if (fixedKey.exists() && file("release.jks").exists().not()) {
         signingConfigs {
             create("fixedDebug") {
                 storeFile = fixedKey
@@ -52,6 +55,9 @@ android {
             getByName("release") {
                 signingConfig = signingConfigs.getByName("makerhip")
                 isMinifyEnabled = false
+            }
+            getByName("debug") {
+                signingConfig = signingConfigs.getByName("makerhip")
             }
         }
     }

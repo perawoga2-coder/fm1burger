@@ -32,7 +32,7 @@ import org.json.JSONObject
  * (stem x gain = the lane in the mix). A stem that would clip 16 bit is turned down and its gain turned up instead.
  */
 object MixSend {
-    const val PKG = "com.makerhip.track16"
+    const val PKG = "com.makerhip.track16.studio"     // (3.66: 16 Track 0.12 on the Maker Hip key; com.makerhip.track16 before)
     /** the name in front of a box's title (the app has no project or song name) */
     const val NAME = "Burger Studio"
     private const val MAX_SECONDS = 600.0

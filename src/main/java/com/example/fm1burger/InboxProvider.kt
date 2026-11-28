@@ -16,7 +16,7 @@ import org.json.JSONObject
  * A box is a folder files/inbox/<id>/ with manifest.json and one WAV per track (MixSend.kt writes it, whole, then
  * renames it into place, so a half-written box is never seen).
  *
- * Authority com.makerhip.burger.inbox; reading and writing need com.makerhip.permission.INBOX (signature: only apps
+ * Authority com.makerhip.burgerstudio.inbox; reading and writing need com.makerhip.studio.permission.INBOX (signature: only apps
  * signed with the same key). The paths:
  *   query    /boxes                     one row per box, newest first
  *   query    /boxes/<id>/tracks         one row per track, in order
@@ -26,7 +26,7 @@ import org.json.JSONObject
 class InboxProvider : ContentProvider() {
 
     companion object {
-        const val AUTH = "com.makerhip.burger.inbox"
+        const val AUTH = "com.makerhip.burgerstudio.inbox"   // (3.66; com.makerhip.burger.inbox before)
         val BOX_COLS = arrayOf("_id", "title", "kind", "bpm", "bars", "meter", "rate", "created", "tracks")
         val TRACK_COLS = arrayOf("idx", "name", "color", "gain", "pan")
         private val ID_OK = Regex("[A-Za-z0-9_-]{1,40}")
