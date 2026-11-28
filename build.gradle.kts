@@ -1,11 +1,11 @@
 plugins {
-    id("com.android.application") version "8.5.2"
+    id("com.android.application") version "8.10.1"    // (3.67: for Android 16, API 36)
     id("org.jetbrains.kotlin.android") version "1.9.24"
 }
 
 android {
     namespace = "com.example.fm1burger"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         // Burger Studio is its own app, so it installs next to the old FM1 Burger (1.0) instead of over it
@@ -13,9 +13,9 @@ android {
         // it installs beside the Lab of before (com.example.burgerstudio.lab, the old key), whose work comes over by RESTORE
         applicationId = "com.makerhip.burgerstudio.lab"
         minSdk = 23
-        targetSdk = 34
-        versionCode = 96
-        versionName = "3.66-lab"
+        targetSdk = 36                                // 3.67: Google Play asks new apps for Android 16
+        versionCode = 97
+        versionName = "3.67-lab"
     }
 
     // 3.66: every build is signed with the Maker Hip release key (below), the debug build too. (The old fixed debug

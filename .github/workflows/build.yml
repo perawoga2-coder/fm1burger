@@ -21,7 +21,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.7
+          gradle-version: 8.11.1          # (3.67: Android Gradle plugin 8.10, for Android 16)
 
       # 3.66: the Maker Hip release key, from this repository's Secrets (never in the repository). No key: no build
       # (an APK on another key would not install over the last one). The old fixed debug key is no longer here.
@@ -48,6 +48,15 @@ jobs:
           "$SIGNER" verify --print-certs build/outputs/apk/debug/*.apk | grep -i "SHA-256 digest"
           "$SIGNER" verify --print-certs build/outputs/apk/debug/*.apk | grep -qi "SHA-256 digest: f3d4074b5e5a731072b992434b0985f8c376dbf4b76fa75eb6445fbeafea4490" || \
             { echo "The APK is not signed with the Maker Hip key: stop"; exit 1; }
+
+      # 3.67: the Android App Bundle for Google Play (the release build: the same Maker Hip key, as Play's upload key)
+      - name: Build the release bundle for Google Play
+        env:
+          RELEASE_PASSWORD: ${{ secrets.RELEASE_PASSWORD }}
+        run: |
+          gradle bundleRelease --stacktrace
+          ls -la build/outputs/bundle/release/
+          for f in build/outputs/bundle/release/*.aab; do mv "$f" "build/outputs/bundle/release/burgerstudio-v${{ steps.ver.outputs.name }}-play.aab"; done
 
       - name: Keep APK as a build artifact
         uses: actions/upload-artifact@v4
@@ -89,7 +98,7 @@ jobs:
           PRE=""
           if [ "${{ github.ref }}" != "refs/heads/main" ]; then PRE="--prerelease"; fi
           gh release delete "v$VER" --yes --cleanup-tag || true
-          gh release create "v$VER" build/outputs/apk/debug/*.apk $PRE \
+          gh release create "v$VER" build/outputs/apk/debug/*.apk build/outputs/bundle/release/*.aab $PRE \
             --title "$(case "$VER" in *lab*) echo "Burger Studio Lab ${VER%-lab}";; *) echo "Burger Studio $VER";; esac)" \
             --notes "Burger Studio $VER. Each app line installs on its own: FM1 Burger (1.x), Burger Studio (2.x) and Burger Studio Lab (3.x, experimental) can all be on one device." \
             --target "${{ github.sha }}"

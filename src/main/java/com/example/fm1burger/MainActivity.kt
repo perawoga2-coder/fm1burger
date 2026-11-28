@@ -509,6 +509,23 @@ class MainActivity : Activity() {
         }
         root.addView(nav)
         setContentView(root)
+        keepClearOfSystemBars(root)
+    }
+
+    /**
+     * 3.67: from Android 15 an app that targets it (Google Play asks for Android 16) draws under the status bar, the
+     * navigation bar and the camera cut-out. The app's frame keeps out of them (and of the keyboard, which no longer
+     * resizes the window there), as before.
+     */
+    private fun keepClearOfSystemBars(v: View) {
+        if (android.os.Build.VERSION.SDK_INT < 35) return
+        v.setOnApplyWindowInsetsListener { view, insets ->
+            val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
+            val ime = insets.getInsets(android.view.WindowInsets.Type.ime())
+            view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            insets
+        }
+        v.requestApplyInsets()
     }
 
     /** Bottom bar: open a section on the page used last in it. */
