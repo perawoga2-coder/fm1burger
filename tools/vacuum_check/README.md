@@ -17,5 +17,5 @@ does not come, and the app says so). A record of before 4.16-beta is one page.
 It needs the app's classes compiled for a plain JVM: kotlinc 1.9.24, the Android framework classes as a jar
 (`org.robolectric:android-all`, from Maven Central) and a stub for `R`:
 
-    kotlinc -cp android-all.jar -d out src/main/java stub/R.kt tools/vacuum_check/VacuumCheck.kt
+    kotlinc -cp android-all.jar -d out src/main/java tools/vacuum_check/stub/R.kt tools/vacuum_check/VacuumCheck.kt
     java -cp out:android-all.jar:kotlin-stdlib.jar VacuumCheckKt tools/vacuum_check/stack_song.txt
