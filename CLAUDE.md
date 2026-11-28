@@ -14,7 +14,7 @@ M-VAVE FM-1 and with Maker Hip's STACK firmware (repo `perawoga2-coder/stack`). 
 work. The package name stays `com.example.fm1burger` so updates install over earlier versions.
 
 - Work branch: `ccr-94587bba-xqg4fh`. Never push to `main` without the owner's word.
-- Version: `build.gradle.kts`, `versionCode` and `versionName` (`3.65-lab`, code 95 at the time of writing). Every
+- Version: `build.gradle.kts`, `versionCode` and `versionName` (`3.66-lab`, code 96 at the time of writing). Every
   build that goes to the owner gets a new version.
 - The owner's site (repo `Fm1sampa`, `web/makerhip/index.html`) has a Burger download button that stays on 3.55
   until the owner says otherwise.
@@ -71,10 +71,17 @@ the loop).
 - Every pattern length 1, 2, 4, 8 bars works since 3.63 (3.62's STEPS window showed buttons 5-8 on any length).
 - A STACK song of N pages goes into Burger bar b = STACK page (b mod N); a shorter Burger pattern says which bars did
   not come (3.64).
-- **The signing key (owner chose ข, a new key, 28 Nov):** `.github/workflows/build.yml` holds the old keystore written
-  out in the file (public). Plan: 3.65 adds BACKUP/RESTORE (old key) → the owner backs up → a new key, put in GitHub
-  Secrets by the owner → 3.66 reads it from Secrets → install, RESTORE. Still to ask: the new build as a new app id
-  beside the old one (recommended: nothing to uninstall until the restore is checked) or the same id.
+- **The signing key (since 3.66, 28 Nov):** every build is signed with the **Maker Hip release key** from GitHub
+  Secrets (`RELEASE_KEYSTORE_B64`, `_2`, `_3`, `RELEASE_PASSWORD`, alias `makerhip`; SHA-256
+  `F3:D4:07:4B:5E:5A:73:10:72:B9:92:43:4B:09:85:F8:C3:76:DB:F4:B7:6F:A7:5E:B6:44:5F:BE:AF:EA:44:90`), the same key in
+  16 Track's repo. CI stops when the key is missing or the APK is signed with another. The package is
+  `com.makerhip.burgerstudio.lab` (16 Track 0.12: `com.makerhip.track16.studio`), both registered in the owner's
+  Android Developer Console (account "Nume", Full) with that fingerprint. The INBOX has new names: authority
+  `com.makerhip.burgerstudio.inbox`, permission `com.makerhip.studio.permission.INBOX`. The old pair
+  (`com.example.burgerstudio.lab` / `com.makerhip.track16`, old public debug key `B7:C6:…:3D:B6`) installs beside it;
+  work moves over by BACKUP (3.65 / 16 Track 0.11) and RESTORE. Check the APK's key from its v2 signing block (16
+  Track's APK has no v1 signature, keytool -printcert shows nothing). `.github/workflows/key-check.yml` prints the
+  fingerprint of the key in Secrets.
 
 ## Waiting (the owner's words, not yet work)
 
