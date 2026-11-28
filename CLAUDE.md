@@ -16,8 +16,8 @@ work. The package name stays `com.example.fm1burger` so updates install over ear
 - Work branch: `ccr-94587bba-xqg4fh`. Never push to `main` without the owner's word.
 - Version: `build.gradle.kts`, `versionCode` and `versionName` (`3.66-lab`, code 96 at the time of writing). Every
   build that goes to the owner gets a new version.
-- The owner's site (repo `Fm1sampa`, `web/makerhip/index.html`) has a Burger download button that stays on 3.55
-  until the owner says otherwise.
+- The owner's site (repo `Fm1sampa`, `web/makerhip/`: `apps.json`, `index.html`, `download/index.html`) offers
+  Burger 3.67 and 16 Track 0.12 (28 Nov). Change the buttons only when the owner says.
 
 ## Build and check (the order of work)
 
